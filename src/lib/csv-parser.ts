@@ -1,5 +1,6 @@
 import Papa from 'papaparse';
 import { Order, DeliveryCarrier, DeliveryType } from './types';
+import { deriveCategory } from './categoriser';
 
 export function deriveShipping(postcode: string, totalPrice: number, postageAndPackaging: number): { deliveryCarrier: DeliveryCarrier; deliveryType: DeliveryType } {
   const upper = postcode.trim().toUpperCase();
@@ -155,7 +156,7 @@ function parseEbayCSV(content: string, batchId: string): Order[] {
       trackingNumber: row['Tracking number'] || '',
       ...deriveShipping(row['Post to postcode'] || '', safeFloat(row['Total price']), safeFloat(row['Postage and packaging'])),
       status: row['Dispatched on date'] ? 'shipped' : 'pending',
-      category: '',
+      category: deriveCategory(row['Item title'] || ''),
       comments: '',
       labelQty: 1,
       isGSP: (row['Post to postcode'] || '').toUpperCase().startsWith('WS11') ||
@@ -219,7 +220,7 @@ function parseBackMarketCSV(content: string, batchId: string): Order[] {
         trackingNumber: row.tracking_number || '',
         ...deriveShipping(row.shipping_postal_code || '', safeFloat(row.order_price), safeFloat(row.shipping_price)),
         status,
-        category: row.category3 || '',
+        category: deriveCategory(row.orderline_title || row.category3 || ''),
         comments: '',
         labelQty: 1,
         isGSP: !!(row.shipping_country && row.shipping_country !== 'GB' && row.shipping_country !== 'United Kingdom'),

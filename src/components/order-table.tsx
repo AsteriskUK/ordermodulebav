@@ -4,6 +4,7 @@ import { useState, useMemo, useEffect } from 'react';
 import { useSearchParams } from 'next/navigation';
 import { useOrderStore } from '@/lib/store';
 import { ORDER_STATUS_CONFIG, OrderStatus, Order } from '@/lib/types';
+import { CATEGORIES } from '@/lib/categoriser';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -50,6 +51,7 @@ const PAGE_SIZE = 25;
 export function OrderTable() {
   const orders = useOrderStore((s) => s.orders);
   const updateOrderStatus = useOrderStore((s) => s.updateOrderStatus);
+  const updateOrderCategory = useOrderStore((s) => s.updateOrderCategory);
   const bulkUpdateStatus = useOrderStore((s) => s.bulkUpdateStatus);
 
   const searchParams = useSearchParams();
@@ -229,6 +231,7 @@ export function OrderTable() {
               <TableHead className="text-xs max-w-[250px]">Item</TableHead>
               <TableHead className="text-xs">Qty</TableHead>
               <TableHead className="text-xs">Amount</TableHead>
+              <TableHead className="text-xs">Category</TableHead>
               <TableHead className="text-xs">Status</TableHead>
               <TableHead className="text-xs">Postcode</TableHead>
               <TableHead className="text-xs w-10"></TableHead>
@@ -237,7 +240,7 @@ export function OrderTable() {
           <TableBody>
             {pageOrders.length === 0 ? (
               <TableRow>
-                <TableCell colSpan={10} className="text-center py-8 text-slate-500">
+                <TableCell colSpan={11} className="text-center py-8 text-slate-500">
                   {orders.length === 0
                     ? 'No orders imported yet. Go to Import Orders to get started.'
                     : 'No orders match your filters.'}
@@ -284,6 +287,30 @@ export function OrderTable() {
                   </TableCell>
                   <TableCell className="text-xs font-medium">
                     £{order.soldFor.toFixed(2)}
+                  </TableCell>
+                  <TableCell onClick={(e) => e.stopPropagation()} className="min-w-[120px]">
+                    <Select
+                      value={order.category || 'N/A'}
+                      onValueChange={(v) => v && updateOrderCategory(order.id, v)}
+                    >
+                      <SelectTrigger className="h-7 text-xs w-[110px] border-0 p-0">
+                        <Badge
+                          variant="outline"
+                          className={`text-xs ${
+                            !order.category || order.category === 'N/A'
+                              ? 'bg-slate-100 text-slate-500 border-slate-300'
+                              : 'bg-blue-50 text-blue-800 border-blue-200'
+                          }`}
+                        >
+                          {order.category || 'N/A'}
+                        </Badge>
+                      </SelectTrigger>
+                      <SelectContent>
+                        {CATEGORIES.map((c) => (
+                          <SelectItem key={c} value={c}>{c}</SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
                   </TableCell>
                   <TableCell onClick={(e) => e.stopPropagation()}>
                     <Select

@@ -31,6 +31,7 @@ interface OrderStore {
   updateOrderTracking: (orderId: string, trackingNumber: string) => void;
   updateOrderCarrier: (orderId: string, carrier: DeliveryCarrier, deliveryType: DeliveryType) => void;
   updateOrderLabelQty: (orderId: string, qty: number) => void;
+  updateOrderCategory: (orderId: string, category: string) => void;
   bulkUpdateStatus: (orderIds: string[], status: OrderStatus) => void;
   deleteOrder: (orderId: string) => void;
   deleteBatch: (batchId: string) => void;
@@ -104,6 +105,12 @@ export const useOrderStore = create<OrderStore>()(
         set((state) => ({
           orders: state.orders.map((o) =>
             o.id === orderId ? { ...o, labelQty: qty } : o
+          ),
+        })),
+      updateOrderCategory: (orderId, category) =>
+        set((state) => ({
+          orders: state.orders.map((o) =>
+            o.id === orderId ? { ...o, category } : o
           ),
         })),
       bulkUpdateStatus: (orderIds, status) =>
