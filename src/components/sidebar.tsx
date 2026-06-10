@@ -16,6 +16,7 @@ import {
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useOrderStore } from '@/lib/store';
+import { GlobalSearch } from './global-search';
 
 const navigation = [
   { name: 'Dashboard', href: '/', icon: LayoutDashboard },
@@ -44,6 +45,9 @@ export function Sidebar() {
           Orders Manager
         </h1>
         <p className="text-xs text-slate-400 mt-1">Warehouse Pipeline</p>
+      </div>
+      <div className="px-3 py-2 border-b border-slate-700">
+        <GlobalSearch />
       </div>
       <nav className="flex-1 p-3 space-y-1">
         {navigation.map((item) => {
