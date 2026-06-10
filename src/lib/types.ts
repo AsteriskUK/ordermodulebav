@@ -37,6 +37,8 @@ export interface ReturnRecord {
   id: string;
   orderId: string;
   salesRecordNumber: string;
+  orderNumber: string;
+  buyerUsername: string;
   itemTitle: string;
   reason: string;
   notes: string;

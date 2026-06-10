@@ -25,7 +25,7 @@ const PAGES = [
   { label: 'Dashboard', href: '/', icon: LayoutDashboard, keywords: 'home overview' },
   { label: 'Import Orders', href: '/import', icon: Upload, keywords: 'csv upload import ebay backmarket' },
   { label: 'Order Sheet', href: '/orders', icon: ClipboardList, keywords: 'orders list table' },
-  { label: 'Packaging', href: '/packaging', icon: Workflow, keywords: 'packaging pipeline assemble check pack' },
+  { label: 'Queue', href: '/packaging', icon: Workflow, keywords: 'queue packaging pipeline assemble check pack' },
   { label: 'Batch Shipping', href: '/shipping', icon: Truck, keywords: 'shipping ship labels dpd fedex' },
   { label: 'Batches', href: '/batches', icon: Package, keywords: 'batches imports history' },
   { label: 'Returns', href: '/returns', icon: PackageOpen, keywords: 'returns refunds rejected' },

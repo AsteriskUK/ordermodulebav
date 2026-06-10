@@ -22,7 +22,7 @@ const navigation = [
   { name: 'Dashboard', href: '/', icon: LayoutDashboard },
   { name: 'Import Orders', href: '/import', icon: Upload },
   { name: 'Order Sheet', href: '/orders', icon: ClipboardList },
-  { name: 'Packaging', href: '/packaging', icon: Workflow },
+  { name: 'Queue', href: '/packaging', icon: Workflow },
   { name: 'Batch Shipping', href: '/shipping', icon: Truck },
   { name: 'Batches', href: '/batches', icon: Package },
   { name: 'Returns', href: '/returns', icon: PackageOpen },

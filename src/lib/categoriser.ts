@@ -30,45 +30,43 @@ export type Category = typeof CATEGORIES[number];
 // Each rule is [pattern, category]
 // ---------------------------------------------------------------------------
 const RULES: [RegExp, Category][] = [
-  // ── PROJECTOR (very distinctive keywords) ────────────────────────────────
-  [/projector|lumens|epson\s+eb|benq\s+(mx|tw|th|mw)|optoma|pt-[a-z]|elpls|nec\s+np|sanyo\s+lns|panasonic\s+et-|casio\s+xj|casio\s+led\s+dlp|short\s+throw.*hdmi\s+.*projector/i, 'PROJECTOR'],
+  // ── PROJECTOR ─────────────────────────────────────────────────────────────
+  [/projector|lumens|\belpls\b|short.throw.*display|epson\s+eb|epson\s+eh|benq\s+(mx|tw|th|mw|w\d)|optoma\s+(hd|uh|gt|ep)|nec\s+np|nec\s+v\d|casio\s+xj|sanyo\s+plc|panasonic\s+pt-|viewsonic\s+p[jg]|acer\s+p\d/i, 'PROJECTOR'],
 
-  // ── NETWORKING ────────────────────────────────────────────────────────────
-  [/\bups\b|uninterruptible|switch\s+\d+.port|cisco\s+catalyst|apc\s+(surt|rbc)|docking\s+station.*toughbook|toughpad.*docking|fz-vebg/i, 'NETWORKING'],
+  // ── NETWORKING / UPS ──────────────────────────────────────────────────────
+  [/\bups\b.*\d+\s*(va|w)\b|\bups\b.*uninterruptible|uninterruptible\s+power|apc\s+(back|smart|surt|rbc|sua|smc|bx|br)|cisco\s+catalyst|cisco\s+sg|cisco\s+ws-|netgear\s+(gs|jgs|m\d)|hp\s+procurve|\bprocurve\b|fz-vebg/i, 'NETWORKING'],
 
   // ── MONITOR ───────────────────────────────────────────────────────────────
-  [/\bmonitor\b|\btft\b|flat\s+screen\s+display|dual\s+(monitor|screen|pc\s+monitor)|elo\s+touch\s+screen\s+monitor|vga\s+flat\s+screen|touch\s+screen\s+monitor\s+vga/i, 'MONITOR'],
+  [/\bmonitor\b|\btft\b|flat.?panel.*(display|screen)|ips\s+screen\s+pc|\beled\b.*display|dual\s+monitor|touch.?screen\s+monitor|elo\s+touch|dell\s+p\d{4}|hp\s+(e|z|la|lp|zr)\d{3,4}[a-z]*\s*(monitor|display|screen|ips|led)|benq\s+(bl|gl|gw|sw)\d{4}|viewsonic\s+v[ax]\d|iiyama\s+pro|lg\s+\d{2}[a-z]+\d+[a-z]*\s*(monitor|ips|display)/i, 'MONITOR'],
 
-  // ── MB/RAM/HDD/SSD (components, not full systems) ────────────────────────
-  [/\bssd\b.*\bhealth\b|\btoner\s+cartridge\b|\bdrum\s+cartridge\b|lsi\s+sas|megaraid|hba\s+controller|\bjoblot\b|\bmotherboard\b|asrock|headset.*usb|plantronics|blackwire|replacement\s+battery\s+set|apc\s+rbc|charger\s+only|\bsend\s+charger\b/i, 'MB/RAM/HDD/SSD'],
-  // Large-capacity raw drives (not inside a system)
-  [/^\d+tb\s+(hdd|ssd)\b|samsung\s+ssd\s+\d+tb|14tb\s+hdd|sm883/i, 'MB/RAM/HDD/SSD'],
+  // ── COMPONENTS / ACCESSORIES (raw parts, not full systems) ────────────────
+  [/\btoner\b|\bdrum\s+unit\b|\bcartridge\b|lsi\s+(sas|megaraid)|\bhba\b.*controller|megaraid\s+sas|\bjob\s*lot\b|\bspare\s+(parts?|job)\b|asrock\s+(b|z|x|h)\d{3}|\bmotherboard\b|plantronics|poly\s+(cs|savi|voyager)|blackwire|jabra\s+(biz|engage|evolve)|charger\s+only|ac\s+adapter\s+only|replacement\s+(battery|psu|charger)|\bpsu\b.*\d+w\b/i, 'MB/RAM/HDD/SSD'],
+  // Standalone drives / memory (not inside a complete system)
+  [/^\s*\d+\s*(gb|tb)\s+(ssd|hdd|nvme|m\.2|ddr[345])\b|samsung\s+(sm883|pm|mz|mznl)|seagate\s+(st\d|skyhawk|barracuda)|western\s+digital\s+\d|\bwd\s+\d+tb|\bcrucial\s+(mx|p[235]|bx)\d|\bkingston\s+(sv|sa|dc|kc|uv)\d/i, 'MB/RAM/HDD/SSD'],
 
-  // ── GAMING PC (must come before generic desktop) ──────────────────────────
-  // Explicit "gaming pc" / "gaming desktop" in title
-  [/gaming\s+(pc|desktop|computer|bundle)|pc\s+gaming\b/i, 'PC-GAMING'],
-  // Discrete GPU keywords that signal a gaming build
-  [/\b(rtx|gtx|radeon\s+rx|rx\s*580|rx\s*570|rx\s*6600|rx\s*7600|r9\s+270|gtx\s+1\d{3}|gtx\s+780|gtx\s+730|rtx\s+[23456789]\d{3}|nvidia\s+rtx|nvidia\s+gtx|amd\s+rx)\b.*\b(pc|desktop|computer|tower|bundle)\b/i, 'PC-GAMING'],
-  // Core i9 / i7 gaming phrases
-  [/(vr\s+powerful|powerful\s+gaming|extreme\s+gaming|ultimate\s+rtx|liquid\s+cool)/i, 'PC-GAMING'],
-  // Water-cooled builds
-  [/water\s+cool.*gaming|gaming.*water\s+cool/i, 'PC-GAMING'],
+  // ── GAMING PC ─────────────────────────────────────────────────────────────
+  // Explicit gaming label
+  [/gaming\s+(pc|desktop|computer|tower|bundle|rig)|pc\s+gaming\b|gaming\s+workstation/i, 'PC-GAMING'],
+  // Any discrete GPU model anywhere in title alongside a system keyword
+  [/\b(rtx\s*[0-9]{3,4}|gtx\s*[0-9]{3,4}|radeon\s+rx\s*[0-9]{3,4}|rx\s*[0-9]{3,4}(?:\s*xt)?|r9\s+[23][79]0|geforce\s+(gtx|rtx))\b/i, 'PC-GAMING'],
+  // Gaming build descriptors
+  [/water.?cool|liquid.?cool|rgb\s+(gaming|pc|desktop|tower)|powerful\s+gaming|extreme\s+gaming|ultimate\s+gaming/i, 'PC-GAMING'],
 
-  // ── LAPTOP (before generic desktop) ──────────────────────────────────────
-  [/\blaptop\b|\bnotebook\b|toughbook|toughpad|macbook|thinkpad|elitebook|lifebook|latitude\s+\d|inspiron|iseries\s+laptop|2\s+in\s+1.*core|x1\s+yoga|x380|x390|panasonic\s+cf-|panasonic\s+fz-|getac|rugged\s+laptop|surface\s+laptop|alienware\s+1[57]\b|hp\s+zbook|dell\s+xps\s+\d/i, 'LAPTOP'],
-  // Catch "Refurbished Core i5 ... 14 inches" style titles
-  [/core\s+i[3579].*\d{2,3}\s*gb\s+ram.*ssd.*win(dows)?/i, 'LAPTOP'],
+  // ── LAPTOP ────────────────────────────────────────────────────────────────
+  [/\blaptop\b|\bnotebook\b|\btoughbook\b|\btoughpad\b|macbook\s+(pro|air|m\d)|thinkpad\s+[a-z]\d|elitebook\s+\d|probook\s+\d|lifebook\s+[a-z]|latitude\s+[e3-9]\d{3}|inspiron\s+\d{4}|vostro\s+\d|alienware\s+(m|x)\d|hp\s+zbook|dell\s+xps\s+\d+|surface\s+(laptop|pro|book|go)|getac\s+[a-z]\d|\brugged\s+(laptop|notebook)\b|cf-[a-z]\d{2}|fz-[a-z]\d{2}|panasonic\s+(cf|fz)-|x1\s+(carbon|yoga|extreme|nano)|x\d{3}[se]?\s+yoga|l\d{3}0[es]?\s+thinkpad/i, 'LAPTOP'],
+  // "14 inch / 15.6 inch" size descriptor with Core processor (classic refurb laptop title)
+  [/\d{2}(\.\d)?\s*("|inch|")\s*.*core\s+i[3579]|core\s+i[3579].*\d{2}(\.\d)?\s*("|inch|")/i, 'LAPTOP'],
 
-  // ── PC-AIO-MINI (SFF / tiny / mini / all-in-one desktops, no gaming GPU) ──
-  [/\b(sff|small\s+form\s+factor|tiny\s+pc|mini\s+pc|micro\s+pc|elitedesk|optiplex|prodesk|thinkcentre|nuc\b|all.in.one|aio\b)\b/i, 'PC-AIO-MINI'],
-  [/hp\s+elitedesk|lenovo\s+(m[89]\d{2}|m\d{3}|tiny)|dell\s+optiplex\s+micro|intel\s+nuc/i, 'PC-AIO-MINI'],
-  // "Desktop PC SFF" or "Desktop Mini PC"
-  [/desktop\s+(pc\s+)?(sff|mini|micro|tiny)/i, 'PC-AIO-MINI'],
-  // "Small Form Factor Desktop" without GPU
-  [/small\s+form.*desktop|desktop.*small\s+form/i, 'PC-AIO-MINI'],
-
-  // ── Fallback generic desktop (no GPU → AIO/MINI, with GPU → GAMING) ───────
-  [/\bdesktop\s+(pc|computer)\b|\btower\s+(pc|computer)\b/i, 'PC-AIO-MINI'],
+  // ── PC-AIO-MINI (SFF / tiny / mini desktops, all-in-ones) ─────────────────
+  // Brand + known SFF model families
+  [/hp\s+elitedesk\s+\d|hp\s+prodesk\s+\d|hp\s+compaq\s+(elite|pro)\d|hp\s+(8[0-9][05]\s+g[1-9]|6[0-9][05]\s+g[1-9])|hp\s+(z[12]\d{2}|z[234]\s+(tower|sff))/i, 'PC-AIO-MINI'],
+  [/dell\s+optiplex\s+\d|dell\s+precision\s+(t|r|tower)\d|lenovo\s+thinkcentre\s+m\d|lenovo\s+(m[6-9]\d{2}|m\d{3}[eq]|m[6-9]\d)\b|intel\s+nuc\s+\d/i, 'PC-AIO-MINI'],
+  // Generic SFF/mini/AIO keywords
+  [/\b(sff|small\s+form\s+factor|mini\s+tower|micro\s+tower|ultra\s+small|usdt|usff|tiny\s+(desktop|pc)|mini\s+(pc|desktop|computer)|all.in.one|all\s+in\s+one)\b/i, 'PC-AIO-MINI'],
+  // Desktop / Tower without GPU markers (fallback)
+  [/\bdesktop\s+(pc|computer|workstation)\b|\btower\s+(pc|computer)\b|\bworkstation\b.*\b(xeon|core\s+i[3579])\b/i, 'PC-AIO-MINI'],
+  // "HP / Dell / Lenovo <model> SFF" - model code then SFF/MT/DT
+  [/\b(elitedesk|optiplex|prodesk|thinkcentre|compaq\s+elite|compaq\s+pro)\b/i, 'PC-AIO-MINI'],
 ];
 
 /**

@@ -1,6 +1,6 @@
 'use client';
 
-import { useMemo } from 'react';
+import { useMemo, useState } from 'react';
 import { useOrderStore } from '@/lib/store';
 import { ORDER_STATUS_CONFIG, PACKAGING_STAGES, OrderStatus, PackagingStage } from '@/lib/types';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -26,6 +26,11 @@ import {
   Package,
   Clock,
   Undo2,
+  X,
+  User,
+  MapPin,
+  Tag,
+  Hash,
 } from 'lucide-react';
 import { toast } from 'sonner';
 
@@ -33,6 +38,8 @@ export function PackagingPipeline() {
   const orders = useOrderStore((s) => s.orders);
   const updateOrderStatus = useOrderStore((s) => s.updateOrderStatus);
   const bulkUpdateStatus = useOrderStore((s) => s.bulkUpdateStatus);
+  const [activeOrderId, setActiveOrderId] = useState<string | null>(null);
+  const activeOrder = orders.find((o) => o.id === activeOrderId) ?? null;
 
   const pendingOrders = useMemo(
     () => orders.filter((o) => o.status === 'pending'),
@@ -93,7 +100,7 @@ export function PackagingPipeline() {
   return (
     <div className="space-y-6">
       <div>
-        <h2 className="text-2xl font-bold text-slate-900">Packaging Pipeline</h2>
+        <h2 className="text-2xl font-bold text-slate-900">Queue</h2>
         <p className="text-slate-500 text-sm mt-1">
           Track orders through assembling, checking, and packing stages
         </p>
@@ -127,6 +134,59 @@ export function PackagingPipeline() {
       </div>
 
       <Separator />
+
+      {/* Active order banner */}
+      {activeOrder ? (
+        <div className="relative rounded-xl border-2 border-blue-400 bg-blue-50 px-5 py-4 flex flex-wrap items-start gap-x-6 gap-y-2 shadow-sm">
+          <button
+            className="absolute top-2 right-2 p-1 rounded hover:bg-blue-100 text-blue-400 hover:text-blue-700"
+            onClick={() => setActiveOrderId(null)}
+          >
+            <X className="h-4 w-4" />
+          </button>
+          <div className="flex items-center gap-1.5 text-blue-900">
+            <Hash className="h-3.5 w-3.5 shrink-0" />
+            <span className="font-mono text-sm font-bold">{activeOrder.salesRecordNumber}</span>
+            <Badge variant="outline" className={`ml-1 text-xs ${ORDER_STATUS_CONFIG[activeOrder.status].color}`}>
+              {ORDER_STATUS_CONFIG[activeOrder.status].label}
+            </Badge>
+          </div>
+          <div className="flex-1 min-w-[200px]">
+            <p className="text-sm font-semibold text-slate-900 leading-snug">{activeOrder.itemTitle}</p>
+            {activeOrder.customLabel && (
+              <p className="text-xs text-slate-500 mt-0.5 flex items-center gap-1">
+                <Tag className="h-3 w-3" />
+                SKU: {activeOrder.customLabel}
+              </p>
+            )}
+          </div>
+          <div className="flex items-center gap-1.5 text-xs text-slate-600">
+            <User className="h-3.5 w-3.5 shrink-0" />
+            <span>{activeOrder.postToName}</span>
+          </div>
+          <div className="flex items-center gap-1.5 text-xs text-slate-600">
+            <MapPin className="h-3.5 w-3.5 shrink-0" />
+            <span>{activeOrder.postToPostcode}</span>
+          </div>
+          <div className="text-xs text-slate-600">
+            <span className="font-medium">£{activeOrder.totalPrice.toFixed(2)}</span>
+            {activeOrder.category && activeOrder.category !== 'N/A' && (
+              <Badge variant="outline" className="ml-2 text-xs bg-blue-100 text-blue-800 border-blue-200">
+                {activeOrder.category}
+              </Badge>
+            )}
+          </div>
+          {activeOrder.labelQty > 1 && (
+            <div className="text-xs bg-orange-100 text-orange-800 border border-orange-200 rounded px-2 py-0.5 font-medium">
+              {activeOrder.labelQty} labels
+            </div>
+          )}
+        </div>
+      ) : (
+        <div className="rounded-xl border-2 border-dashed border-slate-200 bg-slate-50 px-5 py-3 text-xs text-slate-400 text-center">
+          Click any order below to pin it here at a glance
+        </div>
+      )}
 
       {/* Stage cards */}
       <div className="grid grid-cols-1 lg:grid-cols-2 xl:grid-cols-3 gap-4">
@@ -187,7 +247,12 @@ export function PackagingPipeline() {
                     {s.orders.map((order) => (
                       <div
                         key={order.id}
-                        className="p-3 border rounded-lg bg-white hover:shadow-sm transition-shadow"
+                        onClick={() => setActiveOrderId(order.id === activeOrderId ? null : order.id)}
+                        className={`p-3 border rounded-lg bg-white hover:shadow-sm transition-all cursor-pointer ${
+                          order.id === activeOrderId
+                            ? 'border-blue-400 ring-2 ring-blue-200 bg-blue-50'
+                            : 'hover:border-slate-300'
+                        }`}
                       >
                         <div className="flex items-start justify-between gap-2">
                           <div className="min-w-0 flex-1">
@@ -206,7 +271,7 @@ export function PackagingPipeline() {
                               </p>
                             )}
                           </div>
-                          <div className="flex flex-col gap-1 shrink-0">
+                          <div className="flex flex-col gap-1 shrink-0" onClick={(e) => e.stopPropagation()}>
                             <Button
                               size="sm"
                               className="h-6 text-xs px-2"

@@ -80,6 +80,8 @@ export function ReturnsManager() {
       r = r.filter(
         (x) =>
           x.salesRecordNumber.toLowerCase().includes(q) ||
+          x.orderNumber.toLowerCase().includes(q) ||
+          x.buyerUsername.toLowerCase().includes(q) ||
           x.itemTitle.toLowerCase().includes(q) ||
           x.reason.toLowerCase().includes(q) ||
           (x.processedByUserName || '').toLowerCase().includes(q)
@@ -98,6 +100,8 @@ export function ReturnsManager() {
       id: genId(),
       orderId: selectedOrderId,
       salesRecordNumber: order.salesRecordNumber,
+      orderNumber: order.orderNumber,
+      buyerUsername: order.buyerUsername,
       itemTitle: order.itemTitle,
       reason,
       notes,
@@ -255,7 +259,9 @@ export function ReturnsManager() {
               <TableHeader>
                 <TableRow className="bg-slate-50">
                   <TableHead className="text-xs">Date</TableHead>
-                  <TableHead className="text-xs">Order #</TableHead>
+                  <TableHead className="text-xs">Sale #</TableHead>
+                  <TableHead className="text-xs">eBay Order #</TableHead>
+                  <TableHead className="text-xs">eBay User</TableHead>
                   <TableHead className="text-xs">Item</TableHead>
                   <TableHead className="text-xs">Reason</TableHead>
                   <TableHead className="text-xs">Refund</TableHead>
@@ -271,7 +277,9 @@ export function ReturnsManager() {
                       {new Date(ret.returnedAt).toLocaleDateString('en-GB')}
                     </TableCell>
                     <TableCell className="font-mono text-xs">{ret.salesRecordNumber}</TableCell>
-                    <TableCell className="text-xs max-w-[180px] truncate">{ret.itemTitle}</TableCell>
+                    <TableCell className="font-mono text-xs text-slate-500">{ret.orderNumber || '—'}</TableCell>
+                    <TableCell className="text-xs text-slate-600">{ret.buyerUsername || '—'}</TableCell>
+                    <TableCell className="text-xs max-w-[160px] truncate">{ret.itemTitle}</TableCell>
                     <TableCell className="text-xs">{ret.reason}</TableCell>
                     <TableCell className="text-xs font-medium">
                       {ret.refundAmount ? `£${ret.refundAmount.toFixed(2)}` : '—'}
