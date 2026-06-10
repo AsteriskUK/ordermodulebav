@@ -68,9 +68,9 @@ export function PackagingPipeline() {
     toast.success(`Moved to ${ORDER_STATUS_CONFIG[nextStatus].label}`);
   }
 
-  function moveToDelayed(orderId: string) {
-    updateOrderStatus(orderId, 'delayed');
-    toast.warning('Order marked as delayed');
+  function moveToHeld(orderId: string) {
+    updateOrderStatus(orderId, 'held');
+    toast.warning('Order placed on hold');
   }
 
   function moveToPrev(orderId: string, prevStatus: OrderStatus) {
@@ -230,10 +230,10 @@ export function PackagingPipeline() {
                               size="sm"
                               variant="ghost"
                               className="h-6 text-xs px-2 text-red-600 hover:text-red-700 hover:bg-red-50"
-                              onClick={() => moveToDelayed(order.id)}
+                              onClick={() => moveToHeld(order.id)}
                             >
                               <AlertTriangle className="h-3 w-3 mr-1" />
-                              Delay
+                              Hold
                             </Button>
                           </div>
                         </div>
@@ -247,13 +247,13 @@ export function PackagingPipeline() {
         })}
       </div>
 
-      {/* Delayed orders */}
-      {orders.filter((o) => o.status === 'delayed').length > 0 && (
+      {/* On Hold orders */}
+      {orders.filter((o) => o.status === 'held').length > 0 && (
         <Card className="border-red-200">
           <CardHeader>
             <CardTitle className="text-base flex items-center gap-2 text-red-700">
               <AlertTriangle className="h-4 w-4" />
-              Delayed Orders ({orders.filter((o) => o.status === 'delayed').length})
+              On Hold ({orders.filter((o) => o.status === 'held').length})
             </CardTitle>
           </CardHeader>
           <CardContent>
@@ -269,7 +269,7 @@ export function PackagingPipeline() {
               </TableHeader>
               <TableBody>
                 {orders
-                  .filter((o) => o.status === 'delayed')
+                  .filter((o) => o.status === 'held')
                   .map((order) => (
                     <TableRow key={order.id}>
                       <TableCell className="font-mono text-xs">
@@ -294,7 +294,7 @@ export function PackagingPipeline() {
                               updateOrderStatus(order.id, 'pending')
                             }
                           >
-                            Restart
+                            Release
                           </Button>
                           <Button
                             size="sm"

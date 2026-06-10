@@ -37,6 +37,9 @@ import {
   Download,
   ChevronLeft,
   ChevronRight,
+  ArrowUpDown,
+  ArrowUp,
+  ArrowDown,
 } from 'lucide-react';
 import { generateBatchShipCSV } from '@/lib/csv-parser';
 import { toast } from 'sonner';
@@ -60,6 +63,7 @@ export function OrderTable() {
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [page, setPage] = useState(0);
   const [selectedOrder, setSelectedOrder] = useState<Order | null>(null);
+  const [sortDir, setSortDir] = useState<'desc' | 'asc'>('desc');
 
   const filtered = useMemo(() => {
     let result = [...orders];
@@ -73,15 +77,18 @@ export function OrderTable() {
           o.itemTitle.toLowerCase().includes(q) ||
           o.postToName.toLowerCase().includes(q) ||
           o.salesRecordNumber.toLowerCase().includes(q) ||
+          o.orderNumber.toLowerCase().includes(q) ||
           o.buyerUsername.toLowerCase().includes(q) ||
+          o.buyerEmail.toLowerCase().includes(q) ||
           o.customLabel.toLowerCase().includes(q) ||
           o.postToPostcode.toLowerCase().includes(q)
       );
     }
+    const dir = sortDir === 'desc' ? -1 : 1;
     return result.sort(
-      (a, b) => new Date(b.saleDate).getTime() - new Date(a.saleDate).getTime()
+      (a, b) => dir * (new Date(a.saleDate).getTime() - new Date(b.saleDate).getTime())
     );
-  }, [orders, statusFilter, search]);
+  }, [orders, statusFilter, search, sortDir]);
 
   const totalPages = Math.ceil(filtered.length / PAGE_SIZE);
   const pageOrders = filtered.slice(page * PAGE_SIZE, (page + 1) * PAGE_SIZE);
@@ -147,6 +154,14 @@ export function OrderTable() {
             className="pl-9"
           />
         </div>
+        <button
+          onClick={() => setSortDir((d) => (d === 'desc' ? 'asc' : 'desc'))}
+          className="flex items-center gap-1.5 px-3 h-10 rounded-md border border-slate-200 bg-white text-sm text-slate-600 hover:bg-slate-50 transition-colors shrink-0"
+          title="Toggle date sort"
+        >
+          {sortDir === 'desc' ? <ArrowDown className="h-3.5 w-3.5" /> : <ArrowUp className="h-3.5 w-3.5" />}
+          Date
+        </button>
         <Select
           value={statusFilter}
           onValueChange={(v) => {
@@ -326,10 +341,10 @@ export function OrderTable() {
                         </DropdownMenuItem>
                         <DropdownMenuItem
                           onClick={() =>
-                            updateOrderStatus(order.id, 'delayed')
+                            updateOrderStatus(order.id, 'held')
                           }
                         >
-                          Mark Delayed
+                          Place on Hold
                         </DropdownMenuItem>
                       </DropdownMenuContent>
                     </DropdownMenu>

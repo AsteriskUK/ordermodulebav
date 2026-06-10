@@ -16,6 +16,8 @@ import {
   Wrench,
   ClipboardCheck,
   BoxSelect,
+  PauseCircle,
+  PackageOpen,
 } from 'lucide-react';
 
 const statusIcons: Record<OrderStatus, React.ElementType> = {
@@ -26,9 +28,10 @@ const statusIcons: Record<OrderStatus, React.ElementType> = {
   packed: Package,
   shipped: Truck,
   delivered: CheckCircle,
-  delayed: AlertTriangle,
+  held: PauseCircle,
   cancelled: XCircle,
   refunded: RotateCcw,
+  returned: PackageOpen,
 };
 
 export function Dashboard() {

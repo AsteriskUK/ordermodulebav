@@ -11,6 +11,8 @@ import {
   Workflow,
   FileBarChart2,
   Users,
+  PackageOpen,
+  BarChart2,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useOrderStore } from '@/lib/store';
@@ -22,6 +24,8 @@ const navigation = [
   { name: 'Packaging', href: '/packaging', icon: Workflow },
   { name: 'Batch Shipping', href: '/shipping', icon: Truck },
   { name: 'Batches', href: '/batches', icon: Package },
+  { name: 'Returns', href: '/returns', icon: PackageOpen },
+  { name: 'Reports', href: '/reports', icon: BarChart2 },
   { name: 'EOD Report', href: '/eod', icon: FileBarChart2 },
   { name: 'Users & Roles', href: '/users', icon: Users },
 ];

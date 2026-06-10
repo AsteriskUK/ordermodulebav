@@ -2,7 +2,7 @@
 
 import { useState } from 'react';
 import { useOrderStore } from '@/lib/store';
-import { AppUser, UserRole } from '@/lib/types';
+import { AppUser, UserRole, Department } from '@/lib/types';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -36,6 +36,12 @@ const ROLE_CONFIG: Record<UserRole, { label: string; color: string; icon: React.
     icon: User,
     description: 'Can process orders and update statuses only',
   },
+  comms: {
+    label: 'Comms',
+    color: 'bg-purple-100 text-purple-800 border-purple-300',
+    icon: User,
+    description: 'Can place orders on hold; senior comms can release holds',
+  },
 };
 
 function generateId() {
@@ -53,10 +59,12 @@ export function UserManagement() {
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editName, setEditName] = useState('');
   const [editRole, setEditRole] = useState<UserRole>('staff');
+  const [editDept, setEditDept] = useState<Department>('warehouse');
   const [editPin, setEditPin] = useState('');
 
   const [newName, setNewName] = useState('');
   const [newRole, setNewRole] = useState<UserRole>('staff');
+  const [newDept, setNewDept] = useState<Department>('warehouse');
   const [newPin, setNewPin] = useState('');
   const [showAdd, setShowAdd] = useState(false);
 
@@ -66,28 +74,24 @@ export function UserManagement() {
     setEditingId(user.id);
     setEditName(user.name);
     setEditRole(user.role);
+    setEditDept(user.department || 'warehouse');
     setEditPin(user.pin || '');
   };
 
   const saveEdit = () => {
-    if (!editName.trim()) {
-      toast.error('Name is required');
-      return;
-    }
-    updateUser(editingId!, { name: editName.trim(), role: editRole, pin: editPin || undefined });
+    if (!editName.trim()) { toast.error('Name is required'); return; }
+    updateUser(editingId!, { name: editName.trim(), role: editRole, roles: [editRole], department: editDept, pin: editPin || undefined });
     toast.success('User updated');
     setEditingId(null);
   };
 
   const handleAdd = () => {
-    if (!newName.trim()) {
-      toast.error('Name is required');
-      return;
-    }
-    addUser({ id: generateId(), name: newName.trim(), role: newRole, pin: newPin || undefined });
+    if (!newName.trim()) { toast.error('Name is required'); return; }
+    addUser({ id: generateId(), name: newName.trim(), role: newRole, roles: [newRole], department: newDept, pin: newPin || undefined });
     toast.success(`${newName} added`);
     setNewName('');
     setNewRole('staff');
+    setNewDept('warehouse');
     setNewPin('');
     setShowAdd(false);
   };
@@ -180,6 +184,20 @@ export function UserManagement() {
                     <SelectItem value="admin">Admin</SelectItem>
                     <SelectItem value="manager">Manager</SelectItem>
                     <SelectItem value="staff">Staff</SelectItem>
+                    <SelectItem value="comms">Comms</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+              <div>
+                <label className="text-xs text-slate-500 block mb-1">Department</label>
+                <Select value={newDept} onValueChange={(v) => setNewDept(v as Department)}>
+                  <SelectTrigger className="w-36 h-8 text-sm">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="warehouse">Warehouse</SelectItem>
+                    <SelectItem value="comms">Comms</SelectItem>
+                    <SelectItem value="management">Management</SelectItem>
                   </SelectContent>
                 </Select>
               </div>
@@ -236,13 +254,20 @@ export function UserManagement() {
                         className="w-36 h-7 text-sm"
                       />
                       <Select value={editRole} onValueChange={(v) => setEditRole(v as UserRole)}>
-                        <SelectTrigger className="w-28 h-7 text-sm">
-                          <SelectValue />
-                        </SelectTrigger>
+                        <SelectTrigger className="w-28 h-7 text-sm"><SelectValue /></SelectTrigger>
                         <SelectContent>
                           <SelectItem value="admin">Admin</SelectItem>
                           <SelectItem value="manager">Manager</SelectItem>
                           <SelectItem value="staff">Staff</SelectItem>
+                          <SelectItem value="comms">Comms</SelectItem>
+                        </SelectContent>
+                      </Select>
+                      <Select value={editDept} onValueChange={(v) => setEditDept(v as Department)}>
+                        <SelectTrigger className="w-32 h-7 text-sm"><SelectValue /></SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="warehouse">Warehouse</SelectItem>
+                          <SelectItem value="comms">Comms</SelectItem>
+                          <SelectItem value="management">Management</SelectItem>
                         </SelectContent>
                       </Select>
                       <Input
@@ -261,6 +286,7 @@ export function UserManagement() {
                       </div>
                       <div className="flex items-center gap-2 mt-0.5">
                         <Badge variant="outline" className={`text-xs ${cfg.color}`}>{cfg.label}</Badge>
+                        <Badge variant="outline" className="text-xs capitalize bg-slate-50">{user.department || 'warehouse'}</Badge>
                         {user.pin && <span className="text-xs text-slate-400">PIN set</span>}
                       </div>
                     </div>

@@ -157,6 +157,9 @@ function parseEbayCSV(content: string, batchId: string): Order[] {
       status: row['Dispatched on date'] ? 'shipped' : 'pending',
       category: '',
       comments: '',
+      labelQty: 1,
+      isGSP: (row['Post to postcode'] || '').toUpperCase().startsWith('WS11') ||
+             !!(row['Post to country'] && row['Post to country'] !== 'United Kingdom' && row['Post to country'] !== 'GB'),
       importedAt: new Date().toISOString(),
       batchId,
     }));
@@ -218,6 +221,8 @@ function parseBackMarketCSV(content: string, batchId: string): Order[] {
         status,
         category: row.category3 || '',
         comments: '',
+        labelQty: 1,
+        isGSP: !!(row.shipping_country && row.shipping_country !== 'GB' && row.shipping_country !== 'United Kingdom'),
         importedAt: new Date().toISOString(),
         batchId,
       };

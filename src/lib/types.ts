@@ -1,15 +1,24 @@
-export type OrderStatus = 'pending' | 'assembling' | 'checking' | 'packing' | 'packed' | 'shipped' | 'delivered' | 'delayed' | 'cancelled' | 'refunded';
+export type OrderStatus = 'pending' | 'assembling' | 'checking' | 'packing' | 'packed' | 'shipped' | 'delivered' | 'held' | 'cancelled' | 'refunded' | 'returned';
 
 export type DeliveryCarrier = 'DPD' | 'FedEx' | 'Parcelforce' | 'Royal Mail' | 'Other';
 export type DeliveryType = 'standard' | 'next_day';
 
-export type UserRole = 'admin' | 'manager' | 'staff';
+export type UserRole = 'admin' | 'manager' | 'staff' | 'comms';
+export type Department = 'warehouse' | 'comms' | 'management' | 'all';
+
+export interface UserTarget {
+  action: OrderStatus;
+  dailyTarget: number;
+}
 
 export interface AppUser {
   id: string;
   name: string;
   role: UserRole;
+  roles: UserRole[];
+  department: Department;
   pin?: string;
+  targets?: UserTarget[];
 }
 
 export interface EodEvent {
@@ -19,6 +28,23 @@ export interface EodEvent {
   fromStatus: OrderStatus;
   toStatus: OrderStatus;
   changedAt: string;
+  userId?: string;
+  userName?: string;
+  department?: Department;
+}
+
+export interface ReturnRecord {
+  id: string;
+  orderId: string;
+  salesRecordNumber: string;
+  itemTitle: string;
+  reason: string;
+  notes: string;
+  returnedAt: string;
+  processedByUserId?: string;
+  processedByUserName?: string;
+  refundAmount?: number;
+  status: 'pending' | 'received' | 'refunded' | 'rejected';
 }
 
 export interface EodReport {
@@ -71,6 +97,12 @@ export interface Order {
   status: OrderStatus;
   category: string;
   comments: string;
+  // Shipping label
+  labelQty: number;
+  // GSP / international
+  isGSP: boolean;
+  // Return tracking
+  returnId?: string;
   // Metadata
   importedAt: string;
   batchId: string;
@@ -92,9 +124,10 @@ export const ORDER_STATUS_CONFIG: Record<OrderStatus, { label: string; color: st
   packed: { label: 'Packed', color: 'bg-blue-100 text-blue-800 border-blue-300' },
   shipped: { label: 'Shipped', color: 'bg-purple-100 text-purple-800 border-purple-300' },
   delivered: { label: 'Delivered', color: 'bg-green-100 text-green-800 border-green-300' },
-  delayed: { label: 'Delayed', color: 'bg-red-100 text-red-800 border-red-300' },
+  held: { label: 'On Hold', color: 'bg-red-100 text-red-800 border-red-300' },
   cancelled: { label: 'Cancelled', color: 'bg-gray-100 text-gray-800 border-gray-300' },
   refunded: { label: 'Refunded', color: 'bg-orange-100 text-orange-800 border-orange-300' },
+  returned: { label: 'Returned', color: 'bg-rose-100 text-rose-800 border-rose-300' },
 };
 
 export const PACKAGING_STAGES: { stage: PackagingStage; next: OrderStatus; label: string; description: string }[] = [

@@ -1,7 +1,7 @@
 import { create } from 'zustand';
 import { persist, createJSONStorage } from 'zustand/middleware';
 import { get, set as idbSet, del } from 'idb-keyval';
-import { Order, OrderStatus, Batch, DeliveryCarrier, DeliveryType, AppUser, EodEvent } from './types';
+import { Order, OrderStatus, Batch, DeliveryCarrier, DeliveryType, AppUser, EodEvent, ReturnRecord } from './types';
 
 function idbStorage() {
   return createJSONStorage(() => ({
@@ -22,6 +22,7 @@ interface OrderStore {
   orders: Order[];
   batches: Batch[];
   eodEvents: EodEvent[];
+  returns: ReturnRecord[];
   users: AppUser[];
   currentUserId: string | null;
   addOrders: (orders: Order[], batch: Batch) => void;
@@ -29,6 +30,7 @@ interface OrderStore {
   updateOrderComment: (orderId: string, comment: string) => void;
   updateOrderTracking: (orderId: string, trackingNumber: string) => void;
   updateOrderCarrier: (orderId: string, carrier: DeliveryCarrier, deliveryType: DeliveryType) => void;
+  updateOrderLabelQty: (orderId: string, qty: number) => void;
   bulkUpdateStatus: (orderIds: string[], status: OrderStatus) => void;
   deleteOrder: (orderId: string) => void;
   deleteBatch: (batchId: string) => void;
@@ -37,6 +39,8 @@ interface OrderStore {
   deleteUser: (userId: string) => void;
   setCurrentUser: (userId: string | null) => void;
   clearEodEvents: () => void;
+  addReturn: (ret: ReturnRecord) => void;
+  updateReturn: (returnId: string, updates: Partial<ReturnRecord>) => void;
 }
 
 export const useOrderStore = create<OrderStore>()(
@@ -45,8 +49,9 @@ export const useOrderStore = create<OrderStore>()(
       orders: [],
       batches: [],
       eodEvents: [],
+      returns: [],
       users: [
-        { id: 'admin-1', name: 'Admin', role: 'admin', pin: '1234' },
+        { id: 'admin-1', name: 'Admin', role: 'admin', roles: ['admin'], department: 'management', pin: '1234' },
       ],
       currentUserId: null,
       addOrders: (newOrders, batch) =>
@@ -58,6 +63,7 @@ export const useOrderStore = create<OrderStore>()(
         set((state) => {
           const order = state.orders.find((o) => o.id === orderId);
           if (!order) return {};
+          const user = state.users.find((u) => u.id === state.currentUserId);
           const event: EodEvent = {
             orderId,
             salesRecordNumber: order.salesRecordNumber,
@@ -65,6 +71,9 @@ export const useOrderStore = create<OrderStore>()(
             fromStatus: order.status,
             toStatus: status,
             changedAt: new Date().toISOString(),
+            userId: user?.id,
+            userName: user?.name,
+            department: user?.department,
           };
           return {
             orders: state.orders.map((o) =>
@@ -91,9 +100,16 @@ export const useOrderStore = create<OrderStore>()(
             o.id === orderId ? { ...o, deliveryCarrier: carrier, deliveryType } : o
           ),
         })),
+      updateOrderLabelQty: (orderId, qty) =>
+        set((state) => ({
+          orders: state.orders.map((o) =>
+            o.id === orderId ? { ...o, labelQty: qty } : o
+          ),
+        })),
       bulkUpdateStatus: (orderIds, status) =>
         set((state) => {
           const now = new Date().toISOString();
+          const user = state.users.find((u) => u.id === state.currentUserId);
           const newEvents: EodEvent[] = orderIds
             .map((id) => state.orders.find((o) => o.id === id))
             .filter((o): o is Order => !!o)
@@ -104,6 +120,9 @@ export const useOrderStore = create<OrderStore>()(
               fromStatus: o.status,
               toStatus: status,
               changedAt: now,
+              userId: user?.id,
+              userName: user?.name,
+              department: user?.department,
             }));
           return {
             orders: state.orders.map((o) =>
@@ -131,9 +150,20 @@ export const useOrderStore = create<OrderStore>()(
         set((state) => ({ users: state.users.filter((u) => u.id !== userId) })),
       setCurrentUser: (userId) => set({ currentUserId: userId }),
       clearEodEvents: () => set({ eodEvents: [] }),
+      addReturn: (ret) =>
+        set((state) => ({
+          returns: [...state.returns, ret],
+          orders: state.orders.map((o) =>
+            o.id === ret.orderId ? { ...o, status: 'returned', returnId: ret.id } : o
+          ),
+        })),
+      updateReturn: (returnId, updates) =>
+        set((state) => ({
+          returns: state.returns.map((r) => r.id === returnId ? { ...r, ...updates } : r),
+        })),
     }),
     {
-      name: 'ebay-orders-idb-v2',
+      name: 'ebay-orders-idb-v3',
       storage: idbStorage(),
     }
   )
