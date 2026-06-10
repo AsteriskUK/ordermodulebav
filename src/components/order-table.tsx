@@ -1,0 +1,385 @@
+'use client';
+
+import { useState, useMemo, useEffect } from 'react';
+import { useSearchParams } from 'next/navigation';
+import { useOrderStore } from '@/lib/store';
+import { ORDER_STATUS_CONFIG, OrderStatus, Order } from '@/lib/types';
+import { Badge } from '@/components/ui/badge';
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select';
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from '@/components/ui/table';
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu';
+import {
+  Search,
+  MoreHorizontal,
+  CheckSquare,
+  MinusSquare,
+  Square,
+  Download,
+  ChevronLeft,
+  ChevronRight,
+} from 'lucide-react';
+import { generateBatchShipCSV } from '@/lib/csv-parser';
+import { toast } from 'sonner';
+import { OrderDetailDialog } from './order-detail-dialog';
+
+const PAGE_SIZE = 25;
+
+export function OrderTable() {
+  const orders = useOrderStore((s) => s.orders);
+  const updateOrderStatus = useOrderStore((s) => s.updateOrderStatus);
+  const bulkUpdateStatus = useOrderStore((s) => s.bulkUpdateStatus);
+
+  const searchParams = useSearchParams();
+  const [search, setSearch] = useState('');
+  const [statusFilter, setStatusFilter] = useState(() => searchParams.get('status') || 'all');
+
+  useEffect(() => {
+    const s = searchParams.get('status');
+    if (s) setStatusFilter(s);
+  }, [searchParams]);
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [page, setPage] = useState(0);
+  const [selectedOrder, setSelectedOrder] = useState<Order | null>(null);
+
+  const filtered = useMemo(() => {
+    let result = [...orders];
+    if (statusFilter !== 'all') {
+      result = result.filter((o) => o.status === statusFilter);
+    }
+    if (search.trim()) {
+      const q = search.toLowerCase();
+      result = result.filter(
+        (o) =>
+          o.itemTitle.toLowerCase().includes(q) ||
+          o.postToName.toLowerCase().includes(q) ||
+          o.salesRecordNumber.toLowerCase().includes(q) ||
+          o.buyerUsername.toLowerCase().includes(q) ||
+          o.customLabel.toLowerCase().includes(q) ||
+          o.postToPostcode.toLowerCase().includes(q)
+      );
+    }
+    return result.sort(
+      (a, b) => new Date(b.saleDate).getTime() - new Date(a.saleDate).getTime()
+    );
+  }, [orders, statusFilter, search]);
+
+  const totalPages = Math.ceil(filtered.length / PAGE_SIZE);
+  const pageOrders = filtered.slice(page * PAGE_SIZE, (page + 1) * PAGE_SIZE);
+
+  const toggleSelect = (id: string) => {
+    const next = new Set(selectedIds);
+    if (next.has(id)) next.delete(id);
+    else next.add(id);
+    setSelectedIds(next);
+  };
+
+  const toggleAll = () => {
+    if (selectedIds.size === pageOrders.length) {
+      setSelectedIds(new Set());
+    } else {
+      setSelectedIds(new Set(pageOrders.map((o) => o.id)));
+    }
+  };
+
+  const handleBulkStatus = (status: OrderStatus) => {
+    bulkUpdateStatus(Array.from(selectedIds), status);
+    toast.success(`Updated ${selectedIds.size} orders to "${ORDER_STATUS_CONFIG[status].label}"`);
+    setSelectedIds(new Set());
+  };
+
+  const handleExportShipping = () => {
+    const selected = orders.filter((o) => selectedIds.has(o.id));
+    if (selected.length === 0) {
+      toast.error('Select orders to export');
+      return;
+    }
+    const csv = generateBatchShipCSV(selected);
+    const blob = new Blob([csv], { type: 'text/csv' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `batch_ship_${new Date().toISOString().slice(0, 10)}.csv`;
+    a.click();
+    URL.revokeObjectURL(url);
+    toast.success(`Exported ${selected.length} orders for shipping`);
+  };
+
+  return (
+    <div className="space-y-4">
+      <div>
+        <h2 className="text-2xl font-bold text-slate-900">Order Sheet</h2>
+        <p className="text-slate-500 text-sm mt-1">
+          Manage orders, update statuses, and track progress
+        </p>
+      </div>
+
+      {/* Filters & bulk actions */}
+      <div className="flex flex-wrap items-center gap-3">
+        <div className="relative flex-1 min-w-[200px] max-w-sm">
+          <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400" />
+          <Input
+            placeholder="Search orders, items, customers..."
+            value={search}
+            onChange={(e) => {
+              setSearch(e.target.value);
+              setPage(0);
+            }}
+            className="pl-9"
+          />
+        </div>
+        <Select
+          value={statusFilter}
+          onValueChange={(v) => {
+            setStatusFilter(v ?? 'all');
+            setPage(0);
+          }}
+        >
+          <SelectTrigger className="w-[160px]">
+            <SelectValue placeholder="All Statuses" />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="all">All Statuses</SelectItem>
+            {(Object.keys(ORDER_STATUS_CONFIG) as OrderStatus[]).map((s) => (
+              <SelectItem key={s} value={s}>
+                {ORDER_STATUS_CONFIG[s].label}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+
+        {selectedIds.size > 0 && (
+          <div className="flex items-center gap-2">
+            <span className="text-sm text-slate-600 font-medium">
+              {selectedIds.size} selected
+            </span>
+            <DropdownMenu>
+              <DropdownMenuTrigger className="inline-flex items-center justify-center rounded-md border border-input bg-background px-3 py-1 text-sm font-medium hover:bg-accent hover:text-accent-foreground">
+                Set Status
+              </DropdownMenuTrigger>
+              <DropdownMenuContent>
+                {(Object.keys(ORDER_STATUS_CONFIG) as OrderStatus[]).map((s) => (
+                  <DropdownMenuItem key={s} onClick={() => handleBulkStatus(s)}>
+                    {ORDER_STATUS_CONFIG[s].label}
+                  </DropdownMenuItem>
+                ))}
+              </DropdownMenuContent>
+            </DropdownMenu>
+            <Button size="sm" variant="outline" onClick={handleExportShipping}>
+              <Download className="h-3 w-3 mr-1" />
+              Export Shipping CSV
+            </Button>
+          </div>
+        )}
+      </div>
+
+      {/* Table */}
+      <div className="border rounded-lg overflow-hidden bg-white">
+        <Table>
+          <TableHeader>
+            <TableRow className="bg-slate-50">
+              <TableHead className="w-10">
+                <button onClick={toggleAll} className="p-1">
+                  {selectedIds.size === pageOrders.length && pageOrders.length > 0 ? (
+                    <CheckSquare className="h-4 w-4 text-blue-600" />
+                  ) : selectedIds.size > 0 ? (
+                    <MinusSquare className="h-4 w-4 text-blue-400" />
+                  ) : (
+                    <Square className="h-4 w-4 text-slate-400" />
+                  )}
+                </button>
+              </TableHead>
+              <TableHead className="text-xs">Order #</TableHead>
+              <TableHead className="text-xs">Date</TableHead>
+              <TableHead className="text-xs">Customer</TableHead>
+              <TableHead className="text-xs max-w-[250px]">Item</TableHead>
+              <TableHead className="text-xs">Qty</TableHead>
+              <TableHead className="text-xs">Amount</TableHead>
+              <TableHead className="text-xs">Status</TableHead>
+              <TableHead className="text-xs">Postcode</TableHead>
+              <TableHead className="text-xs w-10"></TableHead>
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {pageOrders.length === 0 ? (
+              <TableRow>
+                <TableCell colSpan={10} className="text-center py-8 text-slate-500">
+                  {orders.length === 0
+                    ? 'No orders imported yet. Go to Import Orders to get started.'
+                    : 'No orders match your filters.'}
+                </TableCell>
+              </TableRow>
+            ) : (
+              pageOrders.map((order) => (
+                <TableRow
+                  key={order.id}
+                  className="cursor-pointer hover:bg-slate-50"
+                  onClick={() => setSelectedOrder(order)}
+                >
+                  <TableCell onClick={(e) => e.stopPropagation()}>
+                    <button
+                      onClick={() => toggleSelect(order.id)}
+                      className="p-1"
+                    >
+                      {selectedIds.has(order.id) ? (
+                        <CheckSquare className="h-4 w-4 text-blue-600" />
+                      ) : (
+                        <Square className="h-4 w-4 text-slate-400" />
+                      )}
+                    </button>
+                  </TableCell>
+                  <TableCell className="font-mono text-xs">
+                    {order.salesRecordNumber}
+                  </TableCell>
+                  <TableCell className="text-xs text-slate-600">
+                    {order.saleDate
+                      ? new Date(order.saleDate).toLocaleDateString('en-GB')
+                      : '-'}
+                  </TableCell>
+                  <TableCell className="text-xs">
+                    <div className="font-medium">{order.postToName}</div>
+                    {order.buyerUsername && (
+                      <div className="text-slate-400">{order.buyerUsername}</div>
+                    )}
+                  </TableCell>
+                  <TableCell className="text-xs max-w-[250px] truncate">
+                    {order.itemTitle}
+                  </TableCell>
+                  <TableCell className="text-xs text-center">
+                    {order.quantity}
+                  </TableCell>
+                  <TableCell className="text-xs font-medium">
+                    £{order.soldFor.toFixed(2)}
+                  </TableCell>
+                  <TableCell onClick={(e) => e.stopPropagation()}>
+                    <Select
+                      value={order.status}
+                      onValueChange={(v) =>
+                        updateOrderStatus(order.id, v as OrderStatus)
+                      }
+                    >
+                      <SelectTrigger className="h-7 text-xs w-[110px] border-0 p-0">
+                        <Badge
+                          variant="outline"
+                          className={`${ORDER_STATUS_CONFIG[order.status].color} text-xs`}
+                        >
+                          {ORDER_STATUS_CONFIG[order.status].label}
+                        </Badge>
+                      </SelectTrigger>
+                      <SelectContent>
+                        {(Object.keys(ORDER_STATUS_CONFIG) as OrderStatus[]).map(
+                          (s) => (
+                            <SelectItem key={s} value={s}>
+                              {ORDER_STATUS_CONFIG[s].label}
+                            </SelectItem>
+                          )
+                        )}
+                      </SelectContent>
+                    </Select>
+                  </TableCell>
+                  <TableCell className="text-xs text-slate-500">
+                    {order.postToPostcode}
+                  </TableCell>
+                  <TableCell onClick={(e) => e.stopPropagation()}>
+                    <DropdownMenu>
+                      <DropdownMenuTrigger className="p-1 hover:bg-slate-100 rounded">
+                        <MoreHorizontal className="h-4 w-4 text-slate-400" />
+                      </DropdownMenuTrigger>
+                      <DropdownMenuContent align="end">
+                        <DropdownMenuItem
+                          onClick={() => setSelectedOrder(order)}
+                        >
+                          View Details
+                        </DropdownMenuItem>
+                        <DropdownMenuItem
+                          onClick={() =>
+                            updateOrderStatus(order.id, 'packed')
+                          }
+                        >
+                          Mark Packed
+                        </DropdownMenuItem>
+                        <DropdownMenuItem
+                          onClick={() =>
+                            updateOrderStatus(order.id, 'shipped')
+                          }
+                        >
+                          Mark Shipped
+                        </DropdownMenuItem>
+                        <DropdownMenuItem
+                          onClick={() =>
+                            updateOrderStatus(order.id, 'delayed')
+                          }
+                        >
+                          Mark Delayed
+                        </DropdownMenuItem>
+                      </DropdownMenuContent>
+                    </DropdownMenu>
+                  </TableCell>
+                </TableRow>
+              ))
+            )}
+          </TableBody>
+        </Table>
+      </div>
+
+      {/* Pagination */}
+      {totalPages > 1 && (
+        <div className="flex items-center justify-between">
+          <p className="text-sm text-slate-500">
+            Showing {page * PAGE_SIZE + 1}–
+            {Math.min((page + 1) * PAGE_SIZE, filtered.length)} of{' '}
+            {filtered.length}
+          </p>
+          <div className="flex items-center gap-2">
+            <Button
+              size="sm"
+              variant="outline"
+              disabled={page === 0}
+              onClick={() => setPage(page - 1)}
+            >
+              <ChevronLeft className="h-4 w-4" />
+            </Button>
+            <span className="text-sm text-slate-600">
+              Page {page + 1} of {totalPages}
+            </span>
+            <Button
+              size="sm"
+              variant="outline"
+              disabled={page >= totalPages - 1}
+              onClick={() => setPage(page + 1)}
+            >
+              <ChevronRight className="h-4 w-4" />
+            </Button>
+          </div>
+        </div>
+      )}
+
+      {/* Detail dialog */}
+      {selectedOrder && (
+        <OrderDetailDialog
+          order={selectedOrder}
+          onClose={() => setSelectedOrder(null)}
+        />
+      )}
+    </div>
+  );
+}
