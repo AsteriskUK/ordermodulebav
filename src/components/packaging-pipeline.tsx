@@ -597,7 +597,7 @@ export function PackagingPipeline() {
           </CardContent>
         </Card>
       )}
-    </div>
+    )}
 
       {/* Variation Details Modal */}
       {showVariationDetails && activeOrder && (
