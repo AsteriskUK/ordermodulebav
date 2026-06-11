@@ -357,7 +357,7 @@ export function OrderTable() {
                   <TableCell onClick={(e) => e.stopPropagation()} className="min-w-[120px]">
                     <Select
                       value={order.category || 'N/A'}
-                      onValueChange={(v) => v && updateOrderCategory(order.id, v)}
+                      onValueChange={(v) => v ? updateOrderCategory(order.id, v) : undefined}
                     >
                       <SelectTrigger className="h-7 text-xs w-[110px] border-0 p-0">
                         <Badge

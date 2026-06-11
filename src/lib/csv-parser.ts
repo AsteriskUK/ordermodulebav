@@ -148,6 +148,8 @@ function parseEbayCSV(content: string, batchId: string): Order[] {
       soldFor: safeFloat(row['Sold for']),
       postageAndPackaging: safeFloat(row['Postage and packaging']),
       totalPrice: safeFloat(row['Total price']),
+      priority: 5, // Default to lowest priority
+      numberOfBoxes: 1, // Default to 1 box
       saleDate: row['Sale date'] || row['Paid on date'] || '',
       paidOnDate: row['Paid on date'] || '',
       postByDate: row['Post by date'] || '',
@@ -212,6 +214,8 @@ function parseBackMarketCSV(content: string, batchId: string): Order[] {
         soldFor: safeFloat(row.order_price),
         postageAndPackaging: safeFloat(row.shipping_price),
         totalPrice: safeFloat(row.order_price),
+        priority: 5, // Default to lowest priority
+        numberOfBoxes: 1, // Default to 1 box
         saleDate: row.date_creation || '',
         paidOnDate: row.date_payment || '',
         postByDate: '',
