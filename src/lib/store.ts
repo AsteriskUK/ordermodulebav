@@ -3,6 +3,18 @@ import { persist, createJSONStorage } from 'zustand/middleware';
 import { get, set as idbSet, del } from 'idb-keyval';
 import { Order, OrderStatus, Batch, DeliveryCarrier, DeliveryType, AppUser, EodEvent, ReturnRecord, Department } from './types';
 
+export interface EmailConfig {
+  enabled: boolean;
+  recipientEmail: string;
+  /** SMTP settings stored here — actual sending requires the /api/send-eod server route */
+  smtpHost: string;
+  smtpPort: number;
+  smtpUser: string;
+  smtpPass: string;
+  fromAddress: string;
+  autoSendAt8pm: boolean;
+}
+
 function idbStorage() {
   return createJSONStorage(() => ({
     getItem: async (name: string) => {
@@ -25,6 +37,7 @@ interface OrderStore {
   returns: ReturnRecord[];
   users: AppUser[];
   currentUserId: string | null;
+  emailConfig: EmailConfig;
   addOrders: (orders: Order[], batch: Batch) => void;
   updateOrderStatus: (orderId: string, status: OrderStatus) => void;
   updateOrderComment: (orderId: string, comment: string) => void;
@@ -39,6 +52,7 @@ interface OrderStore {
   updateUser: (userId: string, updates: Partial<AppUser>) => void;
   deleteUser: (userId: string) => void;
   setCurrentUser: (userId: string | null) => void;
+  setEmailConfig: (config: Partial<EmailConfig>) => void;
   clearEodEvents: () => void;
   addReturn: (ret: ReturnRecord) => void;
   updateReturn: (returnId: string, updates: Partial<ReturnRecord>) => void;
@@ -55,6 +69,16 @@ export const useOrderStore = create<OrderStore>()(
         { id: 'admin-1', name: 'Admin', role: 'admin', roles: ['admin'], department: 'management', departments: ['management'] as Department[], pin: '1234' },
       ],
       currentUserId: null,
+      emailConfig: {
+        enabled: false,
+        recipientEmail: '',
+        smtpHost: '',
+        smtpPort: 587,
+        smtpUser: '',
+        smtpPass: '',
+        fromAddress: '',
+        autoSendAt8pm: true,
+      },
       addOrders: (newOrders, batch) =>
         set((state) => ({
           orders: [...state.orders, ...newOrders],
@@ -156,6 +180,8 @@ export const useOrderStore = create<OrderStore>()(
       deleteUser: (userId) =>
         set((state) => ({ users: state.users.filter((u) => u.id !== userId) })),
       setCurrentUser: (userId) => set({ currentUserId: userId }),
+      setEmailConfig: (config) =>
+        set((state) => ({ emailConfig: { ...state.emailConfig, ...config } })),
       clearEodEvents: () => set({ eodEvents: [] }),
       addReturn: (ret) =>
         set((state) => ({
@@ -185,6 +211,16 @@ export const useOrderStore = create<OrderStore>()(
             { id: 'admin-1', name: 'Admin', role: 'admin', roles: ['admin'], department: 'management', departments: ['management'] as Department[], pin: '1234' },
           ],
           currentUserId: s.currentUserId ?? null,
+          emailConfig: (s as OrderStore).emailConfig ?? {
+            enabled: false,
+            recipientEmail: '',
+            smtpHost: '',
+            smtpPort: 587,
+            smtpUser: '',
+            smtpPass: '',
+            fromAddress: '',
+            autoSendAt8pm: true,
+          },
         } as OrderStore;
       },
     }
