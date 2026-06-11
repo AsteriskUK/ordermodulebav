@@ -13,9 +13,11 @@ import {
   Users,
   PackageOpen,
   BarChart2,
+  LogOut,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useOrderStore } from '@/lib/store';
+import { DEPARTMENT_CONFIG, Department } from '@/lib/types';
 import { GlobalSearch } from './global-search';
 
 const ALL_NAV = [
@@ -37,10 +39,14 @@ export function Sidebar() {
   const currentUserId = useOrderStore((s) => s.currentUserId);
   const currentUser = users.find((u) => u.id === currentUserId);
 
+  const setCurrentUser = useOrderStore((s) => s.setCurrentUser);
   const isAdminOrManager = currentUser?.role === 'admin' || currentUser?.role === 'manager';
   const navigation = isAdminOrManager
     ? ALL_NAV
     : ALL_NAV.filter((item) => item.staffVisible);
+  const userDepts: Department[] = currentUser
+    ? (currentUser.departments?.length ? currentUser.departments : [currentUser.department ?? 'management'])
+    : [];
 
   return (
     <aside className="w-64 bg-slate-900 text-white flex flex-col min-h-screen">
@@ -76,17 +82,35 @@ export function Sidebar() {
           );
         })}
       </nav>
-      <div className="p-4 border-t border-slate-700">
+      <div className="p-4 border-t border-slate-700 space-y-3">
         {currentUser ? (
-          <div className="flex items-center gap-2">
-            <div className="h-6 w-6 rounded-full bg-blue-600 flex items-center justify-center text-xs font-bold">
-              {currentUser.name.charAt(0).toUpperCase()}
+          <>
+            <div className="flex items-center gap-2">
+              <div className="h-7 w-7 rounded-full bg-blue-600 flex items-center justify-center text-xs font-bold shrink-0">
+                {currentUser.name.charAt(0).toUpperCase()}
+              </div>
+              <div className="flex-1 min-w-0">
+                <p className="text-xs font-medium text-slate-300 truncate">{currentUser.name}</p>
+                <p className="text-xs text-slate-500 capitalize">{currentUser.role}</p>
+              </div>
             </div>
-            <div>
-              <p className="text-xs font-medium text-slate-300">{currentUser.name}</p>
-              <p className="text-xs text-slate-500 capitalize">{currentUser.role}</p>
-            </div>
-          </div>
+            {!isAdminOrManager && userDepts.length > 0 && (
+              <div className="flex flex-wrap gap-1">
+                {userDepts.map((d) => (
+                  <span key={d} className={`text-[10px] px-1.5 py-0.5 rounded border font-medium ${DEPARTMENT_CONFIG[d]?.color ?? ''}`}>
+                    {DEPARTMENT_CONFIG[d]?.label ?? d}
+                  </span>
+                ))}
+              </div>
+            )}
+            <button
+              onClick={() => setCurrentUser(null)}
+              className="flex items-center gap-2 w-full px-2 py-1.5 rounded-md text-xs text-slate-400 hover:text-white hover:bg-slate-700 transition-colors"
+            >
+              <LogOut className="h-3.5 w-3.5" />
+              Sign out
+            </button>
+          </>
         ) : (
           <p className="text-xs text-slate-500">v1.0 — Core Module</p>
         )}

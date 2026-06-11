@@ -1,10 +1,13 @@
 import { AppShell } from '@/components/app-shell';
 import { Reports } from '@/components/reports';
+import { RoleGate } from '@/components/role-gate';
 
 export default function ReportsPage() {
   return (
     <AppShell>
-      <Reports />
+      <RoleGate allowedRoles={['admin', 'manager']}>
+        <Reports />
+      </RoleGate>
     </AppShell>
   );
 }
