@@ -73,23 +73,25 @@ export function PackagingPipeline() {
       filtered = orders.filter((o) => allowedCategories.includes(o.category));
     }
     
-    // Hide empty item fields for users with multiple orders
-    const userOrderCounts = filtered.reduce((acc, order) => {
-      const username = order.buyerUsername;
-      acc[username] = (acc[username] || 0) + 1;
-      return acc;
-    }, {} as Record<string, number>);
+    // For packaging queue, only show one order per customer to avoid duplicates
+    const customerOrders = new Map<string, Order>();
     
-    return filtered.map(order => {
-      const username = order.buyerUsername;
-      const hasMultipleOrders = userOrderCounts[username] > 1;
-      const hasEmptyItemField = !order.itemTitle || order.itemTitle.trim() === '';
-      
-      if (hasMultipleOrders && hasEmptyItemField) {
-        return { ...order, itemTitle: '[Multiple Orders - Hidden]' };
+    filtered.forEach(order => {
+      const customerKey = order.buyerUsername || order.postToName;
+      if (!customerOrders.has(customerKey)) {
+        customerOrders.set(customerKey, order);
+      } else {
+        // If customer already has an order, check if this one should replace it
+        const existingOrder = customerOrders.get(customerKey)!;
+        // Prioritize orders with higher priority (lower number) or earlier date
+        if ((order.priority ?? 5) < (existingOrder.priority ?? 5) || 
+            (order.priority === existingOrder.priority && order.saleDate < existingOrder.saleDate)) {
+          customerOrders.set(customerKey, order);
+        }
       }
-      return order;
     });
+    
+    return Array.from(customerOrders.values());
   }, [orders, allowedCategories]);
 
   const pendingOrders = useMemo(
