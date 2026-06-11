@@ -220,7 +220,7 @@ export function BatchShipping() {
       {!bundleMode && selectedIds.size > 0 && (
         <div className="flex items-center gap-3 p-3 bg-blue-50 border border-blue-200 rounded-lg">
           <span className="text-sm font-medium text-blue-700">{selectedIds.size} orders selected</span>
-          <Select value={selectedCarrier} onValueChange={setSelectedCarrier}>
+          <Select value={selectedCarrier} onValueChange={(value) => value && setSelectedCarrier(value)}>
             <SelectTrigger className="w-[120px]">
               <SelectValue placeholder="Select carrier" />
             </SelectTrigger>
@@ -247,7 +247,7 @@ export function BatchShipping() {
             {selectedBuyerKeys.size} buyer{selectedBuyerKeys.size !== 1 ? 's' : ''} selected &mdash;{' '}
             {bundleGroups.filter((g) => selectedBuyerKeys.has(g.buyerUsername)).reduce((s, g) => s + g.orders.length, 0)} orders
           </span>
-          <Select value={selectedCarrier} onValueChange={setSelectedCarrier}>
+          <Select value={selectedCarrier} onValueChange={(value) => value && setSelectedCarrier(value)}>
             <SelectTrigger className="w-[120px]">
               <SelectValue placeholder="Select carrier" />
             </SelectTrigger>

@@ -500,7 +500,7 @@ export function OrderTable() {
                   <TableCell className="text-xs text-center">
                     <Select
                       value={order.priority.toString()}
-                      onValueChange={(v) => updateOrderPriority(order.id, parseInt(v))}
+                      onValueChange={(v) => v ? updateOrderPriority(order.id, parseInt(v)) : undefined}
                     >
                       <SelectTrigger className="h-7 text-xs w-[60px] border-0 p-0">
                         <Badge
