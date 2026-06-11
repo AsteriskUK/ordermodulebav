@@ -51,12 +51,14 @@ const PAGE_SIZE = 25;
 export function OrderTable() {
   const orders = useOrderStore((s) => s.orders);
   const updateOrderStatus = useOrderStore((s) => s.updateOrderStatus);
+  const updateOrderPriority = useOrderStore((s) => s.updateOrderPriority);
   const updateOrderCategory = useOrderStore((s) => s.updateOrderCategory);
   const bulkUpdateStatus = useOrderStore((s) => s.bulkUpdateStatus);
 
   const searchParams = useSearchParams();
   const [search, setSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState(() => searchParams.get('status') || 'all');
+  const [categoryFilter, setCategoryFilter] = useState('all');
 
   useEffect(() => {
     const s = searchParams.get('status');
@@ -72,6 +74,9 @@ export function OrderTable() {
     if (statusFilter !== 'all') {
       result = result.filter((o) => o.status === statusFilter);
     }
+    if (categoryFilter !== 'all') {
+      result = result.filter((o) => o.category === categoryFilter);
+    }
     if (search.trim()) {
       const q = search.toLowerCase();
       result = result.filter(
@@ -83,14 +88,20 @@ export function OrderTable() {
           o.buyerUsername.toLowerCase().includes(q) ||
           o.buyerEmail.toLowerCase().includes(q) ||
           o.customLabel.toLowerCase().includes(q) ||
-          o.postToPostcode.toLowerCase().includes(q)
+          o.buyerNote.toLowerCase().includes(q) ||
+          o.category.toLowerCase().includes(q)
       );
     }
-    const dir = sortDir === 'desc' ? -1 : 1;
-    return result.sort(
-      (a, b) => dir * (new Date(a.saleDate).getTime() - new Date(b.saleDate).getTime())
-    );
-  }, [orders, statusFilter, search, sortDir]);
+    // Sort by priority first (1=highest), then by sale date
+    result.sort((a, b) => {
+      if (a.priority !== b.priority) {
+        return a.priority - b.priority; // Lower number = higher priority
+      }
+      const dir = sortDir === 'desc' ? -1 : 1;
+      return dir * (new Date(a.saleDate).getTime() - new Date(b.saleDate).getTime());
+    });
+    return result;
+  }, [orders, statusFilter, categoryFilter, search, sortDir]);
 
   const totalPages = Math.ceil(filtered.length / PAGE_SIZE);
   const pageOrders = filtered.slice(page * PAGE_SIZE, (page + 1) * PAGE_SIZE);
@@ -183,6 +194,23 @@ export function OrderTable() {
             ))}
           </SelectContent>
         </Select>
+        <Select
+          value={categoryFilter}
+          onValueChange={(v) => {
+            setCategoryFilter(v ?? 'all');
+            setPage(0);
+          }}
+        >
+          <SelectTrigger className="w-[140px]">
+            <SelectValue placeholder="All Categories" />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="all">All Categories</SelectItem>
+            {CATEGORIES.map((c) => (
+              <SelectItem key={c} value={c}>{c}</SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
 
         {selectedIds.size > 0 && (
           <div className="flex items-center gap-2">
@@ -230,17 +258,19 @@ export function OrderTable() {
               <TableHead className="text-xs">Customer</TableHead>
               <TableHead className="text-xs max-w-[250px]">Item</TableHead>
               <TableHead className="text-xs">Qty</TableHead>
-              <TableHead className="text-xs">Amount</TableHead>
+              <TableHead className="text-xs">Priority</TableHead>
+              <TableHead className="text-xs">Post By Date</TableHead>
               <TableHead className="text-xs">Category</TableHead>
               <TableHead className="text-xs">Status</TableHead>
-              <TableHead className="text-xs">Postcode</TableHead>
+              <TableHead className="text-xs">User ID</TableHead>
+              <TableHead className="text-xs max-w-[200px]">Buyer Note</TableHead>
               <TableHead className="text-xs w-10"></TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
             {pageOrders.length === 0 ? (
               <TableRow>
-                <TableCell colSpan={11} className="text-center py-8 text-slate-500">
+                <TableCell colSpan={12} className="text-center py-8 text-slate-500">
                   {orders.length === 0
                     ? 'No orders imported yet. Go to Import Orders to get started.'
                     : 'No orders match your filters.'}
@@ -250,7 +280,9 @@ export function OrderTable() {
               pageOrders.map((order) => (
                 <TableRow
                   key={order.id}
-                  className="cursor-pointer hover:bg-slate-50"
+                  className={`cursor-pointer hover:bg-slate-50 ${
+                    order.priority === 1 ? 'bg-red-50 border-l-4 border-red-500' : ''
+                  }`}
                   onClick={() => setSelectedOrder(order)}
                 >
                   <TableCell onClick={(e) => e.stopPropagation()}>
@@ -285,8 +317,42 @@ export function OrderTable() {
                   <TableCell className="text-xs text-center">
                     {order.quantity}
                   </TableCell>
-                  <TableCell className="text-xs font-medium">
-                    £{order.soldFor.toFixed(2)}
+                  <TableCell className="text-xs text-center">
+                    <Select
+                      value={order.priority.toString()}
+                      onValueChange={(v) => updateOrderPriority(order.id, parseInt(v))}
+                    >
+                      <SelectTrigger className="h-7 text-xs w-[60px] border-0 p-0">
+                        <Badge
+                          variant="outline"
+                          className={`text-xs ${
+                            order.priority === 1
+                              ? 'bg-red-100 text-red-800 border-red-300 font-bold'
+                              : order.priority === 2
+                              ? 'bg-orange-100 text-orange-800 border-orange-300'
+                              : order.priority === 3
+                              ? 'bg-yellow-100 text-yellow-800 border-yellow-300'
+                              : order.priority === 4
+                              ? 'bg-blue-100 text-blue-800 border-blue-300'
+                              : 'bg-slate-100 text-slate-600 border-slate-300'
+                          }`}
+                        >
+                          {order.priority}
+                        </Badge>
+                      </SelectTrigger>
+                      <SelectContent>
+                        {[1, 2, 3, 4, 5].map((p) => (
+                          <SelectItem key={p} value={p.toString()}>
+                            {p} {p === 1 ? '(Highest)' : p === 5 ? '(Lowest)' : ''}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </TableCell>
+                  <TableCell className="text-xs text-slate-600">
+                    {order.postByDate
+                      ? new Date(order.postByDate).toLocaleDateString('en-GB')
+                      : '-'}
                   </TableCell>
                   <TableCell onClick={(e) => e.stopPropagation()} className="min-w-[120px]">
                     <Select
@@ -338,8 +404,11 @@ export function OrderTable() {
                       </SelectContent>
                     </Select>
                   </TableCell>
-                  <TableCell className="text-xs text-slate-500">
-                    {order.postToPostcode}
+                  <TableCell className="text-xs text-slate-500 font-mono">
+                    {order.buyerUsername}
+                  </TableCell>
+                  <TableCell className="text-xs max-w-[200px] truncate">
+                    {order.buyerNote || '-'}
                   </TableCell>
                   <TableCell onClick={(e) => e.stopPropagation()}>
                     <DropdownMenu>

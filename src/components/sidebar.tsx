@@ -14,6 +14,8 @@ import {
   PackageOpen,
   BarChart2,
   LogOut,
+  ChevronLeft,
+  ChevronRight,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useOrderStore } from '@/lib/store';
@@ -33,7 +35,7 @@ const ALL_NAV = [
   { name: 'Users & Roles', href: '/users', icon: Users, staffVisible: false },
 ];
 
-export function Sidebar() {
+export function Sidebar({ collapsed, onToggle }: { collapsed: boolean; onToggle: () => void }) {
   const pathname = usePathname();
   const users = useOrderStore((s) => s.users);
   const currentUserId = useOrderStore((s) => s.currentUserId);
@@ -49,15 +51,31 @@ export function Sidebar() {
     : [];
 
   return (
-    <aside className="w-64 bg-slate-900 text-white flex flex-col min-h-screen">
-      <div className="p-4 border-b border-slate-700">
-        <h1 className="text-lg font-bold flex items-center gap-2">
-          <Package className="h-5 w-5 text-blue-400" />
-          Orders Manager
-        </h1>
-        <p className="text-xs text-slate-400 mt-1">Warehouse Pipeline</p>
+    <aside className={`${
+      collapsed ? 'w-16' : 'w-64'
+    } bg-slate-900 text-white flex flex-col min-h-screen transition-all duration-300`}>
+      <div className="p-4 border-b border-slate-700 flex items-center justify-between">
+        {!collapsed && (
+          <div>
+            <h1 className="text-lg font-bold flex items-center gap-2">
+              <Package className="h-5 w-5 text-blue-400" />
+              Orders Manager
+            </h1>
+            <p className="text-xs text-slate-400 mt-1">Warehouse Pipeline</p>
+          </div>
+        )}
+        <button
+          onClick={onToggle}
+          className="p-1.5 rounded-lg hover:bg-slate-800 transition-colors"
+        >
+          {collapsed ? (
+            <ChevronRight className="h-4 w-4" />
+          ) : (
+            <ChevronLeft className="h-4 w-4" />
+          )}
+        </button>
       </div>
-      {isAdminOrManager && (
+      {isAdminOrManager && !collapsed && (
         <div className="px-3 py-2 border-b border-slate-700">
           <GlobalSearch />
         </div>
@@ -75,9 +93,10 @@ export function Sidebar() {
                   ? 'bg-blue-600 text-white'
                   : 'text-slate-300 hover:bg-slate-800 hover:text-white'
               )}
+              title={collapsed ? item.name : undefined}
             >
-              <item.icon className="h-4 w-4" />
-              {item.name}
+              <item.icon className="h-4 w-4 flex-shrink-0" />
+              {!collapsed && <span>{item.name}</span>}
             </Link>
           );
         })}
@@ -89,12 +108,14 @@ export function Sidebar() {
               <div className="h-7 w-7 rounded-full bg-blue-600 flex items-center justify-center text-xs font-bold shrink-0">
                 {currentUser.name.charAt(0).toUpperCase()}
               </div>
-              <div className="flex-1 min-w-0">
-                <p className="text-xs font-medium text-slate-300 truncate">{currentUser.name}</p>
-                <p className="text-xs text-slate-500 capitalize">{currentUser.role}</p>
-              </div>
+              {!collapsed && (
+                <div className="flex-1 min-w-0">
+                  <p className="text-xs font-medium text-slate-300 truncate">{currentUser.name}</p>
+                  <p className="text-xs text-slate-500 capitalize">{currentUser.role}</p>
+                </div>
+              )}
             </div>
-            {!isAdminOrManager && userDepts.length > 0 && (
+            {!collapsed && !isAdminOrManager && userDepts.length > 0 && (
               <div className="flex flex-wrap gap-1">
                 {userDepts.map((d) => (
                   <span key={d} className={`text-[10px] px-1.5 py-0.5 rounded border font-medium ${DEPARTMENT_CONFIG[d]?.color ?? ''}`}>
@@ -103,16 +124,18 @@ export function Sidebar() {
                 ))}
               </div>
             )}
-            <button
-              onClick={() => setCurrentUser(null)}
-              className="flex items-center gap-2 w-full px-2 py-1.5 rounded-md text-xs text-slate-400 hover:text-white hover:bg-slate-700 transition-colors"
-            >
-              <LogOut className="h-3.5 w-3.5" />
-              Sign out
-            </button>
+            {!collapsed && (
+              <button
+                onClick={() => setCurrentUser(null)}
+                className="flex items-center gap-2 w-full px-2 py-1.5 rounded-md text-xs text-slate-400 hover:text-white hover:bg-slate-700 transition-colors"
+              >
+                <LogOut className="h-3.5 w-3.5" />
+                Sign out
+              </button>
+            )}
           </>
         ) : (
-          <p className="text-xs text-slate-500">v1.0 — Core Module</p>
+          !collapsed && <p className="text-xs text-slate-500">v1.0 — Core Module</p>
         )}
       </div>
     </aside>

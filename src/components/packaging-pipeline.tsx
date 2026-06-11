@@ -66,8 +66,30 @@ export function PackagingPipeline() {
   const allowedCategories = isAdmin ? null : getAllowedCategories(userDepts);
 
   const visibleOrders = useMemo(() => {
-    if (!allowedCategories) return orders;
-    return orders.filter((o) => allowedCategories.includes(o.category));
+    let filtered = orders;
+    if (!allowedCategories) {
+      filtered = orders;
+    } else {
+      filtered = orders.filter((o) => allowedCategories.includes(o.category));
+    }
+    
+    // Hide empty item fields for users with multiple orders
+    const userOrderCounts = filtered.reduce((acc, order) => {
+      const username = order.buyerUsername;
+      acc[username] = (acc[username] || 0) + 1;
+      return acc;
+    }, {} as Record<string, number>);
+    
+    return filtered.map(order => {
+      const username = order.buyerUsername;
+      const hasMultipleOrders = userOrderCounts[username] > 1;
+      const hasEmptyItemField = !order.itemTitle || order.itemTitle.trim() === '';
+      
+      if (hasMultipleOrders && hasEmptyItemField) {
+        return { ...order, itemTitle: '[Multiple Orders - Hidden]' };
+      }
+      return order;
+    });
   }, [orders, allowedCategories]);
 
   const pendingOrders = useMemo(
@@ -242,7 +264,7 @@ export function PackagingPipeline() {
             )}
           </div>
           <div className="text-xs text-slate-600">
-            <span className="font-medium">£{activeOrder.totalPrice.toFixed(2)}</span>
+            <span className="font-medium">Priority: {activeOrder.priority}</span>
             {activeOrder.category && activeOrder.category !== 'N/A' && (
               <Badge variant="outline" className="ml-2 text-xs bg-blue-100 text-blue-800 border-blue-200">
                 {activeOrder.category}
@@ -336,12 +358,19 @@ export function PackagingPipeline() {
                               {order.itemTitle}
                             </p>
                             <p className="text-xs text-slate-500 mt-0.5">
-                              {order.postToName} • {order.postToPostcode}
+                              {order.postToName} • User ID: {order.buyerUsername}
                             </p>
                             {order.customLabel && (
-                              <p className="text-xs font-mono text-slate-400 mt-0.5">
+                              <button
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  alert(`SKU: ${order.customLabel}\nVariation: ${order.variation || 'N/A'}\nItem Number: ${order.itemNumber}`);
+                                }}
+                                className="text-xs font-mono text-slate-400 mt-0.5 hover:text-slate-600 hover:underline cursor-pointer"
+                                title="Click for variation details"
+                              >
                                 SKU: {order.customLabel}
-                              </p>
+                              </button>
                             )}
                             {order.isGSP && (
                               <p className="text-xs text-blue-600 mt-0.5 flex items-center gap-1">

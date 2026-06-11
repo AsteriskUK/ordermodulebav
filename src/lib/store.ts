@@ -45,6 +45,8 @@ interface OrderStore {
   updateOrderCarrier: (orderId: string, carrier: DeliveryCarrier, deliveryType: DeliveryType) => void;
   updateOrderLabelQty: (orderId: string, qty: number) => void;
   updateOrderCategory: (orderId: string, category: string) => void;
+  updateOrderPriority: (orderId: string, priority: number) => void;
+  updateOrderNumberOfBoxes: (orderId: string, numberOfBoxes: number) => void;
   bulkUpdateStatus: (orderIds: string[], status: OrderStatus) => void;
   deleteOrder: (orderId: string) => void;
   deleteBatch: (batchId: string) => void;
@@ -80,10 +82,18 @@ export const useOrderStore = create<OrderStore>()(
         autoSendAt8pm: true,
       },
       addOrders: (newOrders, batch) =>
-        set((state) => ({
-          orders: [...state.orders, ...newOrders],
-          batches: [...state.batches, batch],
-        })),
+        set((state) => {
+          // Set default priority and numberOfBoxes for new orders
+          const ordersWithDefaults = newOrders.map(order => ({
+            ...order,
+            priority: order.priority ?? 5, // Default to lowest priority
+            numberOfBoxes: order.numberOfBoxes ?? 1, // Default to 1 box
+          }));
+          return {
+            orders: [...state.orders, ...ordersWithDefaults],
+            batches: [...state.batches, batch],
+          };
+        }),
       updateOrderStatus: (orderId, status) =>
         set((state) => {
           const order = state.orders.find((o) => o.id === orderId);
@@ -135,6 +145,18 @@ export const useOrderStore = create<OrderStore>()(
         set((state) => ({
           orders: state.orders.map((o) =>
             o.id === orderId ? { ...o, category } : o
+          ),
+        })),
+      updateOrderPriority: (orderId, priority) =>
+        set((state) => ({
+          orders: state.orders.map((o) =>
+            o.id === orderId ? { ...o, priority } : o
+          ),
+        })),
+      updateOrderNumberOfBoxes: (orderId, numberOfBoxes) =>
+        set((state) => ({
+          orders: state.orders.map((o) =>
+            o.id === orderId ? { ...o, numberOfBoxes } : o
           ),
         })),
       bulkUpdateStatus: (orderIds, status) =>

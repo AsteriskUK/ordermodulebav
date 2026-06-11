@@ -1,7 +1,7 @@
 export type OrderStatus = 'pending' | 'assembling' | 'checking' | 'packing' | 'packed' | 'shipped' | 'delivered' | 'held' | 'no-stock' | 'cancelled' | 'refunded' | 'returned';
 
 export type DeliveryCarrier = 'DPD' | 'FedEx' | 'Parcelforce' | 'Royal Mail' | 'Other';
-export type DeliveryType = 'standard' | 'next_day';
+export type DeliveryType = 'standard' | 'next_day' | 'express' | 'collection';
 
 export type UserRole = 'admin' | 'manager' | 'staff' | 'comms';
 
@@ -119,6 +119,10 @@ export interface Order {
   soldFor: number;
   postageAndPackaging: number;
   totalPrice: number;
+  // Priority system (1=highest, 5=lowest)
+  priority: number;
+  // Number of boxes for shipping
+  numberOfBoxes: number;
   // Dates
   saleDate: string;
   paidOnDate: string;
