@@ -596,8 +596,8 @@ export function PackagingPipeline() {
             </Table>
           </CardContent>
         </Card>
-      )}
-    )}
+      })}
+  )}
 
       {/* Variation Details Modal */}
       {showVariationDetails && activeOrder && (
