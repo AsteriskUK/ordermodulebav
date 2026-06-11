@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
+import nodemailer from 'nodemailer';
 
 /**
  * POST /api/send-eod
@@ -33,38 +34,43 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'Missing required fields' }, { status: 400 });
     }
 
-    // ── SMTP sending (uncomment once nodemailer is installed) ───────────────
-    //
-    // import nodemailer from 'nodemailer';
-    //
-    // const transporter = nodemailer.createTransport({
-    //   host:   body.smtpHost  || process.env.SMTP_HOST,
-    //   port:   body.smtpPort  || Number(process.env.SMTP_PORT) || 587,
-    //   secure: false,
-    //   auth: {
-    //     user: body.smtpUser  || process.env.SMTP_USER,
-    //     pass: body.smtpPass  || process.env.SMTP_PASS,
-    //   },
-    // });
-    //
-    // await transporter.sendMail({
-    //   from:    body.fromAddress || process.env.SMTP_FROM || 'orders@yourcompany.com',
-    //   to:      recipientEmail,
-    //   subject: `EOD Report — ${date}`,
-    //   text:    `Please find attached the end-of-day report for ${date}.`,
-    //   attachments: [{
-    //     filename: `eod_report_${date}.csv`,
-    //     content:  csvText,
-    //   }],
-    // });
-    //
-    // ───────────────────────────────────────────────────────────────────────
+    // ── SMTP sending (now enabled) ───────────────────────────────────────
+    
+    const transporter = nodemailer.createTransport({
+      host:   body.smtpHost  || process.env.SMTP_HOST,
+      port:   body.smtpPort  || Number(process.env.SMTP_PORT) || 587,
+      secure: false,
+      auth: {
+        user: body.smtpUser  || process.env.SMTP_USER,
+        pass: body.smtpPass  || process.env.SMTP_PASS,
+      },
+    });
 
-    // Placeholder response until SMTP is configured
-    console.info(`[EOD Email] Would send report for ${date} to ${recipientEmail}`);
+    await transporter.sendMail({
+      from:    body.fromAddress || process.env.SMTP_FROM || 'orders@yourcompany.com',
+      to:      recipientEmail,
+      subject: `EOD Report — ${date}`,
+      text:    `Please find attached the end-of-day report for ${date}.`,
+      attachments: [{
+        filename: `eod_report_${date}.csv`,
+        content:  csvText,
+      }],
+    });
+    
+    await transporter.sendMail({
+      from:    body.fromAddress || process.env.SMTP_FROM || 'orders@yourcompany.com',
+      to:      recipientEmail,
+      subject: `EOD Report — ${date}`,
+      text:    `Please find attached the end-of-day report for ${date}.`,
+      attachments: [{
+        filename: `eod_report_${date}.csv`,
+        content:  csvText,
+      }],
+    });
+
     return NextResponse.json({
       ok: true,
-      message: `Email stub: report for ${date} logged. Configure SMTP to enable actual sending.`,
+      message: `EOD report for ${date} sent successfully to ${recipientEmail}`,
     });
 
   } catch (err) {
