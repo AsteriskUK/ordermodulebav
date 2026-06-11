@@ -3,7 +3,7 @@
 import { useState, useMemo } from 'react';
 import { useOrderStore } from '@/lib/store';
 import { ORDER_STATUS_CONFIG, DeliveryCarrier, DeliveryType } from '@/lib/types';
-import { generateBatchShipCSV, generateBundledShipCSV, generateCarrierCSV, groupOrdersByBuyer, BundleGroup } from '@/lib/csv-parser';
+import { generateBatchShipCSV, generateBundledShipCSV, generateCarrierCSV, generateCarrierBundleCSV, groupOrdersByBuyer, BundleGroup } from '@/lib/csv-parser';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -109,8 +109,7 @@ export function BatchShipping() {
       toast.error('Select buyers to export bundled labels');
       return;
     }
-    const allOrders = selectedGroups.flatMap((g) => g.orders);
-    const csv = generateCarrierCSV(allOrders, selectedCarrier);
+    const csv = generateCarrierBundleCSV(selectedGroups, selectedCarrier);
     const blob = new Blob([csv], { type: 'text/csv' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
@@ -118,7 +117,7 @@ export function BatchShipping() {
     a.download = `${selectedCarrier}_bundled_ship_${new Date().toISOString().slice(0, 10)}.csv`;
     a.click();
     URL.revokeObjectURL(url);
-    const totalOrders = allOrders.length;
+    const totalOrders = selectedGroups.reduce((s, g) => s + g.orders.length, 0);
     toast.success(`Exported ${selectedGroups.length} bundled labels (${totalOrders} orders) as ${selectedCarrier} CSV`);
   };
 

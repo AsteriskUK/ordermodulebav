@@ -435,6 +435,130 @@ export function generateFedExCSV(orders: Order[]): string {
   });
 }
 
+export function generateDPDBundleCSV(groups: BundleGroup[]): string {
+  const headers = [
+    'Reference',
+    'Name',
+    'Company',
+    'Address1',
+    'Address2',
+    'City',
+    'Postcode',
+    'Country',
+    'Phone',
+    'Email',
+    'Service Type', // Column X
+    'Liability', // Column Y
+    'Number of Boxes', // Column Z
+    'Weight',
+    'Special Instructions',
+    'Bundle Item Count',
+    'Bundle Order References',
+  ];
+
+  const rows = groups.map((group) => {
+    const rep = group.orders[0];
+    const totalValue = group.orders.reduce((sum, o) => sum + o.totalPrice, 0);
+    const totalBoxes = group.orders.reduce((sum, o) => sum + o.numberOfBoxes, 0);
+    const serviceType = totalValue > 100 ? 'DPD Next Day' : 'DPD Standard';
+    const liability = totalValue > 50 ? '£100' : '£50';
+    const refs = group.orders.map((o) => o.salesRecordNumber).join(' | ');
+    
+    return [
+      refs, // Bundle reference
+      rep.postToName,
+      '',
+      rep.postToAddress1,
+      rep.postToAddress2,
+      rep.postToCity,
+      rep.postToPostcode,
+      rep.postToCountry === 'United Kingdom' ? 'GB' : rep.postToCountry,
+      rep.postToPhone,
+      rep.buyerEmail,
+      serviceType, // Column X
+      liability, // Column Y
+      totalBoxes.toString(), // Column Z - total boxes for bundle
+      String(group.orders.reduce((sum, o) => sum + o.quantity, 0)), // Total weight
+      rep.buyerNote || '',
+      String(group.orders.length), // Bundle item count
+      refs, // Bundle order references
+    ];
+  });
+
+  return Papa.unparse({
+    fields: headers,
+    data: rows,
+  });
+}
+
+export function generateFedExBundleCSV(groups: BundleGroup[]): string {
+  const headers = [
+    'Reference',
+    'Name',
+    'Company',
+    'Address1',
+    'Address2',
+    'City',
+    'State',
+    'Postcode',
+    'Country',
+    'Phone',
+    'Email',
+    'Service Type',
+    'Package Type',
+    'Weight',
+    'Number of Boxes', // Column Z
+    'Special Instructions',
+    'Signature Required',
+    'Bundle Item Count',
+    'Bundle Order References',
+  ];
+
+  const rows = groups.map((group) => {
+    const rep = group.orders[0];
+    const totalBoxes = group.orders.reduce((sum, o) => sum + o.numberOfBoxes, 0);
+    const refs = group.orders.map((o) => o.salesRecordNumber).join(' | ');
+    
+    return [
+      refs, // Bundle reference
+      rep.postToName,
+      '',
+      rep.postToAddress1,
+      rep.postToAddress2,
+      rep.postToCity,
+      rep.postToCounty,
+      rep.postToPostcode,
+      rep.postToCountry === 'United Kingdom' ? 'GB' : rep.postToCountry,
+      rep.postToPhone,
+      rep.buyerEmail,
+      'FedEx Express', // Default service
+      'Package',
+      String(group.orders.reduce((sum, o) => sum + o.quantity, 0)), // Total weight
+      totalBoxes.toString(), // Column Z - total boxes for bundle
+      rep.buyerNote || '',
+      'Yes', // Default signature required
+      String(group.orders.length), // Bundle item count
+      refs, // Bundle order references
+    ];
+  });
+
+  return Papa.unparse({
+    fields: headers,
+    data: rows,
+  });
+}
+
+export function generateCarrierBundleCSV(groups: BundleGroup[], carrier: string): string {
+  switch (carrier.toLowerCase()) {
+    case 'dpd':
+      return generateDPDBundleCSV(groups);
+    case 'fedex':
+      return generateFedExBundleCSV(groups);
+    default:
+      return generateBundledShipCSV(groups);
+  }
+}
+
 export function generateCarrierCSV(orders: Order[], carrier: string): string {
   switch (carrier.toLowerCase()) {
     case 'dpd':
