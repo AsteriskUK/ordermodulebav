@@ -337,6 +337,34 @@ export function CSVImport() {
               </div>
             </div>
 
+            {/* Print / export actions */}
+            <div className="flex flex-wrap gap-2">
+              <Button
+                variant="outline"
+                className="gap-2"
+                onClick={() => printHtml(buildLabelsHtml(preview.orders))}
+              >
+                <Printer className="h-4 w-4" />
+                Print Labels
+              </Button>
+              <Button
+                variant="outline"
+                className="gap-2"
+                onClick={() => printHtml(buildInvoicesHtml(preview.orders))}
+              >
+                <Printer className="h-4 w-4" />
+                Print Invoices
+              </Button>
+              <Button
+                variant="outline"
+                className="gap-2"
+                onClick={() => { downloadLabelsCSV(preview.orders); toast.success('Labels CSV downloaded'); }}
+              >
+                <Download className="h-4 w-4" />
+                Download Labels CSV
+              </Button>
+            </div>
+
             {/* Global label qty setter */}
             <div className="flex items-center gap-3 p-3 bg-slate-50 border rounded-lg">
               <Tag className="h-4 w-4 text-slate-500 shrink-0" />
@@ -400,34 +428,6 @@ export function CSVImport() {
                   ... and {preview.orders.length - 15} more orders
                 </div>
               )}
-            </div>
-
-            {/* Print / export actions */}
-            <div className="flex flex-wrap gap-2 pt-1">
-              <Button
-                variant="outline"
-                className="gap-2"
-                onClick={() => printHtml(buildLabelsHtml(preview.orders))}
-              >
-                <Printer className="h-4 w-4" />
-                Print Labels
-              </Button>
-              <Button
-                variant="outline"
-                className="gap-2"
-                onClick={() => printHtml(buildInvoicesHtml(preview.orders))}
-              >
-                <Printer className="h-4 w-4" />
-                Print Invoices
-              </Button>
-              <Button
-                variant="outline"
-                className="gap-2"
-                onClick={() => { downloadLabelsCSV(preview.orders); toast.success('Labels CSV downloaded'); }}
-              >
-                <Download className="h-4 w-4" />
-                Download Labels CSV
-              </Button>
             </div>
 
             <div className="flex gap-3">
