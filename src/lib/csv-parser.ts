@@ -559,6 +559,53 @@ export function generateCarrierBundleCSV(groups: BundleGroup[], carrier: string)
   }
 }
 
+export function generateEmailLabelsCSV(orders: Order[]): string {
+  // Exclude GSP orders and add today's date in column W
+  const nonGSPOrders = orders.filter(order => !order.isGSP);
+  const today = new Date().toISOString().slice(0, 10); // YYYY-MM-DD format
+  
+  const headers = [
+    'Order Number',
+    'Customer Name',
+    'Address Line 1',
+    'Address Line 2',
+    'City',
+    'Postcode',
+    'Country',
+    'Item Title',
+    'Quantity',
+    'SKU',
+    'Tracking Number',
+    'Service',
+    'Status',
+    'Email Sent Date', // Column W
+    'Notes'
+  ];
+
+  const rows = nonGSPOrders.map((order) => [
+    order.salesRecordNumber,
+    order.postToName,
+    order.postToAddress1,
+    order.postToAddress2 || '',
+    order.postToCity,
+    order.postToPostcode,
+    order.postToCountry,
+    order.itemTitle,
+    order.quantity.toString(),
+    order.customLabel || '',
+    order.trackingNumber || '',
+    order.deliveryService || '',
+    order.status,
+    today, // Column W - today's date
+    order.buyerNote || ''
+  ]);
+
+  return Papa.unparse({
+    fields: headers,
+    data: rows,
+  });
+}
+
 export function generateCarrierCSV(orders: Order[], carrier: string): string {
   switch (carrier.toLowerCase()) {
     case 'dpd':

@@ -41,9 +41,21 @@ export function BatchShipping() {
     [orders]
   );
 
-  const bundleGroups = useMemo(
-    () => groupOrdersByBuyer(shippableOrders),
+  // Collection orders (no labels, exclude from exports)
+  const collectionOrders = useMemo(
+    () => orders.filter((o) => o.deliveryType === 'collection' && (o.status === 'pending' || o.status === 'packed')),
+    [orders]
+  );
+
+  // Orders available for export (exclude collection orders)
+  const exportableOrders = useMemo(
+    () => shippableOrders.filter((o) => o.deliveryType !== 'collection'),
     [shippableOrders]
+  );
+
+  const bundleGroups = useMemo(
+    () => groupOrdersByBuyer(exportableOrders),
+    [exportableOrders]
   );
 
   const multiOrderBuyers = useMemo(
@@ -87,7 +99,7 @@ export function BatchShipping() {
   };
 
   const handleExport = () => {
-    const selected = orders.filter((o) => selectedIds.has(o.id));
+    const selected = exportableOrders.filter((o) => selectedIds.has(o.id));
     if (selected.length === 0) {
       toast.error('Select orders to export for shipping');
       return;

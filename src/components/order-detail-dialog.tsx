@@ -33,6 +33,9 @@ export function OrderDetailDialog({ order, onClose }: Props) {
   const updateOrderComment = useOrderStore((s) => s.updateOrderComment);
   const updateOrderTracking = useOrderStore((s) => s.updateOrderTracking);
   const updateOrderNumberOfBoxes = useOrderStore((s) => s.updateOrderNumberOfBoxes);
+  const { currentUser } = useOrderStore((s) => ({ currentUser: s.users.find(u => u.id === s.currentUserId) }));
+
+  const isCommsTeam = currentUser?.role === 'comms' || currentUser?.departments?.includes('comms');
 
   const [comment, setComment] = useState(order.comments);
   const [tracking, setTracking] = useState(order.trackingNumber);
@@ -86,6 +89,38 @@ export function OrderDetailDialog({ order, onClose }: Props) {
               </SelectContent>
             </Select>
           </div>
+
+          {/* Hold/Unhold buttons for comms team only */}
+          {isCommsTeam && (
+            <div className="flex items-center gap-3">
+              <span className="text-sm font-medium text-slate-600">Comms Actions:</span>
+              {order.status === 'held' ? (
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={() => {
+                    updateOrderStatus(order.id, 'pending');
+                    toast.success('Order unheld and returned to pending');
+                  }}
+                  className="text-green-600 border-green-300 hover:bg-green-50"
+                >
+                  Unhold Order
+                </Button>
+              ) : (
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={() => {
+                    updateOrderStatus(order.id, 'held');
+                    toast.success('Order placed on hold');
+                  }}
+                  className="text-amber-600 border-amber-300 hover:bg-amber-50"
+                >
+                  Hold Order
+                </Button>
+              )}
+            </div>
+          )}
 
           <Separator />
 

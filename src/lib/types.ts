@@ -1,4 +1,4 @@
-export type OrderStatus = 'pending' | 'assembling' | 'checking' | 'packing' | 'packed' | 'shipped' | 'delivered' | 'held' | 'no-stock' | 'cancelled' | 'refunded' | 'returned';
+export type OrderStatus = 'pending' | 'assembling' | 'checking' | 'packing' | 'packed' | 'shipped' | 'delivered' | 'held' | 'no-stock' | 'cancelled' | 'refunded' | 'returned' | 'archived';
 
 export type DeliveryCarrier = 'DPD' | 'FedEx' | 'Parcelforce' | 'Royal Mail' | 'Other';
 export type DeliveryType = 'standard' | 'next_day' | 'express' | 'collection';
@@ -169,6 +169,7 @@ export const ORDER_STATUS_CONFIG: Record<OrderStatus, { label: string; color: st
   cancelled: { label: 'Cancelled', color: 'bg-gray-100 text-gray-800 border-gray-300' },
   refunded: { label: 'Refunded', color: 'bg-orange-100 text-orange-800 border-orange-300' },
   returned: { label: 'Returned', color: 'bg-rose-100 text-rose-800 border-rose-300' },
+  archived: { label: 'Archived', color: 'bg-slate-100 text-slate-800 border-slate-300' },
 };
 
 export const PACKAGING_STAGES: { stage: PackagingStage; next: OrderStatus; label: string; description: string }[] = [
