@@ -607,31 +607,31 @@ export function PackagingPipeline() {
             <div className="space-y-3">
               <div>
                 <span className="text-sm font-medium text-slate-600">Order Number:</span>
-                <p className="text-sm">{activeOrder.salesRecordNumber}</p>
+                <p className="text-sm">{activeOrder?.salesRecordNumber}</p>
               </div>
               <div>
                 <span className="text-sm font-medium text-slate-600">Item Title:</span>
-                <p className="text-sm">{activeOrder.itemTitle}</p>
+                <p className="text-sm">{activeOrder?.itemTitle}</p>
               </div>
               <div>
                 <span className="text-sm font-medium text-slate-600">SKU/Custom Label:</span>
-                <p className="text-sm">{activeOrder.customLabel || 'N/A'}</p>
+                <p className="text-sm">{activeOrder?.customLabel || 'N/A'}</p>
               </div>
               <div>
                 <span className="text-sm font-medium text-slate-600">Quantity:</span>
-                <p className="text-sm">{activeOrder.quantity}</p>
+                <p className="text-sm">{activeOrder?.quantity}</p>
               </div>
               <div>
                 <span className="text-sm font-medium text-slate-600">Category:</span>
-                <p className="text-sm">{activeOrder.category || 'N/A'}</p>
+                <p className="text-sm">{activeOrder?.category || 'N/A'}</p>
               </div>
               <div>
                 <span className="text-sm font-medium text-slate-600">Post By Date:</span>
-                <p className="text-sm">{activeOrder.postByDate || 'N/A'}</p>
+                <p className="text-sm">{activeOrder?.postByDate || 'N/A'}</p>
               </div>
               <div>
                 <span className="text-sm font-medium text-slate-600">Buyer Note:</span>
-                <p className="text-sm">{activeOrder.buyerNote || 'No notes'}</p>
+                <p className="text-sm">{activeOrder?.buyerNote || 'No notes'}</p>
               </div>
             </div>
             <div className="flex justify-end gap-2 mt-6">
