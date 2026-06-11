@@ -31,6 +31,7 @@ import {
   MapPin,
   Tag,
   Hash,
+  PackageX,
 } from 'lucide-react';
 import { toast } from 'sonner';
 
@@ -104,6 +105,11 @@ export function PackagingPipeline() {
   function moveToHeld(orderId: string) {
     updateOrderStatus(orderId, 'held');
     toast.warning('Order placed on hold');
+  }
+
+  function moveToNoStock(orderId: string) {
+    updateOrderStatus(orderId, 'no-stock');
+    toast.warning('Marked as No Stock');
   }
 
   function moveToPrev(orderId: string, prevStatus: OrderStatus) {
@@ -354,6 +360,15 @@ export function PackagingPipeline() {
                               <AlertTriangle className="h-3 w-3 mr-1" />
                               Hold
                             </Button>
+                            <Button
+                              size="sm"
+                              variant="ghost"
+                              className="h-6 text-xs px-2 text-orange-600 hover:text-orange-700 hover:bg-orange-50"
+                              onClick={() => moveToNoStock(order.id)}
+                            >
+                              <PackageX className="h-3 w-3 mr-1" />
+                              No Stock
+                            </Button>
                           </div>
                         </div>
                       </div>
@@ -365,6 +380,66 @@ export function PackagingPipeline() {
           );
         })}
       </div>
+
+      {/* No Stock orders */}
+      {visibleOrders.filter((o) => o.status === 'no-stock').length > 0 && (
+        <Card className="border-orange-200">
+          <CardHeader>
+            <CardTitle className="text-base flex items-center gap-2 text-orange-700">
+              <PackageX className="h-4 w-4" />
+              No Stock / Stock Shortage ({visibleOrders.filter((o) => o.status === 'no-stock').length})
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead className="text-xs">Order #</TableHead>
+                  <TableHead className="text-xs">Item</TableHead>
+                  <TableHead className="text-xs">SKU</TableHead>
+                  <TableHead className="text-xs">Customer</TableHead>
+                  <TableHead className="text-xs">Comments</TableHead>
+                  <TableHead className="text-xs">Actions</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {visibleOrders
+                  .filter((o) => o.status === 'no-stock')
+                  .map((order) => (
+                    <TableRow key={order.id}>
+                      <TableCell className="font-mono text-xs">{order.salesRecordNumber}</TableCell>
+                      <TableCell className="text-xs max-w-[200px] truncate">{order.itemTitle}</TableCell>
+                      <TableCell className="font-mono text-xs text-slate-400">{order.customLabel || '—'}</TableCell>
+                      <TableCell className="text-xs">{order.postToName}</TableCell>
+                      <TableCell className="text-xs text-slate-500">{order.comments || '—'}</TableCell>
+                      <TableCell>
+                        <div className="flex gap-1">
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            className="h-6 text-xs text-green-700 border-green-300 hover:bg-green-50"
+                            onClick={() => { updateOrderStatus(order.id, 'pending'); toast.success('Released back to Pending'); }}
+                          >
+                            <ArrowLeft className="h-3 w-3 mr-1" />
+                            Release
+                          </Button>
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            className="h-6 text-xs"
+                            onClick={() => { updateOrderStatus(order.id, 'cancelled'); toast.info('Order cancelled'); }}
+                          >
+                            Cancel
+                          </Button>
+                        </div>
+                      </TableCell>
+                    </TableRow>
+                  ))}
+              </TableBody>
+            </Table>
+          </CardContent>
+        </Card>
+      )}
 
       {/* On Hold orders */}
       {visibleOrders.filter((o) => o.status === 'held').length > 0 && (

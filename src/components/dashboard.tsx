@@ -29,6 +29,7 @@ const statusIcons: Record<OrderStatus, React.ElementType> = {
   shipped: Truck,
   delivered: CheckCircle,
   held: PauseCircle,
+  'no-stock': AlertTriangle,
   cancelled: XCircle,
   refunded: RotateCcw,
   returned: PackageOpen,
