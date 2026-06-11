@@ -500,7 +500,15 @@ export function OrderTable() {
                   <TableCell className="text-xs text-center">
                     <Select
                       value={(order.priority ?? 5).toString()}
-                      onValueChange={(v) => v ? updateOrderPriority(order.id, parseInt(v)) : undefined}
+                      onValueChange={(v) => {
+                      if (v) {
+                        const newPriority = parseInt(v);
+                        updateOrderPriority(order.id, newPriority);
+                        if (newPriority === 1) {
+                          toast.success(`Order ${order.salesRecordNumber} moved to top of queue (Priority 1)`);
+                        }
+                      }
+                    }}
                     >
                       <SelectTrigger className="h-7 text-xs w-[60px] border-0 p-0">
                         <Badge
