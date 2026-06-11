@@ -57,6 +57,7 @@ export function PackagingPipeline() {
   const bulkUpdateStatus = useOrderStore((s) => s.bulkUpdateStatus);
   const [activeOrderId, setActiveOrderId] = useState<string | null>(null);
   const activeOrder = orders.find((o) => o.id === activeOrderId) ?? null;
+  const [showVariationDetails, setShowVariationDetails] = useState(false);
 
   const currentUser = users.find((u) => u.id === currentUserId);
   const isAdmin = currentUser?.role === 'admin' || currentUser?.role === 'manager';
@@ -288,8 +289,13 @@ export function PackagingPipeline() {
             <span>{activeOrder.postToName}</span>
           </div>
           <div className="flex items-center gap-1.5 text-xs text-slate-600">
-            <MapPin className="h-3.5 w-3.5 shrink-0" />
-            <span>{activeOrder.postToPostcode}</span>
+            <Package className="h-3.5 w-3.5 shrink-0" />
+            <button
+              onClick={() => setShowVariationDetails(true)}
+              className="text-blue-600 hover:text-blue-800 underline cursor-pointer"
+            >
+              View Variation Details
+            </button>
             {activeOrder.isGSP && (
               <Badge variant="outline" className="ml-1 text-xs bg-blue-100 text-blue-700 border-blue-300 flex items-center gap-1">
                 <Globe className="h-3 w-3" />
@@ -590,6 +596,55 @@ export function PackagingPipeline() {
             </Table>
           </CardContent>
         </Card>
+      )}
+    </div>
+
+      {/* Variation Details Modal */}
+      {showVariationDetails && activeOrder && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+          <div className="bg-white rounded-lg p-6 max-w-md w-full mx-4">
+            <h3 className="text-lg font-semibold mb-4">Variation Details</h3>
+            <div className="space-y-3">
+              <div>
+                <span className="text-sm font-medium text-slate-600">Order Number:</span>
+                <p className="text-sm">{activeOrder.salesRecordNumber}</p>
+              </div>
+              <div>
+                <span className="text-sm font-medium text-slate-600">Item Title:</span>
+                <p className="text-sm">{activeOrder.itemTitle}</p>
+              </div>
+              <div>
+                <span className="text-sm font-medium text-slate-600">SKU/Custom Label:</span>
+                <p className="text-sm">{activeOrder.customLabel || 'N/A'}</p>
+              </div>
+              <div>
+                <span className="text-sm font-medium text-slate-600">Quantity:</span>
+                <p className="text-sm">{activeOrder.quantity}</p>
+              </div>
+              <div>
+                <span className="text-sm font-medium text-slate-600">Category:</span>
+                <p className="text-sm">{activeOrder.category || 'N/A'}</p>
+              </div>
+              <div>
+                <span className="text-sm font-medium text-slate-600">Post By Date:</span>
+                <p className="text-sm">{activeOrder.postByDate || 'N/A'}</p>
+              </div>
+              <div>
+                <span className="text-sm font-medium text-slate-600">Buyer Note:</span>
+                <p className="text-sm">{activeOrder.buyerNote || 'No notes'}</p>
+              </div>
+            </div>
+            <div className="flex justify-end gap-2 mt-6">
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={() => setShowVariationDetails(false)}
+              >
+                Close
+              </Button>
+            </div>
+          </div>
+        </div>
       )}
     </div>
   );
