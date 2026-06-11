@@ -18,17 +18,17 @@ import { cn } from '@/lib/utils';
 import { useOrderStore } from '@/lib/store';
 import { GlobalSearch } from './global-search';
 
-const navigation = [
-  { name: 'Dashboard', href: '/', icon: LayoutDashboard },
-  { name: 'Import Orders', href: '/import', icon: Upload },
-  { name: 'Order Sheet', href: '/orders', icon: ClipboardList },
-  { name: 'Queue', href: '/packaging', icon: Workflow },
-  { name: 'Batch Shipping', href: '/shipping', icon: Truck },
-  { name: 'Batches', href: '/batches', icon: Package },
-  { name: 'Returns', href: '/returns', icon: PackageOpen },
-  { name: 'Reports', href: '/reports', icon: BarChart2 },
-  { name: 'EOD Report', href: '/eod', icon: FileBarChart2 },
-  { name: 'Users & Roles', href: '/users', icon: Users },
+const ALL_NAV = [
+  { name: 'Dashboard', href: '/', icon: LayoutDashboard, staffVisible: true },
+  { name: 'Import Orders', href: '/import', icon: Upload, staffVisible: false },
+  { name: 'Order Sheet', href: '/orders', icon: ClipboardList, staffVisible: false },
+  { name: 'Queue', href: '/packaging', icon: Workflow, staffVisible: true },
+  { name: 'Batch Shipping', href: '/shipping', icon: Truck, staffVisible: false },
+  { name: 'Batches', href: '/batches', icon: Package, staffVisible: false },
+  { name: 'Returns', href: '/returns', icon: PackageOpen, staffVisible: false },
+  { name: 'Reports', href: '/reports', icon: BarChart2, staffVisible: false },
+  { name: 'EOD Report', href: '/eod', icon: FileBarChart2, staffVisible: false },
+  { name: 'Users & Roles', href: '/users', icon: Users, staffVisible: false },
 ];
 
 export function Sidebar() {
@@ -36,6 +36,11 @@ export function Sidebar() {
   const users = useOrderStore((s) => s.users);
   const currentUserId = useOrderStore((s) => s.currentUserId);
   const currentUser = users.find((u) => u.id === currentUserId);
+
+  const isAdminOrManager = currentUser?.role === 'admin' || currentUser?.role === 'manager';
+  const navigation = isAdminOrManager
+    ? ALL_NAV
+    : ALL_NAV.filter((item) => item.staffVisible);
 
   return (
     <aside className="w-64 bg-slate-900 text-white flex flex-col min-h-screen">
@@ -46,9 +51,11 @@ export function Sidebar() {
         </h1>
         <p className="text-xs text-slate-400 mt-1">Warehouse Pipeline</p>
       </div>
-      <div className="px-3 py-2 border-b border-slate-700">
-        <GlobalSearch />
-      </div>
+      {isAdminOrManager && (
+        <div className="px-3 py-2 border-b border-slate-700">
+          <GlobalSearch />
+        </div>
+      )}
       <nav className="flex-1 p-3 space-y-1">
         {navigation.map((item) => {
           const isActive = pathname === item.href;

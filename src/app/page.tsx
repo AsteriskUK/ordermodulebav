@@ -1,10 +1,10 @@
 import { AppShell } from '@/components/app-shell';
-import { Dashboard } from '@/components/dashboard';
+import { HomeRouter } from '@/components/home-router';
 
 export default function Home() {
   return (
     <AppShell>
-      <Dashboard />
+      <HomeRouter />
     </AppShell>
   );
 }
