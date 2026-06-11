@@ -3,7 +3,7 @@
 import { useState, useMemo } from 'react';
 import { useOrderStore } from '@/lib/store';
 import { ORDER_STATUS_CONFIG, DeliveryCarrier, DeliveryType } from '@/lib/types';
-import { generateBatchShipCSV, generateBundledShipCSV, groupOrdersByBuyer, BundleGroup } from '@/lib/csv-parser';
+import { generateBatchShipCSV, generateBundledShipCSV, generateCarrierCSV, groupOrdersByBuyer, BundleGroup } from '@/lib/csv-parser';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -33,6 +33,7 @@ export function BatchShipping() {
   const [bundleMode, setBundleMode] = useState(false);
   const [expandedBuyers, setExpandedBuyers] = useState<Set<string>>(new Set());
   const [selectedBuyerKeys, setSelectedBuyerKeys] = useState<Set<string>>(new Set());
+  const [selectedCarrier, setSelectedCarrier] = useState<string>('standard');
 
   // Show orders that are pending or packed (ready for shipping)
   const shippableOrders = useMemo(
@@ -91,15 +92,15 @@ export function BatchShipping() {
       toast.error('Select orders to export for shipping');
       return;
     }
-    const csv = generateBatchShipCSV(selected);
+    const csv = generateCarrierCSV(selected, selectedCarrier);
     const blob = new Blob([csv], { type: 'text/csv' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = `batch_ship_${new Date().toISOString().slice(0, 10)}.csv`;
+    a.download = `${selectedCarrier}_batch_ship_${new Date().toISOString().slice(0, 10)}.csv`;
     a.click();
     URL.revokeObjectURL(url);
-    toast.success(`Exported ${selected.length} orders as Batch Ship CSV`);
+    toast.success(`Exported ${selected.length} orders as ${selectedCarrier} CSV`);
   };
 
   const handleExportBundles = () => {
@@ -108,16 +109,17 @@ export function BatchShipping() {
       toast.error('Select buyers to export bundled labels');
       return;
     }
-    const csv = generateBundledShipCSV(selectedGroups);
+    const allOrders = selectedGroups.flatMap((g) => g.orders);
+    const csv = generateCarrierCSV(allOrders, selectedCarrier);
     const blob = new Blob([csv], { type: 'text/csv' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = `bundled_ship_${new Date().toISOString().slice(0, 10)}.csv`;
+    a.download = `${selectedCarrier}_bundled_ship_${new Date().toISOString().slice(0, 10)}.csv`;
     a.click();
     URL.revokeObjectURL(url);
-    const totalOrders = selectedGroups.reduce((s, g) => s + g.orders.length, 0);
-    toast.success(`Exported ${selectedGroups.length} bundled labels (${totalOrders} orders)`);
+    const totalOrders = allOrders.length;
+    toast.success(`Exported ${selectedGroups.length} bundled labels (${totalOrders} orders) as ${selectedCarrier} CSV`);
   };
 
   const handleMarkShipped = () => {
@@ -219,9 +221,19 @@ export function BatchShipping() {
       {!bundleMode && selectedIds.size > 0 && (
         <div className="flex items-center gap-3 p-3 bg-blue-50 border border-blue-200 rounded-lg">
           <span className="text-sm font-medium text-blue-700">{selectedIds.size} orders selected</span>
+          <Select value={selectedCarrier} onValueChange={setSelectedCarrier}>
+            <SelectTrigger className="w-[120px]">
+              <SelectValue placeholder="Select carrier" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="standard">Standard</SelectItem>
+              <SelectItem value="dpd">DPD</SelectItem>
+              <SelectItem value="fedex">FedEx</SelectItem>
+            </SelectContent>
+          </Select>
           <Button size="sm" onClick={handleExport}>
             <Download className="h-3 w-3 mr-1" />
-            Download Batch Ship CSV
+            Download {selectedCarrier === 'standard' ? 'Batch Ship' : selectedCarrier.toUpperCase()} CSV
           </Button>
           <Button size="sm" variant="outline" onClick={handleMarkShipped}>
             <Truck className="h-3 w-3 mr-1" />
@@ -236,9 +248,19 @@ export function BatchShipping() {
             {selectedBuyerKeys.size} buyer{selectedBuyerKeys.size !== 1 ? 's' : ''} selected &mdash;{' '}
             {bundleGroups.filter((g) => selectedBuyerKeys.has(g.buyerUsername)).reduce((s, g) => s + g.orders.length, 0)} orders
           </span>
+          <Select value={selectedCarrier} onValueChange={setSelectedCarrier}>
+            <SelectTrigger className="w-[120px]">
+              <SelectValue placeholder="Select carrier" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="standard">Standard</SelectItem>
+              <SelectItem value="dpd">DPD</SelectItem>
+              <SelectItem value="fedex">FedEx</SelectItem>
+            </SelectContent>
+          </Select>
           <Button size="sm" onClick={handleExportBundles} className="bg-amber-600 hover:bg-amber-700">
             <Download className="h-3 w-3 mr-1" />
-            Download Bundled Labels CSV
+            Download {selectedCarrier === 'standard' ? 'Bundled Labels' : selectedCarrier.toUpperCase() + ' Bundled'} CSV
           </Button>
           <Button size="sm" variant="outline" onClick={handleMarkBundlesShipped}>
             <Truck className="h-3 w-3 mr-1" />

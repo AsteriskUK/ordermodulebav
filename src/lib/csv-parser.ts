@@ -338,3 +338,110 @@ export function generateBatchShipCSV(orders: Order[]): string {
     data: rows,
   });
 }
+
+export function generateDPDCSV(orders: Order[]): string {
+  const headers = [
+    'Reference',
+    'Name',
+    'Company',
+    'Address1',
+    'Address2',
+    'City',
+    'Postcode',
+    'Country',
+    'Phone',
+    'Email',
+    'Service Type', // Column X
+    'Liability', // Column Y
+    'Number of Boxes', // Column Z
+    'Weight',
+    'Special Instructions',
+  ];
+
+  const rows = orders.map((order) => {
+    const totalValue = order.totalPrice;
+    const serviceType = totalValue > 100 ? 'DPD Next Day' : 'DPD Standard';
+    const liability = totalValue > 50 ? '£100' : '£50';
+    
+    return [
+      order.salesRecordNumber,
+      order.postToName,
+      '',
+      order.postToAddress1,
+      order.postToAddress2,
+      order.postToCity,
+      order.postToPostcode,
+      order.postToCountry === 'United Kingdom' ? 'GB' : order.postToCountry,
+      order.postToPhone,
+      order.buyerEmail,
+      serviceType, // Column X
+      liability, // Column Y
+      order.numberOfBoxes.toString(), // Column Z
+      '1', // Default weight
+      order.buyerNote || '',
+    ];
+  });
+
+  return Papa.unparse({
+    fields: headers,
+    data: rows,
+  });
+}
+
+export function generateFedExCSV(orders: Order[]): string {
+  const headers = [
+    'Reference',
+    'Name',
+    'Company',
+    'Address1',
+    'Address2',
+    'City',
+    'State',
+    'Postcode',
+    'Country',
+    'Phone',
+    'Email',
+    'Service Type',
+    'Package Type',
+    'Weight',
+    'Number of Boxes', // Column Z
+    'Special Instructions',
+    'Signature Required',
+  ];
+
+  const rows = orders.map((order) => [
+    order.salesRecordNumber,
+    order.postToName,
+    '',
+    order.postToAddress1,
+    order.postToAddress2,
+    order.postToCity,
+    order.postToCounty,
+    order.postToPostcode,
+    order.postToCountry === 'United Kingdom' ? 'GB' : order.postToCountry,
+    order.postToPhone,
+    order.buyerEmail,
+    'FedEx Express', // Default service
+    'Package',
+    '1', // Default weight
+    order.numberOfBoxes.toString(), // Column Z
+    order.buyerNote || '',
+    'Yes', // Default signature required
+  ]);
+
+  return Papa.unparse({
+    fields: headers,
+    data: rows,
+  });
+}
+
+export function generateCarrierCSV(orders: Order[], carrier: string): string {
+  switch (carrier.toLowerCase()) {
+    case 'dpd':
+      return generateDPDCSV(orders);
+    case 'fedex':
+      return generateFedExCSV(orders);
+    default:
+      return generateBatchShipCSV(orders);
+  }
+}
