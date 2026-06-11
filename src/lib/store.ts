@@ -148,11 +148,24 @@ export const useOrderStore = create<OrderStore>()(
           ),
         })),
       updateOrderPriority: (orderId, priority) =>
-        set((state) => ({
-          orders: state.orders.map((o) =>
+        set((state) => {
+          const updatedOrders = state.orders.map((o) =>
             o.id === orderId ? { ...o, priority } : o
-          ),
-        })),
+          );
+          
+          // If priority is set to 1 (highest), move order to top of queue
+          if (priority === 1) {
+            const targetOrder = updatedOrders.find(o => o.id === orderId);
+            if (targetOrder) {
+              // Remove the order from its current position
+              const otherOrders = updatedOrders.filter(o => o.id !== orderId);
+              // Add it to the beginning of the array
+              return { orders: [targetOrder, ...otherOrders] };
+            }
+          }
+          
+          return { orders: updatedOrders };
+        }),
       updateOrderNumberOfBoxes: (orderId, numberOfBoxes) =>
         set((state) => ({
           orders: state.orders.map((o) =>
