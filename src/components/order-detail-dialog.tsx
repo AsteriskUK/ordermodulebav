@@ -39,7 +39,7 @@ export function OrderDetailDialog({ order, onClose }: Props) {
 
   const [comment, setComment] = useState(order.comments);
   const [tracking, setTracking] = useState(order.trackingNumber);
-  const [numberOfBoxes, setNumberOfBoxes] = useState(order.numberOfBoxes.toString());
+  const [numberOfBoxes, setNumberOfBoxes] = useState((order.numberOfBoxes ?? 1).toString());
 
   const handleSave = () => {
     updateOrderComment(order.id, comment);

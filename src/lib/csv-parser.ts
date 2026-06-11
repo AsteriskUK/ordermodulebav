@@ -376,7 +376,7 @@ export function generateDPDCSV(orders: Order[]): string {
       order.buyerEmail,
       serviceType, // Column X
       liability, // Column Y
-      order.numberOfBoxes.toString(), // Column Z
+      (order.numberOfBoxes ?? 1).toString(), // Column Z
       '1', // Default weight
       order.buyerNote || '',
     ];
@@ -424,7 +424,7 @@ export function generateFedExCSV(orders: Order[]): string {
     'FedEx Express', // Default service
     'Package',
     '1', // Default weight
-    order.numberOfBoxes.toString(), // Column Z
+    (order.numberOfBoxes ?? 1).toString(), // Column Z
     order.buyerNote || '',
     'Yes', // Default signature required
   ]);
