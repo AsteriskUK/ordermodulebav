@@ -170,8 +170,23 @@ export const useOrderStore = create<OrderStore>()(
         })),
     }),
     {
-      name: 'ebay-orders-idb-v4',
+      name: 'ebay-orders-idb-v5',
       storage: idbStorage(),
+      version: 5,
+      migrate: async (persistedState: unknown, _fromVersion: number) => {
+        // Always carry forward everything and patch any missing fields
+        const s = (persistedState ?? {}) as Partial<OrderStore>;
+        return {
+          orders:      s.orders      ?? [],
+          batches:     s.batches     ?? [],
+          eodEvents:   s.eodEvents   ?? [],
+          returns:     s.returns     ?? [],
+          users:       s.users       ?? [
+            { id: 'admin-1', name: 'Admin', role: 'admin', roles: ['admin'], department: 'management', departments: ['management'] as Department[], pin: '1234' },
+          ],
+          currentUserId: s.currentUserId ?? null,
+        } as OrderStore;
+      },
     }
   )
 );

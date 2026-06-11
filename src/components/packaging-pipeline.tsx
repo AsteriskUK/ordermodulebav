@@ -32,6 +32,8 @@ import {
   Tag,
   Hash,
   PackageX,
+  Truck,
+  Globe,
 } from 'lucide-react';
 import { toast } from 'sonner';
 
@@ -88,6 +90,10 @@ export function PackagingPipeline() {
     () => visibleOrders.filter((o) => o.status === 'packed'),
     [visibleOrders]
   );
+  const shippedOrders = useMemo(
+    () => visibleOrders.filter((o) => o.status === 'shipped'),
+    [visibleOrders]
+  );
 
   const stageData = [
     { stage: 'pending' as OrderStatus, orders: pendingOrders, icon: Clock, prevStage: null, nextStage: 'assembling' as OrderStatus },
@@ -95,6 +101,7 @@ export function PackagingPipeline() {
     { stage: 'checking' as OrderStatus, orders: checkingOrders, icon: ClipboardCheck, prevStage: 'assembling' as OrderStatus, nextStage: 'packing' as OrderStatus },
     { stage: 'packing' as OrderStatus, orders: packingOrders, icon: BoxSelect, prevStage: 'checking' as OrderStatus, nextStage: 'packed' as OrderStatus },
     { stage: 'packed' as OrderStatus, orders: packedOrders, icon: Package, prevStage: 'packing' as OrderStatus, nextStage: 'shipped' as OrderStatus },
+    { stage: 'shipped' as OrderStatus, orders: shippedOrders, icon: Truck, prevStage: 'packed' as OrderStatus, nextStage: 'delivered' as OrderStatus },
   ];
 
   function moveToNext(orderId: string, nextStatus: OrderStatus) {
@@ -227,6 +234,12 @@ export function PackagingPipeline() {
           <div className="flex items-center gap-1.5 text-xs text-slate-600">
             <MapPin className="h-3.5 w-3.5 shrink-0" />
             <span>{activeOrder.postToPostcode}</span>
+            {activeOrder.isGSP && (
+              <Badge variant="outline" className="ml-1 text-xs bg-blue-100 text-blue-700 border-blue-300 flex items-center gap-1">
+                <Globe className="h-3 w-3" />
+                {activeOrder.postToCountry || 'Overseas'}
+              </Badge>
+            )}
           </div>
           <div className="text-xs text-slate-600">
             <span className="font-medium">£{activeOrder.totalPrice.toFixed(2)}</span>
@@ -328,6 +341,12 @@ export function PackagingPipeline() {
                             {order.customLabel && (
                               <p className="text-xs font-mono text-slate-400 mt-0.5">
                                 SKU: {order.customLabel}
+                              </p>
+                            )}
+                            {order.isGSP && (
+                              <p className="text-xs text-blue-600 mt-0.5 flex items-center gap-1">
+                                <Globe className="h-3 w-3" />
+                                {order.postToCountry || 'Overseas'}
                               </p>
                             )}
                           </div>
