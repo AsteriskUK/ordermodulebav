@@ -2,7 +2,7 @@
 
 import { useMemo, useState } from 'react';
 import { useOrderStore } from '@/lib/store';
-import { ORDER_STATUS_CONFIG, PACKAGING_STAGES, OrderStatus, PackagingStage } from '@/lib/types';
+import { ORDER_STATUS_CONFIG, PACKAGING_STAGES, OrderStatus, PackagingStage, DEPARTMENT_CONFIG, Department } from '@/lib/types';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -34,32 +34,58 @@ import {
 } from 'lucide-react';
 import { toast } from 'sonner';
 
+function getAllowedCategories(depts: Department[]): string[] | null {
+  const cats: string[] = [];
+  let hasOpenDept = false;
+  for (const d of depts) {
+    const cfg = DEPARTMENT_CONFIG[d];
+    if (!cfg) continue;
+    if (!cfg.categories) { hasOpenDept = true; break; }
+    cats.push(...cfg.categories);
+  }
+  return hasOpenDept ? null : cats.length ? cats : null;
+}
+
 export function PackagingPipeline() {
   const orders = useOrderStore((s) => s.orders);
+  const users = useOrderStore((s) => s.users);
+  const currentUserId = useOrderStore((s) => s.currentUserId);
   const updateOrderStatus = useOrderStore((s) => s.updateOrderStatus);
   const bulkUpdateStatus = useOrderStore((s) => s.bulkUpdateStatus);
   const [activeOrderId, setActiveOrderId] = useState<string | null>(null);
   const activeOrder = orders.find((o) => o.id === activeOrderId) ?? null;
 
+  const currentUser = users.find((u) => u.id === currentUserId);
+  const isAdmin = currentUser?.role === 'admin' || currentUser?.role === 'manager';
+  const userDepts: Department[] = currentUser
+    ? (currentUser.departments?.length ? currentUser.departments : [currentUser.department ?? 'management'])
+    : [];
+  const allowedCategories = isAdmin ? null : getAllowedCategories(userDepts);
+
+  const visibleOrders = useMemo(() => {
+    if (!allowedCategories) return orders;
+    return orders.filter((o) => allowedCategories.includes(o.category));
+  }, [orders, allowedCategories]);
+
   const pendingOrders = useMemo(
-    () => orders.filter((o) => o.status === 'pending'),
-    [orders]
+    () => visibleOrders.filter((o) => o.status === 'pending'),
+    [visibleOrders]
   );
   const assemblingOrders = useMemo(
-    () => orders.filter((o) => o.status === 'assembling'),
-    [orders]
+    () => visibleOrders.filter((o) => o.status === 'assembling'),
+    [visibleOrders]
   );
   const checkingOrders = useMemo(
-    () => orders.filter((o) => o.status === 'checking'),
-    [orders]
+    () => visibleOrders.filter((o) => o.status === 'checking'),
+    [visibleOrders]
   );
   const packingOrders = useMemo(
-    () => orders.filter((o) => o.status === 'packing'),
-    [orders]
+    () => visibleOrders.filter((o) => o.status === 'packing'),
+    [visibleOrders]
   );
   const packedOrders = useMemo(
-    () => orders.filter((o) => o.status === 'packed'),
-    [orders]
+    () => visibleOrders.filter((o) => o.status === 'packed'),
+    [visibleOrders]
   );
 
   const stageData = [
@@ -105,6 +131,34 @@ export function PackagingPipeline() {
           Track orders through assembling, checking, and packing stages
         </p>
       </div>
+
+      {/* Dept scope indicator */}
+      {currentUser ? (
+        <div className="flex items-center gap-2 flex-wrap text-xs">
+          <span className="text-slate-500">Viewing as:</span>
+          <span className="font-medium text-slate-700">{currentUser.name}</span>
+          <span className="text-slate-400">·</span>
+          {allowedCategories ? (
+            <>
+              <span className="text-slate-500">Departments:</span>
+              {userDepts.map((d) => (
+                <Badge key={d} variant="outline" className={`text-xs ${DEPARTMENT_CONFIG[d]?.color ?? ''}`}>
+                  {DEPARTMENT_CONFIG[d]?.label ?? d}
+                </Badge>
+              ))}
+              <span className="text-slate-400 ml-1">
+                (showing {visibleOrders.length} of {orders.length} orders)
+              </span>
+            </>
+          ) : (
+            <Badge variant="outline" className="text-xs bg-slate-100 text-slate-700">All departments</Badge>
+          )}
+        </div>
+      ) : (
+        <div className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded px-3 py-2">
+          No user signed in — showing all orders. Sign in to filter by department.
+        </div>
+      )}
 
       {/* Pipeline overview */}
       <div className="flex items-center gap-2 overflow-x-auto pb-2">
@@ -313,12 +367,12 @@ export function PackagingPipeline() {
       </div>
 
       {/* On Hold orders */}
-      {orders.filter((o) => o.status === 'held').length > 0 && (
+      {visibleOrders.filter((o) => o.status === 'held').length > 0 && (
         <Card className="border-red-200">
           <CardHeader>
             <CardTitle className="text-base flex items-center gap-2 text-red-700">
               <AlertTriangle className="h-4 w-4" />
-              On Hold ({orders.filter((o) => o.status === 'held').length})
+              On Hold ({visibleOrders.filter((o) => o.status === 'held').length})
             </CardTitle>
           </CardHeader>
           <CardContent>
@@ -333,7 +387,7 @@ export function PackagingPipeline() {
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {orders
+                {visibleOrders
                   .filter((o) => o.status === 'held')
                   .map((order) => (
                     <TableRow key={order.id}>

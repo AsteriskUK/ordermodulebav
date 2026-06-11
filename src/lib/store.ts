@@ -1,7 +1,7 @@
 import { create } from 'zustand';
 import { persist, createJSONStorage } from 'zustand/middleware';
 import { get, set as idbSet, del } from 'idb-keyval';
-import { Order, OrderStatus, Batch, DeliveryCarrier, DeliveryType, AppUser, EodEvent, ReturnRecord } from './types';
+import { Order, OrderStatus, Batch, DeliveryCarrier, DeliveryType, AppUser, EodEvent, ReturnRecord, Department } from './types';
 
 function idbStorage() {
   return createJSONStorage(() => ({
@@ -52,7 +52,7 @@ export const useOrderStore = create<OrderStore>()(
       eodEvents: [],
       returns: [],
       users: [
-        { id: 'admin-1', name: 'Admin', role: 'admin', roles: ['admin'], department: 'management', pin: '1234' },
+        { id: 'admin-1', name: 'Admin', role: 'admin', roles: ['admin'], department: 'management', departments: ['management'] as Department[], pin: '1234' },
       ],
       currentUserId: null,
       addOrders: (newOrders, batch) =>
@@ -170,7 +170,7 @@ export const useOrderStore = create<OrderStore>()(
         })),
     }),
     {
-      name: 'ebay-orders-idb-v3',
+      name: 'ebay-orders-idb-v4',
       storage: idbStorage(),
     }
   )

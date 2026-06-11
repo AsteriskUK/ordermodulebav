@@ -4,7 +4,38 @@ export type DeliveryCarrier = 'DPD' | 'FedEx' | 'Parcelforce' | 'Royal Mail' | '
 export type DeliveryType = 'standard' | 'next_day';
 
 export type UserRole = 'admin' | 'manager' | 'staff' | 'comms';
-export type Department = 'warehouse' | 'comms' | 'management' | 'all';
+
+export type Department =
+  | 'management'
+  | 'packing'
+  | 'comms'
+  | 'returns'
+  | 'qa'
+  | 'laptop'
+  | 'gaming-pc'
+  | 'projector'
+  | 'pc-aio-mini'
+  | 'monitor'
+  | 'networking';
+
+export const DEPARTMENT_CONFIG: Record<Department, {
+  label: string;
+  color: string;
+  /** If set, this dept only sees orders whose category matches one of these values */
+  categories?: string[];
+}> = {
+  management:  { label: 'Management',   color: 'bg-slate-100 text-slate-800 border-slate-300' },
+  packing:     { label: 'Packing Dept',  color: 'bg-indigo-100 text-indigo-800 border-indigo-300' },
+  comms:       { label: 'Comms Dept',    color: 'bg-purple-100 text-purple-800 border-purple-300' },
+  returns:     { label: 'Returns Dept',  color: 'bg-rose-100 text-rose-800 border-rose-300' },
+  qa:          { label: 'QA Dept',       color: 'bg-cyan-100 text-cyan-800 border-cyan-300' },
+  laptop:      { label: 'Laptop Dept',   color: 'bg-blue-100 text-blue-800 border-blue-300',    categories: ['LAPTOP'] },
+  'gaming-pc': { label: 'Gaming PC Dept',color: 'bg-red-100 text-red-800 border-red-300',      categories: ['PC-GAMING'] },
+  projector:   { label: 'Projector Dept',color: 'bg-amber-100 text-amber-800 border-amber-300', categories: ['PROJECTOR'] },
+  'pc-aio-mini':{ label: 'PC-AIO-Mini Dept', color: 'bg-teal-100 text-teal-800 border-teal-300', categories: ['PC-AIO-MINI'] },
+  monitor:     { label: 'Monitor Dept',  color: 'bg-green-100 text-green-800 border-green-300', categories: ['MONITOR'] },
+  networking:  { label: 'Networking Dept', color: 'bg-orange-100 text-orange-800 border-orange-300', categories: ['NETWORKING'] },
+};
 
 export interface UserTarget {
   action: OrderStatus;
@@ -16,7 +47,10 @@ export interface AppUser {
   name: string;
   role: UserRole;
   roles: UserRole[];
+  /** Primary department (kept for backwards compat) */
   department: Department;
+  /** All departments this user belongs to — used for queue filtering */
+  departments: Department[];
   pin?: string;
   targets?: UserTarget[];
 }

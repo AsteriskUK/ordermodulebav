@@ -2,7 +2,7 @@
 
 import { useState } from 'react';
 import { useOrderStore } from '@/lib/store';
-import { AppUser, UserRole, Department } from '@/lib/types';
+import { AppUser, UserRole, Department, DEPARTMENT_CONFIG } from '@/lib/types';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -44,6 +44,39 @@ const ROLE_CONFIG: Record<UserRole, { label: string; color: string; icon: React.
   },
 };
 
+const ALL_DEPTS = Object.keys(DEPARTMENT_CONFIG) as Department[];
+
+function DeptCheckboxes({
+  selected,
+  onChange,
+}: {
+  selected: Department[];
+  onChange: (d: Department[]) => void;
+}) {
+  const toggle = (d: Department) =>
+    onChange(selected.includes(d) ? selected.filter((x) => x !== d) : [...selected, d]);
+  return (
+    <div className="flex flex-wrap gap-1.5">
+      {ALL_DEPTS.map((d) => {
+        const cfg = DEPARTMENT_CONFIG[d];
+        const active = selected.includes(d);
+        return (
+          <button
+            key={d}
+            type="button"
+            onClick={() => toggle(d)}
+            className={`px-2 py-0.5 rounded border text-xs font-medium transition-colors ${
+              active ? cfg.color + ' opacity-100' : 'bg-white text-slate-400 border-slate-200 hover:border-slate-400'
+            }`}
+          >
+            {cfg.label}
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
 function generateId() {
   return `user-${Date.now()}-${Math.random().toString(36).substr(2, 6)}`;
 }
@@ -59,12 +92,12 @@ export function UserManagement() {
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editName, setEditName] = useState('');
   const [editRole, setEditRole] = useState<UserRole>('staff');
-  const [editDept, setEditDept] = useState<Department>('warehouse');
+  const [editDepts, setEditDepts] = useState<Department[]>([]);
   const [editPin, setEditPin] = useState('');
 
   const [newName, setNewName] = useState('');
   const [newRole, setNewRole] = useState<UserRole>('staff');
-  const [newDept, setNewDept] = useState<Department>('warehouse');
+  const [newDepts, setNewDepts] = useState<Department[]>([]);
   const [newPin, setNewPin] = useState('');
   const [showAdd, setShowAdd] = useState(false);
 
@@ -74,24 +107,41 @@ export function UserManagement() {
     setEditingId(user.id);
     setEditName(user.name);
     setEditRole(user.role);
-    setEditDept(user.department || 'warehouse');
+    setEditDepts(user.departments?.length ? user.departments : [user.department ?? 'management']);
     setEditPin(user.pin || '');
   };
 
   const saveEdit = () => {
     if (!editName.trim()) { toast.error('Name is required'); return; }
-    updateUser(editingId!, { name: editName.trim(), role: editRole, roles: [editRole], department: editDept, pin: editPin || undefined });
+    if (!editDepts.length) { toast.error('Select at least one department'); return; }
+    updateUser(editingId!, {
+      name: editName.trim(),
+      role: editRole,
+      roles: [editRole],
+      department: editDepts[0],
+      departments: editDepts,
+      pin: editPin || undefined,
+    });
     toast.success('User updated');
     setEditingId(null);
   };
 
   const handleAdd = () => {
     if (!newName.trim()) { toast.error('Name is required'); return; }
-    addUser({ id: generateId(), name: newName.trim(), role: newRole, roles: [newRole], department: newDept, pin: newPin || undefined });
+    if (!newDepts.length) { toast.error('Select at least one department'); return; }
+    addUser({
+      id: generateId(),
+      name: newName.trim(),
+      role: newRole,
+      roles: [newRole],
+      department: newDepts[0],
+      departments: newDepts,
+      pin: newPin || undefined,
+    });
     toast.success(`${newName} added`);
     setNewName('');
     setNewRole('staff');
-    setNewDept('warehouse');
+    setNewDepts([]);
     setNewPin('');
     setShowAdd(false);
   };
@@ -140,7 +190,7 @@ export function UserManagement() {
       )}
 
       {/* Role legend */}
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+      <div className="grid grid-cols-1 md:grid-cols-4 gap-3">
         {(Object.entries(ROLE_CONFIG) as [UserRole, typeof ROLE_CONFIG[UserRole]][]).map(([role, cfg]) => {
           const Icon = cfg.icon;
           return (
@@ -163,7 +213,7 @@ export function UserManagement() {
           <CardHeader>
             <CardTitle className="text-sm text-blue-800">New User</CardTitle>
           </CardHeader>
-          <CardContent>
+          <CardContent className="space-y-3">
             <div className="flex flex-wrap gap-3 items-end">
               <div>
                 <label className="text-xs text-slate-500 block mb-1">Name</label>
@@ -177,27 +227,12 @@ export function UserManagement() {
               <div>
                 <label className="text-xs text-slate-500 block mb-1">Role</label>
                 <Select value={newRole} onValueChange={(v) => setNewRole(v as UserRole)}>
-                  <SelectTrigger className="w-32 h-8 text-sm">
-                    <SelectValue />
-                  </SelectTrigger>
+                  <SelectTrigger className="w-32 h-8 text-sm"><SelectValue /></SelectTrigger>
                   <SelectContent>
                     <SelectItem value="admin">Admin</SelectItem>
                     <SelectItem value="manager">Manager</SelectItem>
                     <SelectItem value="staff">Staff</SelectItem>
                     <SelectItem value="comms">Comms</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
-              <div>
-                <label className="text-xs text-slate-500 block mb-1">Department</label>
-                <Select value={newDept} onValueChange={(v) => setNewDept(v as Department)}>
-                  <SelectTrigger className="w-36 h-8 text-sm">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="warehouse">Warehouse</SelectItem>
-                    <SelectItem value="comms">Comms</SelectItem>
-                    <SelectItem value="management">Management</SelectItem>
                   </SelectContent>
                 </Select>
               </div>
@@ -212,12 +247,15 @@ export function UserManagement() {
                 />
               </div>
               <Button size="sm" onClick={handleAdd} className="h-8">
-                <Check className="h-3 w-3 mr-1" />
-                Add
+                <Check className="h-3 w-3 mr-1" />Add
               </Button>
               <Button size="sm" variant="outline" onClick={() => setShowAdd(false)} className="h-8">
                 <X className="h-3 w-3" />
               </Button>
+            </div>
+            <div>
+              <label className="text-xs text-slate-500 block mb-1.5">Departments (select all that apply)</label>
+              <DeptCheckboxes selected={newDepts} onChange={setNewDepts} />
             </div>
           </CardContent>
         </Card>
@@ -232,78 +270,79 @@ export function UserManagement() {
           </CardTitle>
         </CardHeader>
         <CardContent>
-          <div className="space-y-2">
+          <div className="space-y-3">
             {users.map((user) => {
               const cfg = ROLE_CONFIG[user.role];
               const Icon = cfg.icon;
               const isEditing = editingId === user.id;
               const isActive = user.id === currentUserId;
+              const userDepts: Department[] = user.departments?.length
+                ? user.departments
+                : [user.department ?? 'management'];
 
               return (
                 <div
                   key={user.id}
-                  className={`flex items-center gap-3 p-3 rounded-lg border ${isActive ? 'bg-blue-50 border-blue-200' : 'bg-white'}`}
+                  className={`p-3 rounded-lg border ${isActive ? 'bg-blue-50 border-blue-200' : 'bg-white'}`}
                 >
-                  <Icon className="h-5 w-5 text-slate-400 shrink-0" />
-
                   {isEditing ? (
-                    <div className="flex flex-wrap gap-2 items-center flex-1">
-                      <Input
-                        value={editName}
-                        onChange={(e) => setEditName(e.target.value)}
-                        className="w-36 h-7 text-sm"
-                      />
-                      <Select value={editRole} onValueChange={(v) => setEditRole(v as UserRole)}>
-                        <SelectTrigger className="w-28 h-7 text-sm"><SelectValue /></SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="admin">Admin</SelectItem>
-                          <SelectItem value="manager">Manager</SelectItem>
-                          <SelectItem value="staff">Staff</SelectItem>
-                          <SelectItem value="comms">Comms</SelectItem>
-                        </SelectContent>
-                      </Select>
-                      <Select value={editDept} onValueChange={(v) => setEditDept(v as Department)}>
-                        <SelectTrigger className="w-32 h-7 text-sm"><SelectValue /></SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="warehouse">Warehouse</SelectItem>
-                          <SelectItem value="comms">Comms</SelectItem>
-                          <SelectItem value="management">Management</SelectItem>
-                        </SelectContent>
-                      </Select>
-                      <Input
-                        value={editPin}
-                        onChange={(e) => setEditPin(e.target.value)}
-                        placeholder="PIN"
-                        maxLength={6}
-                        className="w-24 h-7 text-sm font-mono"
-                      />
+                    <div className="space-y-3">
+                      <div className="flex flex-wrap gap-2 items-center">
+                        <Icon className="h-5 w-5 text-slate-400 shrink-0" />
+                        <Input
+                          value={editName}
+                          onChange={(e) => setEditName(e.target.value)}
+                          className="w-36 h-7 text-sm"
+                        />
+                        <Select value={editRole} onValueChange={(v) => setEditRole(v as UserRole)}>
+                          <SelectTrigger className="w-28 h-7 text-sm"><SelectValue /></SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="admin">Admin</SelectItem>
+                            <SelectItem value="manager">Manager</SelectItem>
+                            <SelectItem value="staff">Staff</SelectItem>
+                            <SelectItem value="comms">Comms</SelectItem>
+                          </SelectContent>
+                        </Select>
+                        <Input
+                          value={editPin}
+                          onChange={(e) => setEditPin(e.target.value)}
+                          placeholder="PIN"
+                          maxLength={6}
+                          className="w-24 h-7 text-sm font-mono"
+                        />
+                        <div className="flex gap-1 ml-auto">
+                          <Button size="sm" variant="outline" className="h-7 w-7 p-0" onClick={saveEdit}>
+                            <Check className="h-3 w-3 text-green-600" />
+                          </Button>
+                          <Button size="sm" variant="outline" className="h-7 w-7 p-0" onClick={() => setEditingId(null)}>
+                            <X className="h-3 w-3" />
+                          </Button>
+                        </div>
+                      </div>
+                      <div>
+                        <label className="text-xs text-slate-500 block mb-1.5">Departments</label>
+                        <DeptCheckboxes selected={editDepts} onChange={setEditDepts} />
+                      </div>
                     </div>
                   ) : (
-                    <div className="flex-1">
-                      <div className="flex items-center gap-2">
-                        <span className="text-sm font-medium">{user.name}</span>
-                        {isActive && <span className="text-xs text-blue-500 font-medium">• Active</span>}
+                    <div className="flex items-start gap-3">
+                      <Icon className="h-5 w-5 text-slate-400 shrink-0 mt-0.5" />
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center gap-2">
+                          <span className="text-sm font-medium">{user.name}</span>
+                          {isActive && <span className="text-xs text-blue-500 font-medium">• Active</span>}
+                        </div>
+                        <div className="flex items-center gap-1.5 mt-1 flex-wrap">
+                          <Badge variant="outline" className={`text-xs ${cfg.color}`}>{cfg.label}</Badge>
+                          {userDepts.map((d) => (
+                            <Badge key={d} variant="outline" className={`text-xs ${DEPARTMENT_CONFIG[d]?.color ?? 'bg-slate-50'}`}>
+                              {DEPARTMENT_CONFIG[d]?.label ?? d}
+                            </Badge>
+                          ))}
+                          {user.pin && <span className="text-xs text-slate-400 ml-1">PIN set</span>}
+                        </div>
                       </div>
-                      <div className="flex items-center gap-2 mt-0.5">
-                        <Badge variant="outline" className={`text-xs ${cfg.color}`}>{cfg.label}</Badge>
-                        <Badge variant="outline" className="text-xs capitalize bg-slate-50">{user.department || 'warehouse'}</Badge>
-                        {user.pin && <span className="text-xs text-slate-400">PIN set</span>}
-                      </div>
-                    </div>
-                  )}
-
-                  <div className="flex items-center gap-1 shrink-0">
-                    {isEditing ? (
-                      <>
-                        <Button size="sm" variant="outline" className="h-7 w-7 p-0" onClick={saveEdit}>
-                          <Check className="h-3 w-3 text-green-600" />
-                        </Button>
-                        <Button size="sm" variant="outline" className="h-7 w-7 p-0" onClick={() => setEditingId(null)}>
-                          <X className="h-3 w-3" />
-                        </Button>
-                      </>
-                    ) : (
-                      <>
+                      <div className="flex items-center gap-1 shrink-0">
                         {!isActive && (
                           <Button
                             size="sm"
@@ -326,9 +365,9 @@ export function UserManagement() {
                         >
                           <Trash2 className="h-3 w-3" />
                         </Button>
-                      </>
-                    )}
-                  </div>
+                      </div>
+                    </div>
+                  )}
                 </div>
               );
             })}
