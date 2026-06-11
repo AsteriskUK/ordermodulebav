@@ -2,7 +2,7 @@
 
 import { useMemo, useState } from 'react';
 import { useOrderStore } from '@/lib/store';
-import { ORDER_STATUS_CONFIG, PACKAGING_STAGES, OrderStatus, PackagingStage, DEPARTMENT_CONFIG, Department } from '@/lib/types';
+import { ORDER_STATUS_CONFIG, PACKAGING_STAGES, Order, OrderStatus, PackagingStage, DEPARTMENT_CONFIG, Department } from '@/lib/types';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
