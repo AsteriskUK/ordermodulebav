@@ -25,9 +25,9 @@ import { GlobalSearch } from './global-search';
 const ALL_NAV = [
   { name: 'Dashboard', href: '/', icon: LayoutDashboard, staffVisible: true },
   { name: 'Import Orders', href: '/import', icon: Upload, staffVisible: false },
+  { name: 'Batch Shipping', href: '/shipping', icon: Truck, staffVisible: false },
   { name: 'Order Sheet', href: '/orders', icon: ClipboardList, staffVisible: false },
   { name: 'Queue', href: '/packaging', icon: Workflow, staffVisible: true },
-  { name: 'Batch Shipping', href: '/shipping', icon: Truck, staffVisible: false },
   { name: 'Batches', href: '/batches', icon: Package, staffVisible: false },
   { name: 'Returns', href: '/returns', icon: PackageOpen, staffVisible: false },
   { name: 'Reports', href: '/reports', icon: BarChart2, staffVisible: false },
