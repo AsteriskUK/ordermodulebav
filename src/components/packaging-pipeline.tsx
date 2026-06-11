@@ -91,7 +91,12 @@ export function PackagingPipeline() {
       }
     });
     
-    return Array.from(customerOrders.values());
+    return Array.from(customerOrders.values()).sort((a, b) => {
+    // Sort by postByDate descending (earlier dates first)
+    const dateA = new Date(a.postByDate || a.saleDate).getTime();
+    const dateB = new Date(b.postByDate || b.saleDate).getTime();
+    return dateB - dateA;
+  });
   }, [orders, allowedCategories]);
 
   const pendingOrders = useMemo(

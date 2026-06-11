@@ -68,7 +68,7 @@ export function OrderTable() {
   const [page, setPage] = useState(0);
   const [selectedOrder, setSelectedOrder] = useState<Order | null>(null);
   const [sortDir, setSortDir] = useState<'desc' | 'asc'>('desc');
-  const [sortField, setSortField] = useState<string>('saleDate');
+  const [sortField, setSortField] = useState<string>('postByDate');
 
   const handleSort = (field: string) => {
     if (sortField === field) {
@@ -336,11 +336,11 @@ export function OrderTable() {
               </TableHead>
               <TableHead 
                 className="text-xs cursor-pointer hover:bg-slate-100 transition-colors"
-                onClick={() => handleSort('saleDate')}
+                onClick={() => handleSort('postByDate')}
               >
                 <div className="flex items-center gap-1">
                   Date
-                  {sortField === 'saleDate' && (
+                  {sortField === 'postByDate' && (
                     sortDir === 'desc' ? <ArrowDown className="h-3 w-3" /> : <ArrowUp className="h-3 w-3" />
                   )}
                 </div>
