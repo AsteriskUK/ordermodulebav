@@ -291,7 +291,7 @@ export function PackagingPipeline() {
             )}
           </div>
           <div className="text-xs text-slate-600">
-            <span className="font-medium">Priority: {activeOrder.priority}</span>
+            <span className="font-medium">Priority: {activeOrder.priority ?? 5}</span>
             {activeOrder.category && activeOrder.category !== 'N/A' && (
               <Badge variant="outline" className="ml-2 text-xs bg-blue-100 text-blue-800 border-blue-200">
                 {activeOrder.category}

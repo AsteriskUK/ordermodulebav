@@ -33,7 +33,7 @@ export function OrderDetailDialog({ order, onClose }: Props) {
   const updateOrderComment = useOrderStore((s) => s.updateOrderComment);
   const updateOrderTracking = useOrderStore((s) => s.updateOrderTracking);
   const updateOrderNumberOfBoxes = useOrderStore((s) => s.updateOrderNumberOfBoxes);
-  const { currentUser } = useOrderStore((s) => ({ currentUser: s.users.find(u => u.id === s.currentUserId) }));
+  const currentUser = useOrderStore((s) => s.users.find(u => u.id === s.currentUserId));
 
   const isCommsTeam = currentUser?.role === 'comms' || currentUser?.departments?.includes('comms');
 

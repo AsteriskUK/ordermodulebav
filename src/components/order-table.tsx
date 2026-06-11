@@ -499,25 +499,25 @@ export function OrderTable() {
                   </TableCell>
                   <TableCell className="text-xs text-center">
                     <Select
-                      value={order.priority.toString()}
+                      value={(order.priority ?? 5).toString()}
                       onValueChange={(v) => v ? updateOrderPriority(order.id, parseInt(v)) : undefined}
                     >
                       <SelectTrigger className="h-7 text-xs w-[60px] border-0 p-0">
                         <Badge
                           variant="outline"
                           className={`text-xs ${
-                            order.priority === 1
+                            (order.priority ?? 5) === 1
                               ? 'bg-red-100 text-red-800 border-red-300 font-bold'
-                              : order.priority === 2
+                              : (order.priority ?? 5) === 2
                               ? 'bg-orange-100 text-orange-800 border-orange-300'
-                              : order.priority === 3
+                              : (order.priority ?? 5) === 3
                               ? 'bg-yellow-100 text-yellow-800 border-yellow-300'
-                              : order.priority === 4
+                              : (order.priority ?? 5) === 4
                               ? 'bg-blue-100 text-blue-800 border-blue-300'
                               : 'bg-slate-100 text-slate-600 border-slate-300'
                           }`}
                         >
-                          {order.priority}
+                          {order.priority ?? 5}
                         </Badge>
                       </SelectTrigger>
                       <SelectContent>
