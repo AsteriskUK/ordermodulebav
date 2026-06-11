@@ -18,6 +18,7 @@ import {
   BoxSelect,
   PauseCircle,
   PackageOpen,
+  Archive,
 } from 'lucide-react';
 
 const statusIcons: Record<OrderStatus, React.ElementType> = {
@@ -33,6 +34,7 @@ const statusIcons: Record<OrderStatus, React.ElementType> = {
   cancelled: XCircle,
   refunded: RotateCcw,
   returned: PackageOpen,
+  archived: Archive,
 };
 
 export function Dashboard() {

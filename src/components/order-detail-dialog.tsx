@@ -238,7 +238,7 @@ export function OrderDetailDialog({ order, onClose }: Props) {
                 <label className="text-sm text-slate-600">Number of Boxes:</label>
                 <Select
                   value={numberOfBoxes}
-                  onValueChange={setNumberOfBoxes}
+                  onValueChange={(value) => value && setNumberOfBoxes(value)}
                 >
                   <SelectTrigger className="w-[80px]">
                     <SelectValue />
