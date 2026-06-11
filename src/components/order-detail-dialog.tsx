@@ -32,13 +32,16 @@ export function OrderDetailDialog({ order, onClose }: Props) {
   const updateOrderStatus = useOrderStore((s) => s.updateOrderStatus);
   const updateOrderComment = useOrderStore((s) => s.updateOrderComment);
   const updateOrderTracking = useOrderStore((s) => s.updateOrderTracking);
+  const updateOrderNumberOfBoxes = useOrderStore((s) => s.updateOrderNumberOfBoxes);
 
   const [comment, setComment] = useState(order.comments);
   const [tracking, setTracking] = useState(order.trackingNumber);
+  const [numberOfBoxes, setNumberOfBoxes] = useState(order.numberOfBoxes.toString());
 
   const handleSave = () => {
     updateOrderComment(order.id, comment);
     updateOrderTracking(order.id, tracking);
+    updateOrderNumberOfBoxes(order.id, parseInt(numberOfBoxes) || 1);
     toast.success('Order updated');
     onClose();
   };
@@ -196,6 +199,24 @@ export function OrderDetailDialog({ order, onClose }: Props) {
                 value={tracking}
                 onChange={(e) => setTracking(e.target.value)}
               />
+              <div className="flex items-center gap-2">
+                <label className="text-sm text-slate-600">Number of Boxes:</label>
+                <Select
+                  value={numberOfBoxes}
+                  onValueChange={setNumberOfBoxes}
+                >
+                  <SelectTrigger className="w-[80px]">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {[1, 2, 3, 4, 5].map((num) => (
+                      <SelectItem key={num} value={num.toString()}>
+                        {num}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
             </div>
           </div>
 

@@ -68,6 +68,16 @@ export function OrderTable() {
   const [page, setPage] = useState(0);
   const [selectedOrder, setSelectedOrder] = useState<Order | null>(null);
   const [sortDir, setSortDir] = useState<'desc' | 'asc'>('desc');
+  const [sortField, setSortField] = useState<string>('saleDate');
+
+  const handleSort = (field: string) => {
+    if (sortField === field) {
+      setSortDir(sortDir === 'desc' ? 'asc' : 'desc');
+    } else {
+      setSortField(field);
+      setSortDir('asc');
+    }
+  };
 
   const filtered = useMemo(() => {
     let result = [...orders];
@@ -92,16 +102,76 @@ export function OrderTable() {
           o.category.toLowerCase().includes(q)
       );
     }
-    // Sort by priority first (1=highest), then by sale date
+    // Sort by selected field
     result.sort((a, b) => {
-      if (a.priority !== b.priority) {
-        return a.priority - b.priority; // Lower number = higher priority
+      // Priority sorting (lower number = higher priority)
+      if (sortField === 'priority') {
+        return a.priority - b.priority;
       }
-      const dir = sortDir === 'desc' ? -1 : 1;
-      return dir * (new Date(a.saleDate).getTime() - new Date(b.saleDate).getTime());
+      
+      // Date sorting
+      if (sortField === 'saleDate') {
+        const dir = sortDir === 'desc' ? -1 : 1;
+        return dir * (new Date(a.saleDate).getTime() - new Date(b.saleDate).getTime());
+      }
+      
+      // Post by date sorting
+      if (sortField === 'postByDate') {
+        const aDate = a.postByDate ? new Date(a.postByDate).getTime() : 0;
+        const bDate = b.postByDate ? new Date(b.postByDate).getTime() : 0;
+        const dir = sortDir === 'desc' ? -1 : 1;
+        return dir * (aDate - bDate);
+      }
+      
+      // Numeric sorting
+      if (sortField === 'quantity') {
+        const dir = sortDir === 'desc' ? -1 : 1;
+        return dir * (a.quantity - b.quantity);
+      }
+      
+      // String sorting
+      let aValue: string = '';
+      let bValue: string = '';
+      
+      switch (sortField) {
+        case 'salesRecordNumber':
+          aValue = a.salesRecordNumber;
+          bValue = b.salesRecordNumber;
+          break;
+        case 'postToName':
+          aValue = a.postToName;
+          bValue = b.postToName;
+          break;
+        case 'itemTitle':
+          aValue = a.itemTitle;
+          bValue = b.itemTitle;
+          break;
+        case 'category':
+          aValue = a.category || '';
+          bValue = b.category || '';
+          break;
+        case 'status':
+          aValue = a.status;
+          bValue = b.status;
+          break;
+        case 'buyerUsername':
+          aValue = a.buyerUsername;
+          bValue = b.buyerUsername;
+          break;
+        case 'buyerNote':
+          aValue = a.buyerNote;
+          bValue = b.buyerNote;
+          break;
+        default:
+          aValue = a.salesRecordNumber;
+          bValue = b.salesRecordNumber;
+      }
+      
+      const comparison = aValue.localeCompare(bValue);
+      return sortDir === 'desc' ? -comparison : comparison;
     });
     return result;
-  }, [orders, statusFilter, categoryFilter, search, sortDir]);
+  }, [orders, statusFilter, categoryFilter, search, sortDir, sortField]);
 
   const totalPages = Math.ceil(filtered.length / PAGE_SIZE);
   const pageOrders = filtered.slice(page * PAGE_SIZE, (page + 1) * PAGE_SIZE);
@@ -253,17 +323,127 @@ export function OrderTable() {
                   )}
                 </button>
               </TableHead>
-              <TableHead className="text-xs">Order #</TableHead>
-              <TableHead className="text-xs">Date</TableHead>
-              <TableHead className="text-xs">Customer</TableHead>
-              <TableHead className="text-xs max-w-[250px]">Item</TableHead>
-              <TableHead className="text-xs">Qty</TableHead>
-              <TableHead className="text-xs">Priority</TableHead>
-              <TableHead className="text-xs">Post By Date</TableHead>
-              <TableHead className="text-xs">Category</TableHead>
-              <TableHead className="text-xs">Status</TableHead>
-              <TableHead className="text-xs">User ID</TableHead>
-              <TableHead className="text-xs max-w-[200px]">Buyer Note</TableHead>
+              <TableHead 
+                className="text-xs cursor-pointer hover:bg-slate-100 transition-colors"
+                onClick={() => handleSort('salesRecordNumber')}
+              >
+                <div className="flex items-center gap-1">
+                  Order #
+                  {sortField === 'salesRecordNumber' && (
+                    sortDir === 'desc' ? <ArrowDown className="h-3 w-3" /> : <ArrowUp className="h-3 w-3" />
+                  )}
+                </div>
+              </TableHead>
+              <TableHead 
+                className="text-xs cursor-pointer hover:bg-slate-100 transition-colors"
+                onClick={() => handleSort('saleDate')}
+              >
+                <div className="flex items-center gap-1">
+                  Date
+                  {sortField === 'saleDate' && (
+                    sortDir === 'desc' ? <ArrowDown className="h-3 w-3" /> : <ArrowUp className="h-3 w-3" />
+                  )}
+                </div>
+              </TableHead>
+              <TableHead 
+                className="text-xs cursor-pointer hover:bg-slate-100 transition-colors"
+                onClick={() => handleSort('postToName')}
+              >
+                <div className="flex items-center gap-1">
+                  Customer
+                  {sortField === 'postToName' && (
+                    sortDir === 'desc' ? <ArrowDown className="h-3 w-3" /> : <ArrowUp className="h-3 w-3" />
+                  )}
+                </div>
+              </TableHead>
+              <TableHead 
+                className="text-xs max-w-[250px] cursor-pointer hover:bg-slate-100 transition-colors"
+                onClick={() => handleSort('itemTitle')}
+              >
+                <div className="flex items-center gap-1">
+                  Item
+                  {sortField === 'itemTitle' && (
+                    sortDir === 'desc' ? <ArrowDown className="h-3 w-3" /> : <ArrowUp className="h-3 w-3" />
+                  )}
+                </div>
+              </TableHead>
+              <TableHead 
+                className="text-xs cursor-pointer hover:bg-slate-100 transition-colors"
+                onClick={() => handleSort('quantity')}
+              >
+                <div className="flex items-center gap-1">
+                  Qty
+                  {sortField === 'quantity' && (
+                    sortDir === 'desc' ? <ArrowDown className="h-3 w-3" /> : <ArrowUp className="h-3 w-3" />
+                  )}
+                </div>
+              </TableHead>
+              <TableHead 
+                className="text-xs cursor-pointer hover:bg-slate-100 transition-colors"
+                onClick={() => handleSort('priority')}
+              >
+                <div className="flex items-center gap-1">
+                  Priority
+                  {sortField === 'priority' && (
+                    sortDir === 'desc' ? <ArrowDown className="h-3 w-3" /> : <ArrowUp className="h-3 w-3" />
+                  )}
+                </div>
+              </TableHead>
+              <TableHead 
+                className="text-xs cursor-pointer hover:bg-slate-100 transition-colors"
+                onClick={() => handleSort('postByDate')}
+              >
+                <div className="flex items-center gap-1">
+                  Post By Date
+                  {sortField === 'postByDate' && (
+                    sortDir === 'desc' ? <ArrowDown className="h-3 w-3" /> : <ArrowUp className="h-3 w-3" />
+                  )}
+                </div>
+              </TableHead>
+              <TableHead 
+                className="text-xs cursor-pointer hover:bg-slate-100 transition-colors"
+                onClick={() => handleSort('category')}
+              >
+                <div className="flex items-center gap-1">
+                  Category
+                  {sortField === 'category' && (
+                    sortDir === 'desc' ? <ArrowDown className="h-3 w-3" /> : <ArrowUp className="h-3 w-3" />
+                  )}
+                </div>
+              </TableHead>
+              <TableHead 
+                className="text-xs cursor-pointer hover:bg-slate-100 transition-colors"
+                onClick={() => handleSort('status')}
+              >
+                <div className="flex items-center gap-1">
+                  Status
+                  {sortField === 'status' && (
+                    sortDir === 'desc' ? <ArrowDown className="h-3 w-3" /> : <ArrowUp className="h-3 w-3" />
+                  )}
+                </div>
+              </TableHead>
+              <TableHead 
+                className="text-xs cursor-pointer hover:bg-slate-100 transition-colors"
+                onClick={() => handleSort('buyerUsername')}
+              >
+                <div className="flex items-center gap-1">
+                  User ID
+                  {sortField === 'buyerUsername' && (
+                    sortDir === 'desc' ? <ArrowDown className="h-3 w-3" /> : <ArrowUp className="h-3 w-3" />
+                  )}
+                </div>
+              </TableHead>
+              <TableHead 
+                className="text-xs max-w-[200px] cursor-pointer hover:bg-slate-100 transition-colors"
+                onClick={() => handleSort('buyerNote')}
+              >
+                <div className="flex items-center gap-1">
+                  Buyer Note
+                  {sortField === 'buyerNote' && (
+                    sortDir === 'desc' ? <ArrowDown className="h-3 w-3" /> : <ArrowUp className="h-3 w-3" />
+                  )}
+                </div>
+              </TableHead>
               <TableHead className="text-xs w-10"></TableHead>
             </TableRow>
           </TableHeader>
