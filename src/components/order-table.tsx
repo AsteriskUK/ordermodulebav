@@ -41,8 +41,10 @@ import {
   ArrowUpDown,
   ArrowUp,
   ArrowDown,
+  CheckCircle2,
 } from 'lucide-react';
 import { generateBatchShipCSV } from '@/lib/csv-parser';
+import { DeliveryBadge } from './delivery-badge';
 import { toast } from 'sonner';
 import { OrderDetailDialog } from './order-detail-dialog';
 
@@ -308,7 +310,7 @@ export function OrderTable() {
       </div>
 
       {/* Table */}
-      <div className="border rounded-lg overflow-hidden bg-white">
+      <div className="border rounded-lg overflow-x-auto bg-white w-full">
         <Table>
           <TableHeader>
             <TableRow className="bg-slate-50">
@@ -339,7 +341,7 @@ export function OrderTable() {
                 onClick={() => handleSort('postByDate')}
               >
                 <div className="flex items-center gap-1">
-                  Date
+                  Post By
                   {sortField === 'postByDate' && (
                     sortDir === 'desc' ? <ArrowDown className="h-3 w-3" /> : <ArrowUp className="h-3 w-3" />
                   )}
@@ -357,12 +359,23 @@ export function OrderTable() {
                 </div>
               </TableHead>
               <TableHead 
-                className="text-xs max-w-[250px] cursor-pointer hover:bg-slate-100 transition-colors"
+                className="text-xs cursor-pointer hover:bg-slate-100 transition-colors"
                 onClick={() => handleSort('itemTitle')}
               >
                 <div className="flex items-center gap-1">
                   Item
                   {sortField === 'itemTitle' && (
+                    sortDir === 'desc' ? <ArrowDown className="h-3 w-3" /> : <ArrowUp className="h-3 w-3" />
+                  )}
+                </div>
+              </TableHead>
+              <TableHead 
+                className="text-xs cursor-pointer hover:bg-slate-100 transition-colors"
+                onClick={() => handleSort('buyerNote')}
+              >
+                <div className="flex items-center gap-1">
+                  Note
+                  {sortField === 'buyerNote' && (
                     sortDir === 'desc' ? <ArrowDown className="h-3 w-3" /> : <ArrowUp className="h-3 w-3" />
                   )}
                 </div>
@@ -391,17 +404,6 @@ export function OrderTable() {
               </TableHead>
               <TableHead 
                 className="text-xs cursor-pointer hover:bg-slate-100 transition-colors"
-                onClick={() => handleSort('postByDate')}
-              >
-                <div className="flex items-center gap-1">
-                  Post By Date
-                  {sortField === 'postByDate' && (
-                    sortDir === 'desc' ? <ArrowDown className="h-3 w-3" /> : <ArrowUp className="h-3 w-3" />
-                  )}
-                </div>
-              </TableHead>
-              <TableHead 
-                className="text-xs cursor-pointer hover:bg-slate-100 transition-colors"
                 onClick={() => handleSort('category')}
               >
                 <div className="flex items-center gap-1">
@@ -422,35 +424,13 @@ export function OrderTable() {
                   )}
                 </div>
               </TableHead>
-              <TableHead 
-                className="text-xs cursor-pointer hover:bg-slate-100 transition-colors"
-                onClick={() => handleSort('buyerUsername')}
-              >
-                <div className="flex items-center gap-1">
-                  User ID
-                  {sortField === 'buyerUsername' && (
-                    sortDir === 'desc' ? <ArrowDown className="h-3 w-3" /> : <ArrowUp className="h-3 w-3" />
-                  )}
-                </div>
-              </TableHead>
-              <TableHead 
-                className="text-xs max-w-[200px] cursor-pointer hover:bg-slate-100 transition-colors"
-                onClick={() => handleSort('buyerNote')}
-              >
-                <div className="flex items-center gap-1">
-                  Buyer Note
-                  {sortField === 'buyerNote' && (
-                    sortDir === 'desc' ? <ArrowDown className="h-3 w-3" /> : <ArrowUp className="h-3 w-3" />
-                  )}
-                </div>
-              </TableHead>
               <TableHead className="text-xs w-10"></TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
             {pageOrders.length === 0 ? (
               <TableRow>
-                <TableCell colSpan={12} className="text-center py-8 text-slate-500">
+                <TableCell colSpan={10} className="text-center py-8 text-slate-500">
                   {orders.length === 0
                     ? 'No orders imported yet. Go to Import Orders to get started.'
                     : 'No orders match your filters.'}
@@ -477,22 +457,26 @@ export function OrderTable() {
                       )}
                     </button>
                   </TableCell>
-                  <TableCell className="font-mono text-xs">
-                    {order.salesRecordNumber}
+                  <TableCell className="font-mono text-xs whitespace-nowrap">
+                    <div>{order.salesRecordNumber}</div>
+                    {order.buyerUsername && (
+                      <div className="text-slate-400 text-[10px]">{order.buyerUsername}</div>
+                    )}
                   </TableCell>
-                  <TableCell className="text-xs text-slate-600">
-                    {order.saleDate
-                      ? new Date(order.saleDate).toLocaleDateString('en-GB')
+                  <TableCell className="text-xs text-slate-600 whitespace-nowrap">
+                    {order.postByDate
+                      ? new Date(order.postByDate).toLocaleDateString('en-GB')
                       : '-'}
                   </TableCell>
                   <TableCell className="text-xs">
                     <div className="font-medium">{order.postToName}</div>
-                    {order.buyerUsername && (
-                      <div className="text-slate-400">{order.buyerUsername}</div>
-                    )}
+                    <DeliveryBadge deliveryType={order.deliveryType} deliveryCarrier={order.deliveryCarrier} />
                   </TableCell>
-                  <TableCell className="text-xs max-w-[250px] truncate">
+                  <TableCell className="text-xs max-w-[200px] truncate">
                     {order.itemTitle}
+                  </TableCell>
+                  <TableCell className="text-xs max-w-[150px] truncate text-slate-500">
+                    {order.buyerNote || '-'}
                   </TableCell>
                   <TableCell className="text-xs text-center">
                     {order.quantity}
@@ -537,12 +521,7 @@ export function OrderTable() {
                       </SelectContent>
                     </Select>
                   </TableCell>
-                  <TableCell className="text-xs text-slate-600">
-                    {order.postByDate
-                      ? new Date(order.postByDate).toLocaleDateString('en-GB')
-                      : '-'}
-                  </TableCell>
-                  <TableCell onClick={(e) => e.stopPropagation()} className="min-w-[120px]">
+                  <TableCell onClick={(e) => e.stopPropagation()} className="min-w-[100px]">
                     <Select
                       value={order.category || 'N/A'}
                       onValueChange={(v) => v ? updateOrderCategory(order.id, v) : undefined}
@@ -567,6 +546,7 @@ export function OrderTable() {
                     </Select>
                   </TableCell>
                   <TableCell onClick={(e) => e.stopPropagation()}>
+                    <div className="flex flex-col gap-1">
                     <Select
                       value={order.status}
                       onValueChange={(v) =>
@@ -591,12 +571,16 @@ export function OrderTable() {
                         )}
                       </SelectContent>
                     </Select>
-                  </TableCell>
-                  <TableCell className="text-xs text-slate-500 font-mono">
-                    {order.buyerUsername}
-                  </TableCell>
-                  <TableCell className="text-xs max-w-[200px] truncate">
-                    {order.buyerNote || '-'}
+                    {order.labelPrintedAt && (
+                      <span
+                        className="flex items-center gap-1 text-xs text-green-700 bg-green-50 border border-green-300 rounded px-1.5 py-0.5 whitespace-nowrap w-fit"
+                        title={`Label printed ${new Date(order.labelPrintedAt).toLocaleString('en-GB')} via ${order.labelCarrier ?? ''}`}
+                      >
+                        <CheckCircle2 className="h-3 w-3" />
+                        Label printed
+                      </span>
+                    )}
+                    </div>
                   </TableCell>
                   <TableCell onClick={(e) => e.stopPropagation()}>
                     <DropdownMenu>

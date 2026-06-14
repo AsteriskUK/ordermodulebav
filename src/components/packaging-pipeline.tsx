@@ -34,8 +34,10 @@ import {
   PackageX,
   Truck,
   Globe,
+  MessageSquare,
 } from 'lucide-react';
 import { toast } from 'sonner';
+import { DeliveryBadge } from './delivery-badge';
 
 function getAllowedCategories(depts: Department[]): string[] | null {
   const cats: string[] = [];
@@ -58,6 +60,7 @@ export function PackagingPipeline() {
   const [activeOrderId, setActiveOrderId] = useState<string | null>(null);
   const activeOrder = orders.find((o) => o.id === activeOrderId) ?? null;
   const [showVariationDetails, setShowVariationDetails] = useState(false);
+  const [variationOnly, setVariationOnly] = useState(false);
 
   const currentUser = users.find((u) => u.id === currentUserId);
   const isAdmin = currentUser?.role === 'admin' || currentUser?.role === 'manager';
@@ -67,37 +70,23 @@ export function PackagingPipeline() {
   const allowedCategories = isAdmin ? null : getAllowedCategories(userDepts);
 
   const visibleOrders = useMemo(() => {
-    let filtered = orders;
+    // Exclude orphan ghost rows (no address AND no postcode — from old multi-line-item imports)
+    const nonOrphans = orders.filter((o) =>
+      (o.postToAddress1 && o.postToAddress1.trim() !== '') ||
+      (o.postToPostcode && o.postToPostcode.trim() !== '')
+    );
+    let filtered = nonOrphans;
     if (!allowedCategories) {
-      filtered = orders;
+      filtered = nonOrphans;
     } else {
-      filtered = orders.filter((o) => allowedCategories.includes(o.category));
+      filtered = nonOrphans.filter((o) => allowedCategories.includes(o.category));
     }
     
-    // For packaging queue, only show one order per customer to avoid duplicates
-    const customerOrders = new Map<string, Order>();
-    
-    filtered.forEach(order => {
-      const customerKey = order.buyerUsername || order.postToName;
-      if (!customerOrders.has(customerKey)) {
-        customerOrders.set(customerKey, order);
-      } else {
-        // If customer already has an order, check if this one should replace it
-        const existingOrder = customerOrders.get(customerKey)!;
-        // Prioritize orders with higher priority (lower number) or earlier date
-        if ((order.priority ?? 5) < (existingOrder.priority ?? 5) || 
-            (order.priority === existingOrder.priority && order.saleDate < existingOrder.saleDate)) {
-          customerOrders.set(customerKey, order);
-        }
-      }
+    return filtered.sort((a, b) => {
+      const dateA = new Date(a.postByDate || a.saleDate).getTime();
+      const dateB = new Date(b.postByDate || b.saleDate).getTime();
+      return dateB - dateA;
     });
-    
-    return Array.from(customerOrders.values()).sort((a, b) => {
-    // Sort by postByDate descending (earlier dates first)
-    const dateA = new Date(a.postByDate || a.saleDate).getTime();
-    const dateB = new Date(b.postByDate || b.saleDate).getTime();
-    return dateB - dateA;
-  });
   }, [orders, allowedCategories]);
 
   const pendingOrders = useMemo(
@@ -382,10 +371,19 @@ export function PackagingPipeline() {
                     {s.orders.map((order) => (
                       <div
                         key={order.id}
-                        onClick={() => setActiveOrderId(order.id === activeOrderId ? null : order.id)}
+                        onClick={() => {
+                          const newId = order.id === activeOrderId ? null : order.id;
+                          setActiveOrderId(newId);
+                          if (newId && order.variation) {
+                            setVariationOnly(true);
+                            setShowVariationDetails(true);
+                          }
+                        }}
                         className={`p-3 border rounded-lg bg-white hover:shadow-sm transition-all cursor-pointer ${
                           order.id === activeOrderId
                             ? 'border-blue-400 ring-2 ring-blue-200 bg-blue-50'
+                            : order.deliveryType === 'express'
+                            ? 'border-red-400 ring-1 ring-red-200 bg-red-50'
                             : 'hover:border-slate-300'
                         }`}
                       >
@@ -401,17 +399,30 @@ export function PackagingPipeline() {
                               {order.postToName} • User ID: {order.buyerUsername}
                             </p>
                             {order.customLabel && (
-                              <button
-                                onClick={(e) => {
-                                  e.stopPropagation();
-                                  alert(`SKU: ${order.customLabel}\nVariation: ${order.variation || 'N/A'}\nItem Number: ${order.itemNumber}`);
-                                }}
-                                className="text-xs font-mono text-slate-400 mt-0.5 hover:text-slate-600 hover:underline cursor-pointer"
-                                title="Click for variation details"
-                              >
+                              <p className="text-xs font-mono text-slate-400 mt-0.5">
                                 SKU: {order.customLabel}
-                              </button>
+                              </p>
                             )}
+                            {order.variation && (
+                              <p className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded px-1.5 py-0.5 mt-1 font-medium">
+                                ⚠ Variation: {order.variation}
+                              </p>
+                            )}
+                            {(order.notes?.length ?? 0) > 0 && (
+                              <div className="mt-1 flex items-start gap-1">
+                                <MessageSquare className="h-3 w-3 text-blue-400 shrink-0 mt-0.5" />
+                                <p className="text-xs text-blue-600 line-clamp-2">
+                                  <span className="font-medium">{order.notes![order.notes!.length - 1].authorName}:</span>{' '}
+                                  {order.notes![order.notes!.length - 1].text}
+                                  {order.notes!.length > 1 && (
+                                    <span className="text-blue-400 ml-1">(+{order.notes!.length - 1} more)</span>
+                                  )}
+                                </p>
+                              </div>
+                            )}
+                            <div className="flex items-center gap-1 mt-1">
+                              <DeliveryBadge deliveryType={order.deliveryType} deliveryCarrier={order.deliveryCarrier} />
+                            </div>
                             {order.isGSP && (
                               <p className="text-xs text-blue-600 mt-0.5 flex items-center gap-1">
                                 <Globe className="h-3 w-3" />
@@ -596,53 +607,110 @@ export function PackagingPipeline() {
             </Table>
           </CardContent>
         </Card>
-      })}
-  )}
+      )}
 
       {/* Variation Details Modal */}
       {showVariationDetails && activeOrder && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
           <div className="bg-white rounded-lg p-6 max-w-md w-full mx-4">
-            <h3 className="text-lg font-semibold mb-4">Variation Details</h3>
-            <div className="space-y-3">
-              <div>
-                <span className="text-sm font-medium text-slate-600">Order Number:</span>
-                <p className="text-sm">{activeOrder?.salesRecordNumber}</p>
-              </div>
-              <div>
-                <span className="text-sm font-medium text-slate-600">Item Title:</span>
-                <p className="text-sm">{activeOrder?.itemTitle}</p>
-              </div>
-              <div>
-                <span className="text-sm font-medium text-slate-600">SKU/Custom Label:</span>
-                <p className="text-sm">{activeOrder?.customLabel || 'N/A'}</p>
-              </div>
-              <div>
-                <span className="text-sm font-medium text-slate-600">Quantity:</span>
-                <p className="text-sm">{activeOrder?.quantity}</p>
-              </div>
-              <div>
-                <span className="text-sm font-medium text-slate-600">Category:</span>
-                <p className="text-sm">{activeOrder?.category || 'N/A'}</p>
-              </div>
-              <div>
-                <span className="text-sm font-medium text-slate-600">Post By Date:</span>
-                <p className="text-sm">{activeOrder?.postByDate || 'N/A'}</p>
-              </div>
-              <div>
-                <span className="text-sm font-medium text-slate-600">Buyer Note:</span>
-                <p className="text-sm">{activeOrder?.buyerNote || 'No notes'}</p>
-              </div>
-            </div>
-            <div className="flex justify-end gap-2 mt-6">
-              <Button
-                size="sm"
-                variant="outline"
-                onClick={() => setShowVariationDetails(false)}
-              >
-                Close
-              </Button>
-            </div>
+            {variationOnly ? (
+              <>
+                <div className="flex items-center gap-2 mb-4">
+                  <AlertTriangle className="h-5 w-5 text-amber-500" />
+                  <h3 className="text-lg font-semibold text-amber-700">Variation Detected</h3>
+                </div>
+                <p className="text-sm text-slate-600 mb-4">
+                  This order has a variation. Please ensure you pick the correct item before proceeding.
+                </p>
+                <div className="space-y-3 bg-amber-50 border border-amber-200 rounded-lg p-4">
+                  <div>
+                    <span className="text-xs font-medium text-slate-500 uppercase tracking-wide">Order #</span>
+                    <p className="text-sm font-mono font-bold">{activeOrder.salesRecordNumber}</p>
+                  </div>
+                  <div>
+                    <span className="text-xs font-medium text-slate-500 uppercase tracking-wide">Variation</span>
+                    <p className="text-base font-semibold text-amber-800">{activeOrder.variation}</p>
+                  </div>
+                  {activeOrder.customLabel && (
+                    <div>
+                      <span className="text-xs font-medium text-slate-500 uppercase tracking-wide">SKU</span>
+                      <p className="text-sm font-mono">{activeOrder.customLabel}</p>
+                    </div>
+                  )}
+                  <div>
+                    <span className="text-xs font-medium text-slate-500 uppercase tracking-wide">Item</span>
+                    <p className="text-sm">{activeOrder.itemTitle}</p>
+                  </div>
+                  <div>
+                    <span className="text-xs font-medium text-slate-500 uppercase tracking-wide">Qty</span>
+                    <p className="text-sm font-bold">{activeOrder.quantity}</p>
+                  </div>
+                </div>
+                <div className="flex justify-between items-center mt-6">
+                  <button
+                    className="text-xs text-slate-400 hover:text-slate-600 underline"
+                    onClick={() => setVariationOnly(false)}
+                  >
+                    Show all details
+                  </button>
+                  <Button
+                    size="sm"
+                    onClick={() => { setShowVariationDetails(false); setVariationOnly(false); }}
+                  >
+                    Got it
+                  </Button>
+                </div>
+              </>
+            ) : (
+              <>
+                <h3 className="text-lg font-semibold mb-4">Order Details</h3>
+                <div className="space-y-3">
+                  <div>
+                    <span className="text-sm font-medium text-slate-600">Order Number:</span>
+                    <p className="text-sm">{activeOrder.salesRecordNumber}</p>
+                  </div>
+                  <div>
+                    <span className="text-sm font-medium text-slate-600">Item Title:</span>
+                    <p className="text-sm">{activeOrder.itemTitle}</p>
+                  </div>
+                  {activeOrder.variation && (
+                    <div className="bg-amber-50 border border-amber-200 rounded p-3">
+                      <span className="text-sm font-medium text-amber-700">Variation:</span>
+                      <p className="text-sm font-semibold text-amber-800">{activeOrder.variation}</p>
+                    </div>
+                  )}
+                  <div>
+                    <span className="text-sm font-medium text-slate-600">SKU/Custom Label:</span>
+                    <p className="text-sm">{activeOrder.customLabel || 'N/A'}</p>
+                  </div>
+                  <div>
+                    <span className="text-sm font-medium text-slate-600">Quantity:</span>
+                    <p className="text-sm">{activeOrder.quantity}</p>
+                  </div>
+                  <div>
+                    <span className="text-sm font-medium text-slate-600">Category:</span>
+                    <p className="text-sm">{activeOrder.category || 'N/A'}</p>
+                  </div>
+                  <div>
+                    <span className="text-sm font-medium text-slate-600">Post By Date:</span>
+                    <p className="text-sm">{activeOrder.postByDate || 'N/A'}</p>
+                  </div>
+                  <div>
+                    <span className="text-sm font-medium text-slate-600">Buyer Note:</span>
+                    <p className="text-sm">{activeOrder.buyerNote || 'No notes'}</p>
+                  </div>
+                </div>
+                <div className="flex justify-end gap-2 mt-6">
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={() => { setShowVariationDetails(false); setVariationOnly(false); }}
+                  >
+                    Close
+                  </Button>
+                </div>
+              </>
+            )}
           </div>
         </div>
       )}

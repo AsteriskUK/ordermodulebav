@@ -19,6 +19,8 @@ import {
   Users,
   BarChart2,
   ArrowRight,
+  Sparkles,
+  Loader2,
 } from 'lucide-react';
 
 const PAGES = [
@@ -55,8 +57,45 @@ export function GlobalSearch() {
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState('');
   const [active, setActive] = useState(0);
+  const [aiLoading, setAiLoading] = useState(false);
+  const [aiResultIds, setAiResultIds] = useState<string[] | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
   const listRef = useRef<HTMLDivElement>(null);
+
+  const looksLikeNaturalLanguage = query.trim().split(/\s+/).length >= 3;
+
+  const handleAiSearch = async () => {
+    if (!query.trim() || aiLoading) return;
+    setAiLoading(true);
+    setAiResultIds(null);
+    try {
+      const payload = orders.map((o) => ({
+        id: o.id,
+        salesRecordNumber: o.salesRecordNumber,
+        itemTitle: o.itemTitle,
+        status: o.status,
+        postToCity: o.postToCity,
+        postToPostcode: o.postToPostcode,
+        postToCountry: o.postToCountry,
+        totalPrice: o.totalPrice,
+        deliveryCarrier: o.deliveryCarrier,
+        category: o.category,
+        buyerUsername: o.buyerUsername,
+        postToName: o.postToName,
+      }));
+      const res = await fetch('/api/ai/search-orders', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ query, orders: payload }),
+      });
+      const data = await res.json();
+      setAiResultIds(Array.isArray(data.ids) ? data.ids : []);
+    } catch {
+      setAiResultIds([]);
+    } finally {
+      setAiLoading(false);
+    }
+  };
 
   // ⌘K / Ctrl+K to open
   useEffect(() => {
@@ -75,9 +114,12 @@ export function GlobalSearch() {
     if (open) {
       setQuery('');
       setActive(0);
+      setAiResultIds(null);
       setTimeout(() => inputRef.current?.focus(), 30);
     }
   }, [open]);
+
+  useEffect(() => { setAiResultIds(null); }, [query]);
 
   const results = useMemo<Result[]>(() => {
     const q = query.trim().toLowerCase();
@@ -149,8 +191,27 @@ export function GlobalSearch() {
       });
     }
 
+    // If AI search has returned results, prepend them as a deduplicated AI section
+    if (aiResultIds !== null) {
+      const aiOrders = orders.filter((o) => aiResultIds.includes(o.id));
+      const aiResults: Result[] = aiOrders.map((o) => {
+        const cfg = ORDER_STATUS_CONFIG[o.status];
+        return {
+          kind: 'order' as ResultKind,
+          id: `ai-${o.id}`,
+          label: `#${o.salesRecordNumber} — ${o.postToName}`,
+          sub: o.itemTitle.length > 60 ? o.itemTitle.slice(0, 60) + '…' : o.itemTitle,
+          href: `/orders`,
+          badge: cfg.label,
+          badgeColor: cfg.color,
+          icon: Sparkles,
+        };
+      });
+      return aiResults.length ? aiResults : out;
+    }
+
     return out;
-  }, [query, orders, returns]);
+  }, [query, orders, returns, aiResultIds]);
 
   useEffect(() => { setActive(0); }, [results]);
 
@@ -214,6 +275,17 @@ export function GlobalSearch() {
                   <X className="h-4 w-4" />
                 </button>
               )}
+              {looksLikeNaturalLanguage && (
+                <button
+                  onClick={handleAiSearch}
+                  disabled={aiLoading}
+                  className="flex items-center gap-1 text-xs px-2 py-1 rounded-md bg-purple-100 text-purple-700 hover:bg-purple-200 transition-colors disabled:opacity-50 shrink-0"
+                  title="Search with AI"
+                >
+                  {aiLoading ? <Loader2 className="h-3 w-3 animate-spin" /> : <Sparkles className="h-3 w-3" />}
+                  Ask AI
+                </button>
+              )}
               <kbd
                 className="rounded border border-slate-200 px-1.5 py-0.5 text-xs font-mono text-slate-400 cursor-pointer hover:bg-slate-50"
                 onClick={() => setOpen(false)}
@@ -235,8 +307,9 @@ export function GlobalSearch() {
                     const sectionLabel = kind === 'page' ? 'Pages' : kind === 'order' ? 'Orders' : 'Returns';
                     return (
                       <div key={kind}>
-                        <div className="px-4 py-1.5 text-xs font-semibold text-slate-400 uppercase tracking-wide">
-                          {sectionLabel}
+                        <div className="px-4 py-1.5 text-xs font-semibold text-slate-400 uppercase tracking-wide flex items-center gap-1.5">
+                          {aiResultIds !== null && kind === 'order' && <Sparkles className="h-3 w-3 text-purple-400" />}
+                          {aiResultIds !== null && kind === 'order' ? 'AI Results' : sectionLabel}
                         </div>
                         {group.map((result) => {
                           const idx = results.indexOf(result);

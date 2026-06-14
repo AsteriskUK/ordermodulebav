@@ -16,6 +16,8 @@ import {
   LogOut,
   ChevronLeft,
   ChevronRight,
+  MessageSquare,
+  FilePlus,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useOrderStore } from '@/lib/store';
@@ -25,9 +27,11 @@ import { GlobalSearch } from './global-search';
 const ALL_NAV = [
   { name: 'Dashboard', href: '/', icon: LayoutDashboard, staffVisible: true },
   { name: 'Import Orders', href: '/import', icon: Upload, staffVisible: false },
+  { name: 'Create Order', href: '/orders/new', icon: FilePlus, staffVisible: false },
   { name: 'Batch Shipping', href: '/shipping', icon: Truck, staffVisible: false },
   { name: 'Order Sheet', href: '/orders', icon: ClipboardList, staffVisible: false },
   { name: 'Queue', href: '/packaging', icon: Workflow, staffVisible: true },
+  { name: 'Notes', href: '/notes', icon: MessageSquare, staffVisible: true },
   { name: 'Batches', href: '/batches', icon: Package, staffVisible: false },
   { name: 'Returns', href: '/returns', icon: PackageOpen, staffVisible: false },
   { name: 'Reports', href: '/reports', icon: BarChart2, staffVisible: false },
@@ -40,6 +44,7 @@ export function Sidebar({ collapsed, onToggle }: { collapsed: boolean; onToggle:
   const users = useOrderStore((s) => s.users);
   const currentUserId = useOrderStore((s) => s.currentUserId);
   const currentUser = users.find((u) => u.id === currentUserId);
+  const totalNotes = useOrderStore((s) => s.orders.reduce((sum, o) => sum + (o.notes?.length ?? 0), 0));
 
   const setCurrentUser = useOrderStore((s) => s.setCurrentUser);
   const isAdminOrManager = currentUser?.role === 'admin' || currentUser?.role === 'manager';
@@ -53,7 +58,7 @@ export function Sidebar({ collapsed, onToggle }: { collapsed: boolean; onToggle:
   return (
     <aside className={`${
       collapsed ? 'w-16' : 'w-64'
-    } bg-slate-900 text-white flex flex-col min-h-screen transition-all duration-300`}>
+    } bg-slate-900 text-white flex flex-col h-full flex-shrink-0 transition-all duration-300`}>
       <div className="p-4 border-b border-slate-700 flex items-center justify-between">
         {!collapsed && (
           <div>
@@ -80,7 +85,7 @@ export function Sidebar({ collapsed, onToggle }: { collapsed: boolean; onToggle:
           <GlobalSearch />
         </div>
       )}
-      <nav className="flex-1 p-3 space-y-1">
+      <nav className="flex-1 p-3 space-y-1 overflow-y-auto">
         {navigation.map((item) => {
           const isActive = pathname === item.href;
           return (
@@ -96,7 +101,12 @@ export function Sidebar({ collapsed, onToggle }: { collapsed: boolean; onToggle:
               title={collapsed ? item.name : undefined}
             >
               <item.icon className="h-4 w-4 flex-shrink-0" />
-              {!collapsed && <span>{item.name}</span>}
+              {!collapsed && <span className="flex-1">{item.name}</span>}
+              {!collapsed && item.href === '/notes' && totalNotes > 0 && (
+                <span className="ml-auto bg-blue-500 text-white text-[10px] font-bold rounded-full px-1.5 py-0.5 leading-none">
+                  {totalNotes}
+                </span>
+              )}
             </Link>
           );
         })}

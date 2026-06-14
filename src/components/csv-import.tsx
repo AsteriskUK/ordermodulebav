@@ -1,7 +1,7 @@
 'use client';
 
-import { useState, useRef } from 'react';
-import { Upload, FileText, CheckCircle, AlertCircle, Printer, Download, Tag } from 'lucide-react';
+import { useState, useRef, useEffect } from 'react';
+import { Upload, FileText, CheckCircle, AlertCircle, Printer, Download, Tag, RefreshCw, ShoppingBag, Wifi, WifiOff, Sparkles } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { parseCSV } from '@/lib/csv-parser';
@@ -72,7 +72,7 @@ function buildInvoicesHtml(orders: Order[]): string {
         <div class="col">
           <p class="label">Order Details</p>
           <p>Sale Date: ${o.saleDate || o.paidOnDate || '—'}</p>
-          <p>Source: ${o.batchId.includes('batch') ? 'eBay' : 'BackMarket'}</p>
+          <p>Source: ${o.batchId}</p>
           ${o.customLabel ? `<p>SKU: ${o.customLabel}</p>` : ''}
           ${o.trackingNumber ? `<p>Tracking: ${o.trackingNumber}</p>` : ''}
         </div>
@@ -152,13 +152,78 @@ export function CSVImport() {
   const [dragActive, setDragActive] = useState(false);
   const [preview, setPreview] = useState<{
     orders: Order[];
-    format: string;
+    format: 'ebay' | 'backmarket' | 'amazon' | 'temu' | 'onbuy';
     fileName: string;
   } | null>(null);
   const [importing, setImporting] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
+  // eBay direct import state
+  const [ebayConnected, setEbayConnected] = useState<boolean | null>(null);
+  const [ebayEnvToken, setEbayEnvToken] = useState(false);
+  const [ebayFetching, setEbayFetching] = useState(false);
+  const [ebayDays, setEbayDays] = useState(7);
+
   const addOrders = useOrderStore((s) => s.addOrders);
+  const updateOrderCategory = useOrderStore((s) => s.updateOrderCategory);
+  const [aiCategorising, setAiCategorising] = useState(false);
+
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    if (params.get('ebay_connected') === '1') {
+      setEbayConnected(true);
+      toast.success('eBay account connected successfully!');
+      window.history.replaceState({}, '', '/import');
+    } else if (params.get('ebay_error')) {
+      toast.error(`eBay connection failed: ${params.get('ebay_error')}`);
+      window.history.replaceState({}, '', '/import');
+    }
+  }, []);
+
+  async function checkEbayStatus() {
+    try {
+      const res = await fetch('/api/ebay/status');
+      if (res.ok) {
+        const data = await res.json() as { connected: boolean; source: string };
+        setEbayConnected(data.connected);
+        setEbayEnvToken(data.source === 'env');
+      } else {
+        setEbayConnected(false);
+      }
+    } catch {
+      setEbayConnected(false);
+    }
+  }
+
+  useEffect(() => { checkEbayStatus(); }, []);
+
+  async function handleEbayImport() {
+    setEbayFetching(true);
+    try {
+      const res = await fetch(`/api/ebay/orders?days=${ebayDays}`);
+      if (res.status === 401) {
+        setEbayConnected(false);
+        toast.error('eBay session expired. Please reconnect.');
+        return;
+      }
+      if (!res.ok) {
+        const err = await res.json() as { message?: string };
+        toast.error(`eBay API error: ${err.message || res.statusText}`);
+        return;
+      }
+      const data = await res.json() as { orders: Order[]; batch: Batch };
+      if (data.orders.length === 0) {
+        toast.info('No unfulfilled orders found in eBay for this period.');
+        return;
+      }
+      setPreview({ orders: data.orders, format: 'ebay', fileName: data.batch.name });
+      toast.success(`Fetched ${data.orders.length} orders from eBay`);
+    } catch (e) {
+      toast.error(`Failed to fetch eBay orders: ${e instanceof Error ? e.message : 'Unknown error'}`);
+    } finally {
+      setEbayFetching(false);
+    }
+  }
 
   function setLabelQty(index: number, qty: number) {
     if (!preview) return;
@@ -217,7 +282,7 @@ export function CSVImport() {
     processFile(file);
   }
 
-  const handleImport = () => {
+  const handleImport = async () => {
     if (!preview) return;
     setImporting(true);
 
@@ -226,13 +291,44 @@ export function CSVImport() {
       name: preview.fileName,
       importedAt: new Date().toISOString(),
       orderCount: preview.orders.length,
-      source: preview.format as 'ebay' | 'backmarket',
+      source: preview.format as Batch['source'],
     };
 
     addOrders(preview.orders, batch);
     toast.success(`Imported ${preview.orders.length} orders successfully!`);
     setPreview(null);
     setImporting(false);
+
+    // Background AI categorisation for N/A items
+    const uncategorised = preview.orders
+      .filter((o) => o.category === 'N/A' && o.itemTitle)
+      .map((o) => ({ id: o.id, title: o.itemTitle }));
+
+    if (uncategorised.length > 0) {
+      setAiCategorising(true);
+      try {
+        const res = await fetch('/api/ai/categorise', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ items: uncategorised }),
+        });
+        if (res.ok) {
+          const data = await res.json();
+          let updated = 0;
+          for (const r of data.results ?? []) {
+            if (r.category && r.category !== 'N/A') {
+              updateOrderCategory(r.id, r.category);
+              updated++;
+            }
+          }
+          if (updated > 0) toast.success(`AI classified ${updated} uncategorised item${updated !== 1 ? 's' : ''}`, { icon: '✨' });
+        }
+      } catch {
+        // Silent fail — categorisation is best-effort
+      } finally {
+        setAiCategorising(false);
+      }
+    }
   };
 
   const globalLabelQty = preview
@@ -258,6 +354,65 @@ export function CSVImport() {
         className="hidden"
         onChange={handleFileChange}
       />
+
+      {/* eBay Direct Import */}
+      <Card className="border-amber-200 bg-amber-50">
+        <CardContent className="pt-5">
+          <div className="flex items-center justify-between flex-wrap gap-3">
+            <div className="flex items-center gap-3">
+              <ShoppingBag className="h-6 w-6 text-amber-600" />
+              <div>
+                <p className="font-semibold text-slate-800">Import from eBay</p>
+                <p className="text-xs text-slate-500">Fetch unfulfilled orders directly via eBay API</p>
+              </div>
+              {ebayConnected === true && (
+                <span className="flex items-center gap-1 text-xs text-green-700 bg-green-100 border border-green-300 rounded-full px-2 py-0.5">
+                  <Wifi className="h-3 w-3" /> Connected
+                </span>
+              )}
+              {ebayConnected === false && (
+                <span className="flex items-center gap-1 text-xs text-red-700 bg-red-100 border border-red-300 rounded-full px-2 py-0.5">
+                  <WifiOff className="h-3 w-3" /> Not connected
+                </span>
+              )}
+            </div>
+            <div className="flex items-center gap-2">
+              <label className="text-xs text-slate-600">Last</label>
+              <select
+                value={ebayDays}
+                onChange={(e) => setEbayDays(Number(e.target.value))}
+                className="h-8 border rounded px-2 text-xs bg-white"
+              >
+                {[1, 3, 7, 14, 30].map((d) => (
+                  <option key={d} value={d}>{d} days</option>
+                ))}
+              </select>
+              {ebayConnected ? (
+                <Button
+                  size="sm"
+                  className="bg-amber-600 hover:bg-amber-700 text-white"
+                  onClick={handleEbayImport}
+                  disabled={ebayFetching}
+                >
+                  <RefreshCw className={`h-3.5 w-3.5 mr-1.5 ${ebayFetching ? 'animate-spin' : ''}`} />
+                  {ebayFetching ? 'Fetching...' : 'Fetch Orders'}
+                </Button>
+              ) : (
+                !ebayEnvToken && (
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    className="border-amber-400 text-amber-700 hover:bg-amber-100"
+                    onClick={() => { window.location.href = '/api/ebay/auth'; }}
+                  >
+                    Connect eBay Account
+                  </Button>
+                )
+              )}
+            </div>
+          </div>
+        </CardContent>
+      </Card>
 
       {/* Drop zone */}
       <div
@@ -430,13 +585,19 @@ export function CSVImport() {
               )}
             </div>
 
-            <div className="flex gap-3">
+            <div className="flex gap-3 items-center flex-wrap">
               <Button onClick={handleImport} disabled={importing}>
                 {importing ? 'Importing...' : `Import ${preview.orders.length} Orders`}
               </Button>
               <Button variant="outline" onClick={() => setPreview(null)}>
                 Cancel
               </Button>
+              {aiCategorising && (
+                <span className="flex items-center gap-1.5 text-xs text-purple-600 animate-pulse">
+                  <Sparkles className="h-3.5 w-3.5" />
+                  AI classifying uncategorised items…
+                </span>
+              )}
             </div>
 
             <div className="flex items-start gap-2 p-3 bg-amber-50 border border-amber-200 rounded-lg">

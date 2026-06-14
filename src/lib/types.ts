@@ -93,6 +93,14 @@ export interface EodReport {
 
 export type PackagingStage = 'assembling' | 'checking' | 'packing';
 
+export interface OrderNote {
+  id: string;
+  text: string;
+  authorId: string;
+  authorName: string;
+  createdAt: string;
+}
+
 export interface Order {
   id: string;
   salesRecordNumber: string;
@@ -137,12 +145,17 @@ export interface Order {
   status: OrderStatus;
   category: string;
   comments: string;
+  notes?: OrderNote[];
   // Shipping label
   labelQty: number;
   // GSP / international
   isGSP: boolean;
   // Return tracking
   returnId?: string;
+  // Printed label storage
+  labelPrintedAt?: string;
+  labelCarrier?: string;
+  labelData?: string[]; // base64 PDF(s)
   // Metadata
   importedAt: string;
   batchId: string;
@@ -153,7 +166,7 @@ export interface Batch {
   name: string;
   importedAt: string;
   orderCount: number;
-  source: 'ebay' | 'backmarket';
+  source: 'ebay' | 'backmarket' | 'amazon' | 'temu' | 'onbuy' | 'manual';
 }
 
 export const ORDER_STATUS_CONFIG: Record<OrderStatus, { label: string; color: string }> = {

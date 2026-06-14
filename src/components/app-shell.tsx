@@ -10,12 +10,10 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
 
   return (
-    <div className="flex min-h-screen">
+    <div className="flex h-screen overflow-hidden">
       <EodScheduler />
       <Sidebar collapsed={sidebarCollapsed} onToggle={() => setSidebarCollapsed(!sidebarCollapsed)} />
-      <main className={`flex-1 bg-slate-50 overflow-auto transition-all duration-300 ${
-        sidebarCollapsed ? 'ml-0' : 'ml-0'
-      }`}>
+      <main className="flex-1 bg-slate-50 overflow-y-auto">
         <div className="p-6">
           <Button
             variant="outline"

@@ -19,6 +19,8 @@ import {
   PauseCircle,
   PackageOpen,
   Archive,
+  MessageSquare,
+  Store,
 } from 'lucide-react';
 
 const statusIcons: Record<OrderStatus, React.ElementType> = {
@@ -50,9 +52,50 @@ export function Dashboard() {
     {} as Record<string, number>
   );
 
+  // ── Per-source stats ────────────────────────────────────────────
+  const SOURCE_CONFIG: Record<string, { label: string; color: string; bg: string; bar: string }> = {
+    ebay:        { label: 'eBay',        color: 'text-yellow-700', bg: 'bg-yellow-50 border-yellow-200',  bar: 'bg-yellow-400' },
+    backmarket:  { label: 'Back Market', color: 'text-green-700',  bg: 'bg-green-50 border-green-200',   bar: 'bg-green-500'  },
+    amazon:      { label: 'Amazon',      color: 'text-orange-700', bg: 'bg-orange-50 border-orange-200', bar: 'bg-orange-400' },
+    temu:        { label: 'Temu',        color: 'text-rose-700',   bg: 'bg-rose-50 border-rose-200',     bar: 'bg-rose-400'   },
+    onbuy:       { label: 'OnBuy',       color: 'text-cyan-700',   bg: 'bg-cyan-50 border-cyan-200',     bar: 'bg-cyan-400'   },
+    manual:      { label: 'Manual',      color: 'text-blue-700',   bg: 'bg-blue-50 border-blue-200',     bar: 'bg-blue-400'   },
+  };
+
+  const sourceStats = batches.reduce((acc, batch) => {
+    const src = batch.source ?? 'manual';
+    if (!acc[src]) acc[src] = { orders: 0, revenue: 0, pending: 0, shipped: 0 };
+    const batchOrders = orders.filter((o) => o.batchId === batch.id);
+    acc[src].orders  += batchOrders.length;
+    acc[src].revenue += batchOrders.reduce((s, o) => s + o.soldFor, 0);
+    acc[src].pending += batchOrders.filter((o) => o.status === 'pending').length;
+    acc[src].shipped += batchOrders.filter((o) => o.status === 'shipped').length;
+    return acc;
+  }, {} as Record<string, { orders: number; revenue: number; pending: number; shipped: number }>);
+
+  // Largest-remainder method: percentages guaranteed to sum to 100
+  const _total = orders.length || 1;
+  const sourceEntries = Object.entries(sourceStats)
+    .sort((a, b) => b[1].orders - a[1].orders)
+    .map(([src, stats]) => ({
+      src,
+      stats,
+      pct: Math.floor((stats.orders / _total) * 100),
+      rem: ((stats.orders / _total) * 100) % 1,
+    }));
+  const _remainder = 100 - sourceEntries.reduce((s, e) => s + e.pct, 0);
+  sourceEntries
+    .slice()
+    .sort((a, b) => b.rem - a.rem)
+    .forEach((e, i) => { if (i < _remainder) e.pct += 1; });
+
   const totalRevenue = orders.reduce((sum, o) => sum + o.soldFor, 0);
   const pendingCount = statusCounts['pending'] || 0;
   const shippedCount = statusCounts['shipped'] || 0;
+  const totalNotes = orders.reduce((sum, o) => sum + (o.notes?.length ?? 0), 0);
+  const recentNote = orders
+    .flatMap((o) => (o.notes ?? []).map((n) => ({ ...n, salesRecordNumber: o.salesRecordNumber })))
+    .sort((a, b) => b.createdAt.localeCompare(a.createdAt))[0] ?? null;
 
   return (
     <div className="space-y-6">
@@ -138,7 +181,65 @@ export function Dashboard() {
             <p className="text-xs text-slate-500 mt-1">From all orders</p>
           </CardContent>
         </Card>
+
+        <Card
+          className="cursor-pointer hover:shadow-md transition-shadow"
+          onClick={() => router.push('/notes')}
+        >
+          <CardHeader className="flex flex-row items-center justify-between pb-2">
+            <CardTitle className="text-sm font-medium text-slate-500">
+              Team Notes
+            </CardTitle>
+            <MessageSquare className="h-4 w-4 text-blue-400" />
+          </CardHeader>
+          <CardContent>
+            <div className="text-2xl font-bold text-blue-600">{totalNotes}</div>
+            <p className="text-xs text-slate-500 mt-1 truncate">
+              {recentNote
+                ? `${recentNote.authorName}: ${recentNote.text.slice(0, 30)}${recentNote.text.length > 30 ? '…' : ''}`
+                : 'No notes yet'}
+            </p>
+          </CardContent>
+        </Card>
       </div>
+
+      {/* Order Sources */}
+      {sourceEntries.length > 0 && (
+        <Card>
+          <CardHeader className="flex flex-row items-center justify-between pb-2">
+            <CardTitle className="text-base">Order Sources</CardTitle>
+            <Store className="h-4 w-4 text-slate-400" />
+          </CardHeader>
+          <CardContent>
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+              {sourceEntries.map(({ src, stats, pct }) => {
+                const cfg = SOURCE_CONFIG[src] ?? { label: src, color: 'text-slate-700', bg: 'bg-slate-50 border-slate-200', bar: 'bg-slate-400' };
+                return (
+                  <div
+                    key={src}
+                    className={`rounded-xl border p-4 cursor-pointer hover:shadow-md transition-shadow ${cfg.bg}`}
+                    onClick={() => router.push(`/orders?source=${src}`)}
+                  >
+                    <div className="flex items-center justify-between mb-2">
+                      <span className={`text-xs font-bold uppercase tracking-wide ${cfg.color}`}>{cfg.label}</span>
+                      <span className={`text-xs font-semibold ${cfg.color}`}>{Math.round((stats.orders / _total) * 100)}%</span>
+                    </div>
+                    <div className="text-2xl font-bold text-slate-900 mb-1">{stats.orders}</div>
+                    <div className="text-xs text-slate-500 mb-3">orders &nbsp;·&nbsp; £{stats.revenue.toLocaleString('en-GB', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}</div>
+                    <div className="w-full h-1.5 bg-slate-200 rounded-full overflow-hidden mb-3">
+                      <div className={`h-full rounded-full ${cfg.bar}`} style={{ width: `${pct}%` }} />
+                    </div>
+                    <div className="flex justify-between text-xs text-slate-500">
+                      <span><span className="font-medium text-yellow-600">{stats.pending}</span> pending</span>
+                      <span><span className="font-medium text-purple-600">{stats.shipped}</span> shipped</span>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </CardContent>
+        </Card>
+      )}
 
       {/* Status breakdown */}
       <Card>

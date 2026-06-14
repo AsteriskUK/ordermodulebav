@@ -1,0 +1,151 @@
+/**
+ * FedEx Ship API v1 client
+ * Docs: https://developer.fedex.com/api/en-gb/catalog/ship/v1/docs.html
+ *
+ * Fill in .env.local:
+ *   FEDEX_CLIENT_ID, FEDEX_CLIENT_SECRET, FEDEX_ACCOUNT_NUMBER, FEDEX_ENV (sandbox|production)
+ */
+
+const SANDBOX_BASE = 'https://apis-sandbox.fedex.com';
+const PROD_BASE = 'https://apis.fedex.com';
+
+function getBase(): string {
+  return process.env.FEDEX_ENV === 'production' ? PROD_BASE : SANDBOX_BASE;
+}
+
+let _cachedToken: { token: string; expiresAt: number } | null = null;
+
+export async function getFedExToken(): Promise<string> {
+  if (_cachedToken && Date.now() < _cachedToken.expiresAt - 60_000) {
+    return _cachedToken.token;
+  }
+
+  const clientId = process.env.FEDEX_CLIENT_ID;
+  const clientSecret = process.env.FEDEX_CLIENT_SECRET;
+  if (!clientId || !clientSecret) throw new Error('FEDEX_CLIENT_ID or FEDEX_CLIENT_SECRET not set');
+
+  const res = await fetch(`${getBase()}/oauth/token`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+    body: new URLSearchParams({
+      grant_type: 'client_credentials',
+      client_id: clientId,
+      client_secret: clientSecret,
+    }),
+  });
+
+  if (!res.ok) {
+    const body = await res.text();
+    throw new Error(`FedEx auth failed: ${res.status} ${body}`);
+  }
+
+  const data = await res.json() as { access_token: string; expires_in: number };
+  _cachedToken = { token: data.access_token, expiresAt: Date.now() + data.expires_in * 1000 };
+  return data.access_token;
+}
+
+export interface FedExAddress {
+  streetLines: string[];
+  city: string;
+  stateOrProvinceCode?: string;
+  postalCode: string;
+  countryCode: string;
+}
+
+export interface FedExContact {
+  personName: string;
+  phoneNumber?: string;
+  emailAddress?: string;
+  companyName?: string;
+}
+
+export interface FedExShipmentRequest {
+  shipDatestamp: string; // "YYYY-MM-DD"
+  serviceType:
+    | 'INTERNATIONAL_ECONOMY'      // GB → overseas, 2-5 days
+    | 'INTERNATIONAL_PRIORITY'     // GB → overseas, 1-3 days
+    | 'FEDEX_PRIORITY_EXPRESS'     // UK/Europe domestic, next day by noon
+    | 'FEDEX_PRIORITY'             // UK/Europe domestic, end of day
+    | 'FEDEX_ECONOMY';             // UK/Europe domestic, 3 days
+  packagingType: 'YOUR_PACKAGING';
+  pickupType: 'USE_SCHEDULED_PICKUP' | 'DROPOFF_AT_FEDEX_LOCATION';
+  shipper: {
+    contact: FedExContact;
+    address: FedExAddress;
+  };
+  recipients: {
+    contact: FedExContact;
+    address: FedExAddress;
+  }[];
+  shippingChargesPayment: {
+    paymentType: 'SENDER';
+    payor: { responsibleParty: { accountNumber: { value: string } } };
+  };
+  labelSpecification: {
+    labelFormatType: 'COMMON2D';
+    imageType: 'PDF';
+    labelStockType: 'PAPER_85X11_TOP_HALF_LABEL';
+  };
+  requestedPackageLineItems: {
+    weight: { units: 'KG'; value: number };
+    dimensions?: { length: number; width: number; height: number; units: 'CM' };
+    customerReferences?: { customerReferenceType: 'CUSTOMER_REFERENCE'; value: string }[];
+  }[];
+}
+
+export interface FedExShipmentResponse {
+  output?: {
+    transactionShipments?: {
+      masterTrackingNumber: string;
+      serviceType?: string;
+      pieceResponses?: {
+        masterTrackingNumber: string;
+        trackingNumber: string;
+        packageDocuments?: {
+          contentType: string;
+          copiesToPrint: number;
+          encodedLabel: string; // base64 PDF
+          docType: string;
+        }[];
+      }[];
+      completedShipmentDetail?: {
+        completedPackageDetails?: {
+          trackingIds?: { trackingNumber: string }[];
+        }[];
+      };
+    }[];
+  };
+  errors?: { code: string; message: string }[];
+}
+
+export async function createFedExShipment(payload: FedExShipmentRequest): Promise<FedExShipmentResponse> {
+  const base = getBase();
+  const token = await getFedExToken();
+  const accountNumber = process.env.FEDEX_ACCOUNT_NUMBER;
+  if (!accountNumber) throw new Error('FEDEX_ACCOUNT_NUMBER not set');
+
+  const body = {
+    labelResponseOptions: 'LABEL',
+    requestedShipment: payload,
+    accountNumber: { value: accountNumber },
+  };
+
+  const res = await fetch(`${base}/ship/v1/shipments`, {
+    method: 'POST',
+    headers: {
+      'Authorization': `Bearer ${token}`,
+      'Content-Type': 'application/json',
+      'X-locale': 'en_GB',
+    },
+    body: JSON.stringify(body),
+  });
+
+  const data = await res.json() as FedExShipmentResponse;
+
+  if (!res.ok || data.errors?.length) {
+    const detail = data.errors?.map((e) => e.message).join('; ') || res.statusText;
+    throw new Error(`FedEx API error: ${detail}`);
+  }
+
+  return data;
+}

@@ -1,7 +1,7 @@
 import { create } from 'zustand';
 import { persist, createJSONStorage } from 'zustand/middleware';
 import { get, set as idbSet, del } from 'idb-keyval';
-import { Order, OrderStatus, Batch, DeliveryCarrier, DeliveryType, AppUser, EodEvent, ReturnRecord, Department } from './types';
+import { Order, OrderNote, OrderStatus, Batch, DeliveryCarrier, DeliveryType, AppUser, EodEvent, ReturnRecord, Department } from './types';
 
 export interface EmailConfig {
   enabled: boolean;
@@ -41,14 +41,18 @@ interface OrderStore {
   addOrders: (orders: Order[], batch: Batch) => void;
   updateOrderStatus: (orderId: string, status: OrderStatus) => void;
   updateOrderComment: (orderId: string, comment: string) => void;
+  addOrderNote: (orderId: string, note: Omit<OrderNote, 'id' | 'createdAt'>) => void;
+  deleteOrderNote: (orderId: string, noteId: string) => void;
   updateOrderTracking: (orderId: string, trackingNumber: string) => void;
   updateOrderCarrier: (orderId: string, carrier: DeliveryCarrier, deliveryType: DeliveryType) => void;
   updateOrderLabelQty: (orderId: string, qty: number) => void;
   updateOrderCategory: (orderId: string, category: string) => void;
   updateOrderPriority: (orderId: string, priority: number) => void;
   updateOrderNumberOfBoxes: (orderId: string, numberOfBoxes: number) => void;
+  saveOrderLabels: (orderId: string, carrier: string, labels: string[]) => void;
   bulkUpdateStatus: (orderIds: string[], status: OrderStatus) => void;
   deleteOrder: (orderId: string) => void;
+  purgeOrphanOrders: () => void;
   deleteBatch: (batchId: string) => void;
   addUser: (user: AppUser) => void;
   updateUser: (userId: string, updates: Partial<AppUser>) => void;
@@ -83,14 +87,16 @@ export const useOrderStore = create<OrderStore>()(
       },
       addOrders: (newOrders, batch) =>
         set((state) => {
-          // Set default priority and numberOfBoxes for new orders
           const ordersWithDefaults = newOrders.map(order => ({
             ...order,
-            priority: order.priority ?? 5, // Default to lowest priority
-            numberOfBoxes: order.numberOfBoxes ?? 1, // Default to 1 box
+            priority: order.priority ?? 5,
+            numberOfBoxes: order.numberOfBoxes ?? 1,
           }));
+          // Replace any existing order that shares a salesRecordNumber with an incoming order
+          const incomingNums = new Set(ordersWithDefaults.map((o) => o.salesRecordNumber).filter(Boolean));
+          const retained = state.orders.filter((o) => !incomingNums.has(o.salesRecordNumber));
           return {
-            orders: [...state.orders, ...ordersWithDefaults],
+            orders: [...retained, ...ordersWithDefaults],
             batches: [...state.batches, batch],
           };
         }),
@@ -121,6 +127,20 @@ export const useOrderStore = create<OrderStore>()(
         set((state) => ({
           orders: state.orders.map((o) =>
             o.id === orderId ? { ...o, comments: comment } : o
+          ),
+        })),
+      addOrderNote: (orderId, note) =>
+        set((state) => ({
+          orders: state.orders.map((o) =>
+            o.id === orderId
+              ? { ...o, notes: [...(o.notes ?? []), { ...note, id: `note-${Date.now()}-${Math.random().toString(36).slice(2)}`, createdAt: new Date().toISOString() }] }
+              : o
+          ),
+        })),
+      deleteOrderNote: (orderId, noteId) =>
+        set((state) => ({
+          orders: state.orders.map((o) =>
+            o.id === orderId ? { ...o, notes: (o.notes ?? []).filter((n) => n.id !== noteId) } : o
           ),
         })),
       updateOrderTracking: (orderId, trackingNumber) =>
@@ -172,6 +192,14 @@ export const useOrderStore = create<OrderStore>()(
             o.id === orderId ? { ...o, numberOfBoxes } : o
           ),
         })),
+      saveOrderLabels: (orderId, carrier, labels) =>
+        set((state) => ({
+          orders: state.orders.map((o) =>
+            o.id === orderId
+              ? { ...o, labelPrintedAt: new Date().toISOString(), labelCarrier: carrier, labelData: labels }
+              : o
+          ),
+        })),
       bulkUpdateStatus: (orderIds, status) =>
         set((state) => {
           const now = new Date().toISOString();
@@ -196,6 +224,25 @@ export const useOrderStore = create<OrderStore>()(
             ),
             eodEvents: [...state.eodEvents, ...newEvents],
           };
+        }),
+      purgeOrphanOrders: () =>
+        set((state) => {
+          // Step 1: remove ghost sub-rows (no address AND no postcode)
+          const withAddress = state.orders.filter((o) =>
+            (o.postToAddress1 && o.postToAddress1.trim() !== '') ||
+            (o.postToPostcode && o.postToPostcode.trim() !== '')
+          );
+          // Step 2: deduplicate by salesRecordNumber — keep the row with the longest itemTitle
+          // (merged rows from the new mapper have combined titles; old sub-rows have partial titles)
+          const seen = new Map<string, typeof withAddress[number]>();
+          for (const o of withAddress) {
+            const key = o.salesRecordNumber || o.id;
+            const existing = seen.get(key);
+            if (!existing || (o.itemTitle?.length ?? 0) > (existing.itemTitle?.length ?? 0)) {
+              seen.set(key, o);
+            }
+          }
+          return { orders: Array.from(seen.values()) };
         }),
       deleteOrder: (orderId) =>
         set((state) => ({

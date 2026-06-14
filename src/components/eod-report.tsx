@@ -14,7 +14,7 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table';
-import { FileText, Truck, Package, TrendingUp, Trash2, Download, Mail, Clock, Send, Settings2 } from 'lucide-react';
+import { FileText, Truck, Package, TrendingUp, Trash2, Download, Mail, Clock, Send, Settings2, Sparkles, Copy, RefreshCw } from 'lucide-react';
 import { toast } from 'sonner';
 import { buildEodCsvText, downloadEodCsv } from '@/lib/use-eod-scheduler';
 
@@ -26,6 +26,8 @@ export function EodReport() {
   const setEmailConfig = useOrderStore((s) => s.setEmailConfig);
   const [showEmailSettings, setShowEmailSettings] = useState(false);
   const [testSending, setTestSending] = useState(false);
+  const [aiSummary, setAiSummary] = useState('');
+  const [aiLoading, setAiLoading] = useState(false);
 
   const todayStr = new Date().toISOString().slice(0, 10);
 
@@ -63,6 +65,42 @@ export function EodReport() {
 
   const todayShipped = todayEvents.filter((e) => e.toStatus === 'shipped').length;
   const todayPacked = todayEvents.filter((e) => e.toStatus === 'packed').length;
+  const todayHeld = orders.filter((o) => o.status === 'held').length;
+  const todayNoStock = orders.filter((o) => o.status === 'no-stock').length;
+
+  const topItems = useMemo(() => {
+    const shippedIds = new Set(todayEvents.filter((e) => e.toStatus === 'shipped').map((e) => e.orderId));
+    const titles = orders.filter((o) => shippedIds.has(o.id)).map((o) => o.itemTitle).filter(Boolean);
+    return [...new Set(titles)].slice(0, 5);
+  }, [todayEvents, orders]);
+
+  const handleAiSummary = async () => {
+    setAiLoading(true);
+    setAiSummary('');
+    try {
+      const res = await fetch('/api/ai/eod-summary', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          date: new Date().toLocaleDateString('en-GB', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' }),
+          shipped: todayShipped,
+          packed: todayPacked,
+          revenue: todayRevenue.toFixed(2),
+          held: todayHeld,
+          noStock: todayNoStock,
+          events: todayEvents.length,
+          topItems,
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error);
+      setAiSummary(data.summary);
+    } catch (err) {
+      toast.error(`AI summary failed: ${err instanceof Error ? err.message : 'Unknown error'}`);
+    } finally {
+      setAiLoading(false);
+    }
+  };
 
   const handleExportDay = (date: string, events: typeof eodEvents) => {
     const csvText = buildEodCsvText(date, events);
@@ -121,6 +159,16 @@ export function EodReport() {
             Auto-runs {nextTrigger.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' })} GMT
             {nextTrigger.toDateString() !== new Date().toDateString() ? ' tomorrow' : ' today'}
           </div>
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={handleAiSummary}
+            disabled={todayEvents.length === 0 || aiLoading}
+            className="border-purple-300 text-purple-700 hover:bg-purple-50"
+          >
+            {aiLoading ? <RefreshCw className="h-3 w-3 mr-1 animate-spin" /> : <Sparkles className="h-3 w-3 mr-1" />}
+            {aiLoading ? 'Generating...' : 'AI Summary'}
+          </Button>
           <Button
             variant="outline"
             size="sm"
@@ -224,6 +272,36 @@ export function EodReport() {
                 <Send className="h-3 w-3 mr-1" />
                 {testSending ? 'Sending...' : 'Test Send Now'}
               </Button>
+            </div>
+          </CardContent>
+        </Card>
+      )}
+
+      {/* AI narrative summary */}
+      {aiSummary && (
+        <Card className="border-purple-200 bg-gradient-to-br from-purple-50 to-white">
+          <CardContent className="pt-4 pb-3">
+            <div className="flex items-start justify-between gap-3">
+              <div className="flex items-start gap-2 flex-1">
+                <Sparkles className="h-4 w-4 text-purple-500 shrink-0 mt-0.5" />
+                <p className="text-sm text-slate-800 leading-relaxed">{aiSummary}</p>
+              </div>
+              <div className="flex gap-1 shrink-0">
+                <button
+                  onClick={() => { navigator.clipboard.writeText(aiSummary); toast.success('Copied to clipboard'); }}
+                  className="text-slate-400 hover:text-purple-600 transition-colors p-1"
+                  title="Copy to clipboard"
+                >
+                  <Copy className="h-3.5 w-3.5" />
+                </button>
+                <button
+                  onClick={handleAiSummary}
+                  className="text-slate-400 hover:text-purple-600 transition-colors p-1"
+                  title="Regenerate"
+                >
+                  <RefreshCw className="h-3.5 w-3.5" />
+                </button>
+              </div>
             </div>
           </CardContent>
         </Card>

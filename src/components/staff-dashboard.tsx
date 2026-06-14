@@ -25,6 +25,7 @@ import {
   Layers,
   User,
   TrendingUp,
+  MessageSquare,
 } from 'lucide-react';
 
 const PIPELINE_STATUSES: { status: OrderStatus; icon: React.ElementType }[] = [
@@ -91,6 +92,12 @@ export function StaffDashboard() {
   const urgentCount = (statusCounts['pending'] || 0) + (statusCounts['no-stock'] || 0) + (statusCounts['held'] || 0);
   const inProgressCount = (statusCounts['assembling'] || 0) + (statusCounts['checking'] || 0) + (statusCounts['packing'] || 0);
 
+  const allOrders = useOrderStore((s) => s.orders);
+  const totalNotes = allOrders.reduce((sum, o) => sum + (o.notes?.length ?? 0), 0);
+  const recentNote = allOrders
+    .flatMap((o) => (o.notes ?? []).map((n) => ({ ...n, salesRecordNumber: o.salesRecordNumber })))
+    .sort((a, b) => b.createdAt.localeCompare(a.createdAt))[0] ?? null;
+
   if (!currentUser) {
     return (
       <div className="flex flex-col items-center justify-center py-24 text-center">
@@ -125,6 +132,30 @@ export function StaffDashboard() {
           )}
         </div>
       </div>
+
+      {/* Team Notes tile */}
+      <Card
+        className="cursor-pointer hover:shadow-md transition-shadow border-blue-200 bg-gradient-to-br from-blue-50 to-blue-100"
+        onClick={() => router.push('/notes')}
+      >
+        <CardContent className="pt-4 pb-3">
+          <div className="flex items-center justify-between mb-1">
+            <MessageSquare className="h-4 w-4 text-blue-500" />
+            {totalNotes > 0 && (
+              <span className="bg-blue-500 text-white text-[10px] font-bold rounded-full px-1.5 py-0.5 leading-none">
+                {totalNotes}
+              </span>
+            )}
+          </div>
+          <div className="text-2xl font-bold text-blue-700">{totalNotes}</div>
+          <p className="text-xs text-blue-600 mt-0.5">Team Notes</p>
+          {recentNote && (
+            <p className="text-xs text-blue-500 mt-1 truncate">
+              {recentNote.authorName}: {recentNote.text.slice(0, 35)}{recentNote.text.length > 35 ? '…' : ''}
+            </p>
+          )}
+        </CardContent>
+      </Card>
 
       {/* Today's personal stats */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-3">

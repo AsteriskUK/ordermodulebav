@@ -1,7 +1,7 @@
 'use client';
 
-import { useState } from 'react';
-import { Order, ORDER_STATUS_CONFIG, OrderStatus } from '@/lib/types';
+import { useState, useRef, useEffect } from 'react';
+import { Order, ORDER_STATUS_CONFIG, OrderStatus, OrderNote } from '@/lib/types';
 import { useOrderStore } from '@/lib/store';
 import {
   Dialog,
@@ -20,7 +20,8 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
-import { MapPin, Package, User, Truck, MessageSquare } from 'lucide-react';
+import { MapPin, Package, User, Truck, MessageSquare, Send, Trash2 } from 'lucide-react';
+import { DeliveryBadge } from './delivery-badge';
 import { toast } from 'sonner';
 
 interface Props {
@@ -30,30 +31,47 @@ interface Props {
 
 export function OrderDetailDialog({ order, onClose }: Props) {
   const updateOrderStatus = useOrderStore((s) => s.updateOrderStatus);
-  const updateOrderComment = useOrderStore((s) => s.updateOrderComment);
   const updateOrderTracking = useOrderStore((s) => s.updateOrderTracking);
   const updateOrderNumberOfBoxes = useOrderStore((s) => s.updateOrderNumberOfBoxes);
+  const addOrderNote = useOrderStore((s) => s.addOrderNote);
+  const deleteOrderNote = useOrderStore((s) => s.deleteOrderNote);
   const currentUser = useOrderStore((s) => s.users.find(u => u.id === s.currentUserId));
+  const liveOrder = useOrderStore((s) => s.orders.find(o => o.id === order.id)) ?? order;
 
   const isCommsTeam = currentUser?.role === 'comms' || currentUser?.departments?.includes('comms');
 
-  const [comment, setComment] = useState(order.comments);
   const [tracking, setTracking] = useState(order.trackingNumber);
   const [numberOfBoxes, setNumberOfBoxes] = useState((order.numberOfBoxes ?? 1).toString());
+  const [noteText, setNoteText] = useState('');
+  const notesEndRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    notesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+  }, [liveOrder.notes?.length]);
 
   const handleSave = () => {
-    updateOrderComment(order.id, comment);
     updateOrderTracking(order.id, tracking);
     updateOrderNumberOfBoxes(order.id, parseInt(numberOfBoxes) || 1);
     toast.success('Order updated');
     onClose();
   };
 
+  const handlePostNote = () => {
+    const text = noteText.trim();
+    if (!text) return;
+    addOrderNote(order.id, {
+      text,
+      authorId: currentUser?.id ?? 'unknown',
+      authorName: currentUser?.name ?? 'Unknown',
+    });
+    setNoteText('');
+  };
+
   return (
     <Dialog open onOpenChange={onClose}>
       <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
         <DialogHeader>
-          <DialogTitle className="flex items-center gap-3">
+          <DialogTitle className="flex items-center gap-3 flex-wrap">
             <span>Order #{order.salesRecordNumber}</span>
             <Badge
               variant="outline"
@@ -61,6 +79,7 @@ export function OrderDetailDialog({ order, onClose }: Props) {
             >
               {ORDER_STATUS_CONFIG[order.status].label}
             </Badge>
+            <DeliveryBadge deliveryType={order.deliveryType} deliveryCarrier={order.deliveryCarrier} size="sm" />
           </DialogTitle>
         </DialogHeader>
 
@@ -223,6 +242,14 @@ export function OrderDetailDialog({ order, onClose }: Props) {
               <Truck className="h-4 w-4" /> Shipping & Tracking
             </h4>
             <div className="space-y-2">
+              <div className="flex items-center gap-2 flex-wrap">
+                <span className="text-sm text-slate-500">Carrier:</span>
+                <span className="text-sm font-medium">{order.deliveryCarrier}</span>
+                <DeliveryBadge deliveryType={order.deliveryType} deliveryCarrier={order.deliveryCarrier} size="sm" />
+                {order.postageAndPackaging > 0 && (
+                  <span className="text-xs text-slate-400">(paid postage: £{order.postageAndPackaging.toFixed(2)})</span>
+                )}
+              </div>
               {order.deliveryService && (
                 <p className="text-sm">
                   <span className="text-slate-500">Service:</span>{' '}
@@ -255,17 +282,70 @@ export function OrderDetailDialog({ order, onClose }: Props) {
             </div>
           </div>
 
-          {/* Comments */}
+          {/* Notes thread */}
           <div>
             <h4 className="text-sm font-semibold text-slate-700 flex items-center gap-2 mb-2">
-              <MessageSquare className="h-4 w-4" /> Comments
+              <MessageSquare className="h-4 w-4" /> Team Notes
+              {(liveOrder.notes?.length ?? 0) > 0 && (
+                <span className="ml-1 bg-blue-100 text-blue-700 text-xs rounded-full px-1.5 py-0.5 leading-none">
+                  {liveOrder.notes!.length}
+                </span>
+              )}
             </h4>
-            <textarea
-              className="w-full border rounded-lg p-3 text-sm min-h-[80px] resize-y focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-              placeholder="Add warehouse notes, delay reasons, etc..."
-              value={comment}
-              onChange={(e) => setComment(e.target.value)}
-            />
+            {/* Legacy plain comment migration */}
+            {liveOrder.comments && (liveOrder.notes?.length ?? 0) === 0 && (
+              <div className="mb-2 p-2 bg-slate-50 rounded text-xs text-slate-500 italic">
+                {liveOrder.comments}
+              </div>
+            )}
+            {/* Notes list */}
+            <div className="space-y-2 max-h-48 overflow-y-auto mb-2 pr-1">
+              {(liveOrder.notes ?? []).map((note: OrderNote) => (
+                <div key={note.id} className="flex gap-2 group">
+                  <div className="flex-1 bg-slate-50 border border-slate-200 rounded-lg px-3 py-2">
+                    <div className="flex items-center justify-between gap-2 mb-0.5">
+                      <span className="text-xs font-medium text-slate-700">{note.authorName}</span>
+                      <span className="text-xs text-slate-400">
+                        {new Date(note.createdAt).toLocaleString('en-GB', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' })}
+                      </span>
+                    </div>
+                    <p className="text-sm text-slate-800 whitespace-pre-wrap">{note.text}</p>
+                  </div>
+                  {(currentUser?.id === note.authorId || currentUser?.role === 'admin' || currentUser?.role === 'manager') && (
+                    <button
+                      onClick={() => deleteOrderNote(order.id, note.id)}
+                      className="opacity-0 group-hover:opacity-100 transition-opacity shrink-0 mt-1 text-slate-400 hover:text-red-500"
+                      title="Delete note"
+                    >
+                      <Trash2 className="h-3.5 w-3.5" />
+                    </button>
+                  )}
+                </div>
+              ))}
+              {(liveOrder.notes?.length ?? 0) === 0 && !liveOrder.comments && (
+                <p className="text-xs text-slate-400 text-center py-3">No notes yet</p>
+              )}
+              <div ref={notesEndRef} />
+            </div>
+            {/* Compose */}
+            <div className="flex gap-2">
+              <textarea
+                className="flex-1 border rounded-lg p-2 text-sm min-h-[60px] resize-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                placeholder="Add a note for the team..."
+                value={noteText}
+                onChange={(e) => setNoteText(e.target.value)}
+                onKeyDown={(e) => { if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) handlePostNote(); }}
+              />
+              <button
+                onClick={handlePostNote}
+                disabled={!noteText.trim()}
+                className="self-end px-3 py-2 bg-blue-600 text-white rounded-lg text-sm hover:bg-blue-700 disabled:opacity-40 disabled:cursor-not-allowed flex items-center gap-1"
+              >
+                <Send className="h-3.5 w-3.5" />
+                Post
+              </button>
+            </div>
+            <p className="text-xs text-slate-400 mt-1">Ctrl+Enter to post</p>
           </div>
 
           {/* Dates */}
