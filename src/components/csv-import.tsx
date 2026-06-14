@@ -10,6 +10,15 @@ import { Batch, Order } from '@/lib/types';
 import { toast } from 'sonner';
 import Papa from 'papaparse';
 
+// Generate proper UUID v4 for PostgreSQL compatibility
+function generateUUID(): string {
+  return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function(c) {
+    const r = Math.random() * 16 | 0;
+    const v = c === 'x' ? r : (r & 0x3 | 0x8);
+    return v.toString(16);
+  });
+}
+
 function printHtml(html: string) {
   const win = window.open('', '_blank');
   if (!win) { toast.error('Pop-up blocked — allow pop-ups and try again'); return; }
@@ -248,7 +257,7 @@ export function CSVImport() {
         toast.error('File appears to be empty');
         return;
       }
-      const batchId = `batch-${Date.now()}`;
+      const batchId = generateUUID();
       try {
         const { orders, format } = parseCSV(content, batchId);
         if (orders.length === 0) {
@@ -287,7 +296,7 @@ export function CSVImport() {
     setImporting(true);
 
     const batch: Batch = {
-      id: preview.orders[0]?.batchId || `batch-${Date.now()}`,
+      id: preview.orders[0]?.batchId || generateUUID(),
       name: preview.fileName,
       importedAt: new Date().toISOString(),
       orderCount: preview.orders.length,

@@ -203,8 +203,12 @@ interface BackMarketCSVRow {
   [key: string]: string;
 }
 
-function generateId(): string {
-  return `${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+function generateUUID(): string {
+  return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function(c) {
+    const r = Math.random() * 16 | 0;
+    const v = c === 'x' ? r : (r & 0x3 | 0x8);
+    return v.toString(16);
+  });
 }
 
 function safeFloat(val: string | undefined | null): number {
@@ -304,7 +308,7 @@ function parseEbayCSV(content: string, batchId: string): Order[] {
       const postageAndPackaging = safeFloat(row['Postage and packaging']) || ctx?.postageAndPackaging || 0;
 
       return {
-        id: generateId(),
+        id: generateUUID(),
         salesRecordNumber,
         orderNumber,
         buyerUsername: row['Buyer username'] || ctx?.buyerUsername || '',
@@ -371,7 +375,7 @@ function parseBackMarketCSV(content: string, batchId: string): Order[] {
       else if (orderState === '4') status = 'cancelled';
 
       return {
-        id: generateId(),
+        id: generateUUID(),
         salesRecordNumber: row.order_id || '',
         orderNumber: row.order_id || '',
         buyerUsername: '',
@@ -431,7 +435,7 @@ function parseAmazonCSV(content: string, batchId: string): Order[] {
       const shipping = safeFloat(row['shipping-price'] || '0');
       const totalPrice = price + shipping;
       return {
-        id: generateId(),
+        id: generateUUID(),
         salesRecordNumber: row['order-item-id'] || row['order-id'] || '',
         orderNumber: row['order-id'] || '',
         buyerUsername: '',
@@ -492,7 +496,7 @@ function parseTemuCSV(content: string, batchId: string): Order[] {
       const itemTitle = row['product name by customer order'] || row['product name'] || '';
       const isShipped = (row['order item status'] || '').toLowerCase().includes('ship');
       return {
-        id: generateId(),
+        id: generateUUID(),
         salesRecordNumber: row['Order item ID'] || row['Order ID'] || '',
         orderNumber: row['Order ID'] || '',
         buyerUsername: '',
@@ -556,7 +560,7 @@ function parseOnBuyCSV(content: string, batchId: string): Order[] {
       const totalPrice = safeFloat(row['Order Total']) || price + shipping;
       const isShipped = (row['Status'] || '').toLowerCase() === 'dispatched';
       return {
-        id: generateId(),
+        id: generateUUID(),
         salesRecordNumber: row['Order Number'] || '',
         orderNumber: row['Order Number'] || '',
         buyerUsername: '',
