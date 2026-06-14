@@ -1,6 +1,12 @@
 import { supabase } from './supabase-client';
 import { Order, Batch, AppUser, AttendanceRecord, LeaveRequest, LeaveBalance, EodEvent, ReturnRecord } from './types';
 
+// Helper to check if string is valid UUID
+function isValidUUID(str: string): boolean {
+  const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+  return uuidRegex.test(str);
+}
+
 // ==================== USERS ====================
 
 export async function fetchUsers(): Promise<AppUser[]> {
@@ -65,6 +71,12 @@ export async function fetchBatches(): Promise<Batch[]> {
 }
 
 export async function syncBatch(batch: Batch, importedBy?: string): Promise<void> {
+  // Skip if batch ID is not valid UUID
+  if (!isValidUUID(batch.id)) {
+    console.log('Skipping sync for batch with invalid ID:', batch.id);
+    return;
+  }
+  
   const { error } = await supabase
     .from('batches')
     .upsert({
@@ -76,7 +88,10 @@ export async function syncBatch(batch: Batch, importedBy?: string): Promise<void
       imported_by: importedBy,
     });
   
-  if (error) console.error('Error syncing batch:', error);
+  if (error) {
+    console.error('Error syncing batch:', JSON.stringify(error, null, 2));
+    console.error('Batch data:', { id: batch.id, name: batch.name });
+  }
 }
 
 // ==================== ORDERS ====================
@@ -144,6 +159,17 @@ export async function fetchOrders(): Promise<Order[]> {
 }
 
 export async function syncOrder(order: Order): Promise<void> {
+  // Skip if order ID is not valid UUID
+  if (!isValidUUID(order.id)) {
+    console.log('Skipping sync for order with invalid ID:', order.id);
+    return;
+  }
+  // Skip if batch_id is not valid UUID
+  if (order.batchId && !isValidUUID(order.batchId)) {
+    console.log('Skipping sync - invalid batch ID:', order.batchId);
+    return;
+  }
+  
   const { error } = await supabase
     .from('orders')
     .upsert({
@@ -190,7 +216,10 @@ export async function syncOrder(order: Order): Promise<void> {
       return_id: order.returnId,
     });
   
-  if (error) console.error('Error syncing order:', error);
+  if (error) {
+    console.error('Error syncing order:', JSON.stringify(error, null, 2));
+    console.error('Order data:', { id: order.id, salesRecordNumber: order.salesRecordNumber, batchId: order.batchId });
+  }
 }
 
 // ==================== ATTENDANCE ====================
@@ -217,12 +246,6 @@ export async function fetchAttendance(): Promise<AttendanceRecord[]> {
     approvedBy: r.approved_by,
     approvedAt: r.approved_at,
   })) || [];
-}
-
-// Helper to check if string is valid UUID
-function isValidUUID(str: string): boolean {
-  const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-  return uuidRegex.test(str);
 }
 
 export async function syncAttendance(record: AttendanceRecord): Promise<void> {
