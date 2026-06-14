@@ -2,7 +2,7 @@ import { create } from 'zustand';
 import { persist, createJSONStorage } from 'zustand/middleware';
 import { get, set as idbSet, del } from 'idb-keyval';
 import { Order, OrderNote, OrderStatus, Batch, DeliveryCarrier, DeliveryType, AppUser, EodEvent, ReturnRecord, Department, AttendanceRecord, LeaveRequest, LeaveBalance } from './types';
-import { syncAttendance, syncLeaveRequest, syncOrder, syncBatch, syncUser, deleteUserFromSupabase } from './supabase-store';
+import { syncAttendance, syncLeaveRequest, syncLeaveBalance, syncOrder, syncBatch, syncUser, deleteUserFromSupabase, syncReturn } from './supabase-store';
 
 // Generate proper UUID v4 for PostgreSQL compatibility
 function generateUUID(): string {
@@ -148,27 +148,37 @@ export const useOrderStore = create<OrderStore>()(
             userName: user?.name,
             department: user?.department,
           };
+          const updatedOrders = state.orders.map((o) =>
+            o.id === orderId ? { ...o, status } : o
+          );
+          const updatedOrder = updatedOrders.find(o => o.id === orderId);
+          if (updatedOrder) syncOrder(updatedOrder).catch(console.error);
           return {
-            orders: state.orders.map((o) =>
-              o.id === orderId ? { ...o, status } : o
-            ),
+            orders: updatedOrders,
             eodEvents: [...state.eodEvents, event],
           };
         }),
       updateOrderComment: (orderId, comment) =>
-        set((state) => ({
-          orders: state.orders.map((o) =>
+        set((state) => {
+          const updatedOrders = state.orders.map((o) =>
             o.id === orderId ? { ...o, comments: comment } : o
-          ),
-        })),
+          );
+          const updatedOrder = updatedOrders.find(o => o.id === orderId);
+          if (updatedOrder) syncOrder(updatedOrder).catch(console.error);
+          return { orders: updatedOrders };
+        }),
       addOrderNote: (orderId, note) =>
-        set((state) => ({
-          orders: state.orders.map((o) =>
+        set((state) => {
+          const newNote = { ...note, id: generateUUID(), createdAt: new Date().toISOString() };
+          const updatedOrders = state.orders.map((o) =>
             o.id === orderId
-              ? { ...o, notes: [...(o.notes ?? []), { ...note, id: `note-${Date.now()}-${Math.random().toString(36).slice(2)}`, createdAt: new Date().toISOString() }] }
+              ? { ...o, notes: [...(o.notes ?? []), newNote] }
               : o
-          ),
-        })),
+          );
+          const updatedOrder = updatedOrders.find(o => o.id === orderId);
+          if (updatedOrder) syncOrder(updatedOrder).catch(console.error);
+          return { orders: updatedOrders };
+        }),
       deleteOrderNote: (orderId, noteId) =>
         set((state) => ({
           orders: state.orders.map((o) =>
@@ -176,29 +186,41 @@ export const useOrderStore = create<OrderStore>()(
           ),
         })),
       updateOrderTracking: (orderId, trackingNumber) =>
-        set((state) => ({
-          orders: state.orders.map((o) =>
+        set((state) => {
+          const updatedOrders = state.orders.map((o) =>
             o.id === orderId ? { ...o, trackingNumber } : o
-          ),
-        })),
+          );
+          const updatedOrder = updatedOrders.find(o => o.id === orderId);
+          if (updatedOrder) syncOrder(updatedOrder).catch(console.error);
+          return { orders: updatedOrders };
+        }),
       updateOrderCarrier: (orderId, carrier, deliveryType) =>
-        set((state) => ({
-          orders: state.orders.map((o) =>
+        set((state) => {
+          const updatedOrders = state.orders.map((o) =>
             o.id === orderId ? { ...o, deliveryCarrier: carrier, deliveryType } : o
-          ),
-        })),
+          );
+          const updatedOrder = updatedOrders.find(o => o.id === orderId);
+          if (updatedOrder) syncOrder(updatedOrder).catch(console.error);
+          return { orders: updatedOrders };
+        }),
       updateOrderLabelQty: (orderId, qty) =>
-        set((state) => ({
-          orders: state.orders.map((o) =>
+        set((state) => {
+          const updatedOrders = state.orders.map((o) =>
             o.id === orderId ? { ...o, labelQty: qty } : o
-          ),
-        })),
+          );
+          const updatedOrder = updatedOrders.find(o => o.id === orderId);
+          if (updatedOrder) syncOrder(updatedOrder).catch(console.error);
+          return { orders: updatedOrders };
+        }),
       updateOrderCategory: (orderId, category) =>
-        set((state) => ({
-          orders: state.orders.map((o) =>
+        set((state) => {
+          const updatedOrders = state.orders.map((o) =>
             o.id === orderId ? { ...o, category } : o
-          ),
-        })),
+          );
+          const updatedOrder = updatedOrders.find(o => o.id === orderId);
+          if (updatedOrder) syncOrder(updatedOrder).catch(console.error);
+          return { orders: updatedOrders };
+        }),
       updateOrderPriority: (orderId, priority) =>
         set((state) => {
           const updatedOrders = state.orders.map((o) =>
@@ -212,26 +234,36 @@ export const useOrderStore = create<OrderStore>()(
               // Remove the order from its current position
               const otherOrders = updatedOrders.filter(o => o.id !== orderId);
               // Add it to the beginning of the array
-              return { orders: [targetOrder, ...otherOrders] };
+              const reorderedOrders = [targetOrder, ...otherOrders];
+              syncOrder(targetOrder).catch(console.error);
+              return { orders: reorderedOrders };
             }
           }
           
+          const updatedOrder = updatedOrders.find(o => o.id === orderId);
+          if (updatedOrder) syncOrder(updatedOrder).catch(console.error);
           return { orders: updatedOrders };
         }),
       updateOrderNumberOfBoxes: (orderId, numberOfBoxes) =>
-        set((state) => ({
-          orders: state.orders.map((o) =>
+        set((state) => {
+          const updatedOrders = state.orders.map((o) =>
             o.id === orderId ? { ...o, numberOfBoxes } : o
-          ),
-        })),
+          );
+          const updatedOrder = updatedOrders.find(o => o.id === orderId);
+          if (updatedOrder) syncOrder(updatedOrder).catch(console.error);
+          return { orders: updatedOrders };
+        }),
       saveOrderLabels: (orderId, carrier, labels) =>
-        set((state) => ({
-          orders: state.orders.map((o) =>
+        set((state) => {
+          const updatedOrders = state.orders.map((o) =>
             o.id === orderId
               ? { ...o, labelPrintedAt: new Date().toISOString(), labelCarrier: carrier, labelData: labels }
               : o
-          ),
-        })),
+          );
+          const updatedOrder = updatedOrders.find(o => o.id === orderId);
+          if (updatedOrder) syncOrder(updatedOrder).catch(console.error);
+          return { orders: updatedOrders };
+        }),
       bulkUpdateStatus: (orderIds, status) =>
         set((state) => {
           const now = new Date().toISOString();
@@ -250,10 +282,15 @@ export const useOrderStore = create<OrderStore>()(
               userName: user?.name,
               department: user?.department,
             }));
+          const updatedOrders = state.orders.map((o) =>
+            orderIds.includes(o.id) ? { ...o, status } : o
+          );
+          // Sync all updated orders to Supabase
+          updatedOrders.filter(o => orderIds.includes(o.id)).forEach(o => {
+            syncOrder(o).catch(console.error);
+          });
           return {
-            orders: state.orders.map((o) =>
-              orderIds.includes(o.id) ? { ...o, status } : o
-            ),
+            orders: updatedOrders,
             eodEvents: [...state.eodEvents, ...newEvents],
           };
         }),
@@ -305,17 +342,23 @@ export const useOrderStore = create<OrderStore>()(
       setEmailConfig: (config) =>
         set((state) => ({ emailConfig: { ...state.emailConfig, ...config } })),
       clearEodEvents: () => set({ eodEvents: [] }),
-      addReturn: (ret) =>
+      addReturn: (ret) => {
         set((state) => ({
           returns: [...state.returns, ret],
           orders: state.orders.map((o) =>
             o.id === ret.orderId ? { ...o, status: 'returned', returnId: ret.id } : o
           ),
-        })),
-      updateReturn: (returnId, updates) =>
-        set((state) => ({
-          returns: state.returns.map((r) => r.id === returnId ? { ...r, ...updates } : r),
-        })),
+        }));
+        syncReturn(ret).catch(console.error);
+      },
+      updateReturn: (returnId, updates) => {
+        set((state) => {
+          const updatedReturns = state.returns.map((r) => r.id === returnId ? { ...r, ...updates } : r);
+          const updated = updatedReturns.find(r => r.id === returnId);
+          if (updated) syncReturn(updated).catch(console.error);
+          return { returns: updatedReturns };
+        });
+      },
       // HR Actions
       clockIn: (userId, notes) =>
         set((state) => {
@@ -400,30 +443,37 @@ export const useOrderStore = create<OrderStore>()(
           if (updated) syncLeaveRequest(updated).catch(console.error);
           return { leaveRequests: updatedRequests };
         }),
-      updateLeaveBalance: (userId, year, updates) =>
+      updateLeaveBalance: (userId, year, updates) => {
         set((state) => {
           const existing = state.leaveBalances.find(
             (b) => b.userId === userId && b.year === year
           );
+          let updatedBalances;
+          let balanceToSync: LeaveBalance;
+          
           if (existing) {
-            return {
-              leaveBalances: state.leaveBalances.map((b) =>
-                b.userId === userId && b.year === year ? { ...b, ...updates } : b
-              ),
+            updatedBalances = state.leaveBalances.map((b) =>
+              b.userId === userId && b.year === year ? { ...b, ...updates } : b
+            );
+            balanceToSync = updatedBalances.find(b => b.userId === userId && b.year === year)!;
+          } else {
+            // Create default balance if not exists
+            balanceToSync = {
+              userId,
+              year,
+              annual: 25,
+              sick: 10,
+              unpaid: 999,
+              used: { annual: 0, sick: 0, unpaid: 0, other: 0 },
+              ...updates,
             };
+            updatedBalances = [...state.leaveBalances, balanceToSync];
           }
-          // Create default balance if not exists
-          const newBalance: LeaveBalance = {
-            userId,
-            year,
-            annual: 25,
-            sick: 10,
-            unpaid: 999,
-            used: { annual: 0, sick: 0, unpaid: 0, other: 0 },
-            ...updates,
-          };
-          return { leaveBalances: [...state.leaveBalances, newBalance] };
-        }),
+          
+          syncLeaveBalance(balanceToSync).catch(console.error);
+          return { leaveBalances: updatedBalances };
+        });
+      },
     }),
     {
       name: 'ebay-orders-idb-v6',

@@ -396,6 +396,28 @@ export async function syncLeaveBalance(balance: LeaveBalance): Promise<void> {
   if (error) console.error('Error syncing leave balance:', error);
 }
 
+// ==================== RETURNS ====================
+
+export async function syncReturn(ret: ReturnRecord): Promise<void> {
+  const { error } = await supabase
+    .from('returns')
+    .upsert({
+      id: ret.id,
+      order_id: ret.orderId,
+      sales_record_number: ret.salesRecordNumber,
+      order_number: ret.orderNumber,
+      reason: ret.reason,
+      status: ret.status,
+      notes: ret.notes,
+      returned_at: ret.returnedAt,
+      processed_by_user_id: ret.processedByUserId,
+      processed_by_user_name: ret.processedByUserName,
+      refund_amount: ret.refundAmount,
+    });
+  
+  if (error) console.error('Error syncing return:', error);
+}
+
 // ==================== FULL SYNC ====================
 
 export async function loadAllFromSupabase() {
