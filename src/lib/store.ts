@@ -2,7 +2,7 @@ import { create } from 'zustand';
 import { persist, createJSONStorage } from 'zustand/middleware';
 import { get, set as idbSet, del } from 'idb-keyval';
 import { Order, OrderNote, OrderStatus, Batch, DeliveryCarrier, DeliveryType, AppUser, EodEvent, ReturnRecord, Department, AttendanceRecord, LeaveRequest, LeaveBalance } from './types';
-import { syncAttendance, syncLeaveRequest, syncOrder, syncBatch } from './supabase-store';
+import { syncAttendance, syncLeaveRequest, syncOrder, syncBatch, syncUser, deleteUserFromSupabase } from './supabase-store';
 
 // Generate proper UUID v4 for PostgreSQL compatibility
 function generateUUID(): string {
@@ -285,14 +285,22 @@ export const useOrderStore = create<OrderStore>()(
           orders: state.orders.filter((o) => o.batchId !== batchId),
           batches: state.batches.filter((b) => b.id !== batchId),
         })),
-      addUser: (user) =>
-        set((state) => ({ users: [...state.users, user] })),
-      updateUser: (userId, updates) =>
-        set((state) => ({
-          users: state.users.map((u) => u.id === userId ? { ...u, ...updates } : u),
-        })),
-      deleteUser: (userId) =>
-        set((state) => ({ users: state.users.filter((u) => u.id !== userId) })),
+      addUser: (user) => {
+        set((state) => ({ users: [...state.users, user] }));
+        syncUser(user).catch(console.error);
+      },
+      updateUser: (userId, updates) => {
+        set((state) => {
+          const updatedUsers = state.users.map((u) => u.id === userId ? { ...u, ...updates } : u);
+          const updated = updatedUsers.find(u => u.id === userId);
+          if (updated) syncUser(updated).catch(console.error);
+          return { users: updatedUsers };
+        });
+      },
+      deleteUser: (userId) => {
+        set((state) => ({ users: state.users.filter((u) => u.id !== userId) }));
+        deleteUserFromSupabase(userId).catch(console.error);
+      },
       setCurrentUser: (userId) => set({ currentUserId: userId }),
       setEmailConfig: (config) =>
         set((state) => ({ emailConfig: { ...state.emailConfig, ...config } })),

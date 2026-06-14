@@ -45,6 +45,7 @@ export interface UserTarget {
 export interface AppUser {
   id: string;
   name: string;
+  email?: string;
   role: UserRole;
   roles: UserRole[];
   /** Primary department (kept for backwards compat) */

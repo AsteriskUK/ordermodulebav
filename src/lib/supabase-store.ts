@@ -23,6 +23,7 @@ export async function fetchUsers(): Promise<AppUser[]> {
   return data?.map(u => ({
     id: u.id,
     name: u.name,
+    email: u.email,
     role: u.role,
     roles: u.roles || [u.role],
     department: u.department,
@@ -32,11 +33,18 @@ export async function fetchUsers(): Promise<AppUser[]> {
 }
 
 export async function syncUser(user: AppUser): Promise<void> {
+  // Skip if user ID is not valid UUID
+  if (!isValidUUID(user.id)) {
+    console.log('Skipping sync for user with invalid ID:', user.id);
+    return;
+  }
+  
   const { error } = await supabase
     .from('users')
     .upsert({
       id: user.id,
       name: user.name,
+      email: user.email,
       role: user.role,
       roles: user.roles,
       department: user.department,
@@ -45,7 +53,25 @@ export async function syncUser(user: AppUser): Promise<void> {
       is_active: true,
     });
   
-  if (error) console.error('Error syncing user:', error);
+  if (error) {
+    console.error('Error syncing user:', JSON.stringify(error, null, 2));
+    console.error('User data:', { id: user.id, name: user.name, email: user.email });
+  }
+}
+
+export async function deleteUserFromSupabase(userId: string): Promise<void> {
+  // Skip if user ID is not valid UUID
+  if (!isValidUUID(userId)) {
+    console.log('Skipping delete for user with invalid ID:', userId);
+    return;
+  }
+  
+  const { error } = await supabase
+    .from('users')
+    .update({ is_active: false })
+    .eq('id', userId);
+  
+  if (error) console.error('Error deleting user from Supabase:', error);
 }
 
 // ==================== BATCHES ====================

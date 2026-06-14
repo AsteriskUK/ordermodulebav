@@ -77,8 +77,13 @@ function DeptCheckboxes({
   );
 }
 
-function generateId() {
-  return `user-${Date.now()}-${Math.random().toString(36).substr(2, 6)}`;
+// Generate proper UUID v4 for PostgreSQL compatibility
+function generateUUID(): string {
+  return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function(c) {
+    const r = Math.random() * 16 | 0;
+    const v = c === 'x' ? r : (r & 0x3 | 0x8);
+    return v.toString(16);
+  });
 }
 
 export function UserManagement() {
@@ -96,6 +101,7 @@ export function UserManagement() {
   const [editPin, setEditPin] = useState('');
 
   const [newName, setNewName] = useState('');
+  const [newEmail, setNewEmail] = useState('');
   const [newRole, setNewRole] = useState<UserRole>('staff');
   const [newDepts, setNewDepts] = useState<Department[]>([]);
   const [newPin, setNewPin] = useState('');
@@ -130,8 +136,9 @@ export function UserManagement() {
     if (!newName.trim()) { toast.error('Name is required'); return; }
     if (!newDepts.length) { toast.error('Select at least one department'); return; }
     addUser({
-      id: generateId(),
+      id: generateUUID(),
       name: newName.trim(),
+      email: newEmail.trim() || undefined,
       role: newRole,
       roles: [newRole],
       department: newDepts[0],
@@ -140,6 +147,7 @@ export function UserManagement() {
     });
     toast.success(`${newName} added`);
     setNewName('');
+    setNewEmail('');
     setNewRole('staff');
     setNewDepts([]);
     setNewPin('');
@@ -222,6 +230,16 @@ export function UserManagement() {
                   onChange={(e) => setNewName(e.target.value)}
                   placeholder="Full name"
                   className="w-44 h-8 text-sm"
+                />
+              </div>
+              <div>
+                <label className="text-xs text-slate-500 block mb-1">Email</label>
+                <Input
+                  value={newEmail}
+                  onChange={(e) => setNewEmail(e.target.value)}
+                  placeholder="email@company.com"
+                  type="email"
+                  className="w-48 h-8 text-sm"
                 />
               </div>
               <div>
