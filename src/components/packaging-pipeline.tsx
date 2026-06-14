@@ -38,6 +38,7 @@ import {
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { DeliveryBadge } from './delivery-badge';
+import { OrderDetailDialog } from './order-detail-dialog';
 
 function getAllowedCategories(depts: Department[]): string[] | null {
   const cats: string[] = [];
@@ -59,6 +60,8 @@ export function PackagingPipeline() {
   const bulkUpdateStatus = useOrderStore((s) => s.bulkUpdateStatus);
   const [activeOrderId, setActiveOrderId] = useState<string | null>(null);
   const activeOrder = orders.find((o) => o.id === activeOrderId) ?? null;
+  const [dialogOrderId, setDialogOrderId] = useState<string | null>(null);
+  const dialogOrder = dialogOrderId ? orders.find((o) => o.id === dialogOrderId) : null;
   const [showVariationDetails, setShowVariationDetails] = useState(false);
   const [variationOnly, setVariationOnly] = useState(false);
 
@@ -452,7 +455,7 @@ export function PackagingPipeline() {
                               size="sm"
                               variant="outline"
                               className="h-6 text-xs px-2 text-blue-600 hover:text-blue-700 hover:bg-blue-50"
-                              onClick={() => setActiveOrderId(order.id)}
+                              onClick={() => setDialogOrderId(order.id)}
                             >
                               <MessageSquare className="h-3 w-3 mr-1" />
                               Note
@@ -720,6 +723,11 @@ export function PackagingPipeline() {
             )}
           </div>
         </div>
+      )}
+
+      {/* Order Detail Dialog for Notes */}
+      {dialogOrder && (
+        <OrderDetailDialog order={dialogOrder} onClose={() => setDialogOrderId(null)} />
       )}
     </div>
   );
