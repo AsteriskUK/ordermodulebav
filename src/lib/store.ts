@@ -1,7 +1,7 @@
 import { create } from 'zustand';
 import { persist, createJSONStorage } from 'zustand/middleware';
 import { get, set as idbSet, del } from 'idb-keyval';
-import { Order, OrderNote, OrderStatus, Batch, DeliveryCarrier, DeliveryType, AppUser, EodEvent, ReturnRecord, Department } from './types';
+import { Order, OrderNote, OrderStatus, Batch, DeliveryCarrier, DeliveryType, AppUser, EodEvent, ReturnRecord, Department, AttendanceRecord, LeaveRequest, LeaveBalance } from './types';
 
 export interface EmailConfig {
   enabled: boolean;
@@ -62,6 +62,18 @@ interface OrderStore {
   clearEodEvents: () => void;
   addReturn: (ret: ReturnRecord) => void;
   updateReturn: (returnId: string, updates: Partial<ReturnRecord>) => void;
+  // HR Actions
+  attendanceRecords: AttendanceRecord[];
+  leaveRequests: LeaveRequest[];
+  leaveBalances: LeaveBalance[];
+  clockIn: (userId: string, notes?: string) => void;
+  clockOut: (userId: string) => void;
+  updateAttendance: (recordId: string, updates: Partial<AttendanceRecord>) => void;
+  addLeaveRequest: (request: Omit<LeaveRequest, 'id' | 'requestedAt' | 'status'>) => void;
+  approveLeave: (requestId: string, approverId: string) => void;
+  rejectLeave: (requestId: string, reason: string) => void;
+  cancelLeave: (requestId: string) => void;
+  updateLeaveBalance: (userId: string, year: number, updates: Partial<LeaveBalance>) => void;
 }
 
 export const useOrderStore = create<OrderStore>()(
@@ -71,6 +83,9 @@ export const useOrderStore = create<OrderStore>()(
       batches: [],
       eodEvents: [],
       returns: [],
+      attendanceRecords: [],
+      leaveRequests: [],
+      leaveBalances: [],
       users: [
         { id: 'admin-1', name: 'Admin', role: 'admin', roles: ['admin'], department: 'management', departments: ['management'] as Department[], pin: '1234' },
       ],
@@ -276,6 +291,97 @@ export const useOrderStore = create<OrderStore>()(
         set((state) => ({
           returns: state.returns.map((r) => r.id === returnId ? { ...r, ...updates } : r),
         })),
+      // HR Actions
+      clockIn: (userId, notes) =>
+        set((state) => {
+          const today = new Date().toISOString().slice(0, 10);
+          const existing = state.attendanceRecords.find(
+            (r) => r.userId === userId && r.date === today
+          );
+          if (existing) return {}; // Already clocked in
+          const record: AttendanceRecord = {
+            id: `att-${Date.now()}`,
+            userId,
+            date: today,
+            clockIn: new Date().toISOString(),
+            status: 'present',
+            notes,
+          };
+          return { attendanceRecords: [...state.attendanceRecords, record] };
+        }),
+      clockOut: (userId) =>
+        set((state) => {
+          const today = new Date().toISOString().slice(0, 10);
+          return {
+            attendanceRecords: state.attendanceRecords.map((r) =>
+              r.userId === userId && r.date === today && !r.clockOut
+                ? { ...r, clockOut: new Date().toISOString() }
+                : r
+            ),
+          };
+        }),
+      updateAttendance: (recordId, updates) =>
+        set((state) => ({
+          attendanceRecords: state.attendanceRecords.map((r) =>
+            r.id === recordId ? { ...r, ...updates } : r
+          ),
+        })),
+      addLeaveRequest: (request) =>
+        set((state) => {
+          const newRequest: LeaveRequest = {
+            ...request,
+            id: `leave-${Date.now()}`,
+            requestedAt: new Date().toISOString(),
+            status: 'pending',
+          };
+          return { leaveRequests: [...state.leaveRequests, newRequest] };
+        }),
+      approveLeave: (requestId, approverId) =>
+        set((state) => ({
+          leaveRequests: state.leaveRequests.map((r) =>
+            r.id === requestId
+              ? { ...r, status: 'approved', approvedBy: approverId, approvedAt: new Date().toISOString() }
+              : r
+          ),
+        })),
+      rejectLeave: (requestId, reason) =>
+        set((state) => ({
+          leaveRequests: state.leaveRequests.map((r) =>
+            r.id === requestId
+              ? { ...r, status: 'rejected', rejectionReason: reason }
+              : r
+          ),
+        })),
+      cancelLeave: (requestId) =>
+        set((state) => ({
+          leaveRequests: state.leaveRequests.map((r) =>
+            r.id === requestId ? { ...r, status: 'cancelled' } : r
+          ),
+        })),
+      updateLeaveBalance: (userId, year, updates) =>
+        set((state) => {
+          const existing = state.leaveBalances.find(
+            (b) => b.userId === userId && b.year === year
+          );
+          if (existing) {
+            return {
+              leaveBalances: state.leaveBalances.map((b) =>
+                b.userId === userId && b.year === year ? { ...b, ...updates } : b
+              ),
+            };
+          }
+          // Create default balance if not exists
+          const newBalance: LeaveBalance = {
+            userId,
+            year,
+            annual: 25,
+            sick: 10,
+            unpaid: 999,
+            used: { annual: 0, sick: 0, unpaid: 0, other: 0 },
+            ...updates,
+          };
+          return { leaveBalances: [...state.leaveBalances, newBalance] };
+        }),
     }),
     {
       name: 'ebay-orders-idb-v5',
@@ -289,6 +395,9 @@ export const useOrderStore = create<OrderStore>()(
           batches:     s.batches     ?? [],
           eodEvents:   s.eodEvents   ?? [],
           returns:     s.returns     ?? [],
+          attendanceRecords: (s as OrderStore).attendanceRecords ?? [],
+          leaveRequests: (s as OrderStore).leaveRequests ?? [],
+          leaveBalances: (s as OrderStore).leaveBalances ?? [],
           users:       s.users       ?? [
             { id: 'admin-1', name: 'Admin', role: 'admin', roles: ['admin'], department: 'management', departments: ['management'] as Department[], pin: '1234' },
           ],

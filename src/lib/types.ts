@@ -169,6 +169,53 @@ export interface Batch {
   source: 'ebay' | 'backmarket' | 'amazon' | 'temu' | 'onbuy' | 'manual';
 }
 
+// HR Module Types
+export type AttendanceStatus = 'present' | 'absent' | 'late' | 'half-day' | 'wfh';
+
+export interface AttendanceRecord {
+  id: string;
+  userId: string;
+  date: string; // ISO date string YYYY-MM-DD
+  clockIn?: string; // ISO timestamp
+  clockOut?: string; // ISO timestamp
+  status: AttendanceStatus;
+  notes?: string;
+  approvedBy?: string; // userId of approver
+  approvedAt?: string;
+}
+
+export type LeaveType = 'annual' | 'sick' | 'unpaid' | 'maternity' | 'paternity' | 'bereavement' | 'other';
+export type LeaveStatus = 'pending' | 'approved' | 'rejected' | 'cancelled';
+
+export interface LeaveRequest {
+  id: string;
+  userId: string;
+  type: LeaveType;
+  startDate: string; // YYYY-MM-DD
+  endDate: string; // YYYY-MM-DD
+  days: number;
+  reason: string;
+  status: LeaveStatus;
+  requestedAt: string;
+  approvedBy?: string;
+  approvedAt?: string;
+  rejectionReason?: string;
+}
+
+export interface LeaveBalance {
+  userId: string;
+  year: number;
+  annual: number; // days available
+  sick: number; // days available (may be unlimited, but track usage)
+  unpaid: number; // unlimited, but track for reporting
+  used: {
+    annual: number;
+    sick: number;
+    unpaid: number;
+    other: number;
+  };
+}
+
 export const ORDER_STATUS_CONFIG: Record<OrderStatus, { label: string; color: string }> = {
   pending: { label: 'Pending', color: 'bg-yellow-100 text-yellow-800 border-yellow-300' },
   assembling: { label: 'Assembling', color: 'bg-amber-100 text-amber-800 border-amber-300' },

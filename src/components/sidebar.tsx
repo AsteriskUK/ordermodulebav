@@ -18,6 +18,7 @@ import {
   ChevronRight,
   MessageSquare,
   FilePlus,
+  UsersRound,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useOrderStore } from '@/lib/store';
@@ -36,6 +37,7 @@ const ALL_NAV = [
   { name: 'Returns', href: '/returns', icon: PackageOpen, staffVisible: false },
   { name: 'Reports', href: '/reports', icon: BarChart2, staffVisible: false },
   { name: 'EOD Report', href: '/eod', icon: FileBarChart2, staffVisible: false },
+  { name: 'HR Module', href: '/hr', icon: UsersRound, staffVisible: true },
   { name: 'Users & Roles', href: '/users', icon: Users, staffVisible: false },
 ];
 
