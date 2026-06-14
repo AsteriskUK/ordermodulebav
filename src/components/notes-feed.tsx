@@ -3,8 +3,9 @@
 import { useMemo, useState } from 'react';
 import { useOrderStore } from '@/lib/store';
 import { OrderNote } from '@/lib/types';
-import { MessageSquare, Search, Trash2 } from 'lucide-react';
+import { MessageSquare, Search, Trash2, Plus } from 'lucide-react';
 import { Input } from '@/components/ui/input';
+import { Button } from '@/components/ui/button';
 import { OrderDetailDialog } from './order-detail-dialog';
 import { toast } from 'sonner';
 
@@ -19,8 +20,12 @@ export function NotesFeed() {
   const orders = useOrderStore((s) => s.orders);
   const currentUser = useOrderStore((s) => s.users.find((u) => u.id === s.currentUserId));
   const deleteOrderNote = useOrderStore((s) => s.deleteOrderNote);
+  const addOrderNote = useOrderStore((s) => s.addOrderNote);
   const [search, setSearch] = useState('');
   const [openOrderId, setOpenOrderId] = useState<string | null>(null);
+  const [showAddForm, setShowAddForm] = useState(false);
+  const [selectedOrderId, setSelectedOrderId] = useState('');
+  const [noteText, setNoteText] = useState('');
 
   const feed = useMemo(() => {
     const entries: FeedEntry[] = [];
@@ -56,6 +61,31 @@ export function NotesFeed() {
     toast.success('Note deleted');
   };
 
+  const handleAdd = () => {
+    if (!selectedOrderId) {
+      toast.error('Please select an order');
+      return;
+    }
+    if (!noteText.trim()) {
+      toast.error('Please enter a note');
+      return;
+    }
+    if (!currentUser) {
+      toast.error('Please sign in to add notes');
+      return;
+    }
+    
+    addOrderNote(selectedOrderId, {
+      text: noteText.trim(),
+      authorId: currentUser.id,
+      authorName: currentUser.name,
+    });
+    toast.success('Note added');
+    setNoteText('');
+    setSelectedOrderId('');
+    setShowAddForm(false);
+  };
+
   return (
     <div className="p-6 max-w-3xl mx-auto space-y-4">
       <div>
@@ -68,15 +98,60 @@ export function NotesFeed() {
         </p>
       </div>
 
-      <div className="relative">
-        <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400" />
-        <Input
-          placeholder="Search notes, orders, authors..."
-          value={search}
-          onChange={(e) => setSearch(e.target.value)}
-          className="pl-9"
-        />
+      <div className="flex gap-2">
+        <div className="relative flex-1">
+          <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400" />
+          <Input
+            placeholder="Search notes, orders, authors..."
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            className="pl-9"
+          />
+        </div>
+        <Button onClick={() => setShowAddForm(!showAddForm)} variant="outline">
+          <Plus className="h-4 w-4 mr-1" />
+          Add Note
+        </Button>
       </div>
+
+      {/* Add Note Form */}
+      {showAddForm && (
+        <div className="bg-blue-50 border border-blue-200 rounded-lg p-4 space-y-3">
+          <div>
+            <label className="text-sm font-medium text-slate-700 block mb-1">Select Order</label>
+            <select
+              value={selectedOrderId}
+              onChange={(e) => setSelectedOrderId(e.target.value)}
+              className="w-full px-3 py-2 border border-slate-300 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+            >
+              <option value="">Choose an order...</option>
+              {orders
+                .filter(o => (o.postToAddress1 || o.postToPostcode))
+                .sort((a, b) => b.importedAt.localeCompare(a.importedAt))
+                .slice(0, 50)
+                .map(o => (
+                  <option key={o.id} value={o.id}>
+                    #{o.salesRecordNumber} — {o.itemTitle.slice(0, 60)}{o.itemTitle.length > 60 ? '...' : ''}
+                  </option>
+                ))}
+            </select>
+          </div>
+          <div>
+            <label className="text-sm font-medium text-slate-700 block mb-1">Note</label>
+            <textarea
+              value={noteText}
+              onChange={(e) => setNoteText(e.target.value)}
+              placeholder="Enter your note..."
+              rows={3}
+              className="w-full px-3 py-2 border border-slate-300 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 resize-none"
+            />
+          </div>
+          <div className="flex gap-2">
+            <Button onClick={handleAdd} size="sm">Add Note</Button>
+            <Button onClick={() => setShowAddForm(false)} variant="outline" size="sm">Cancel</Button>
+          </div>
+        </div>
+      )}
 
       {filtered.length === 0 ? (
         <div className="text-center py-16 text-slate-400">
