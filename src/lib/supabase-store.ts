@@ -234,7 +234,10 @@ export async function syncAttendance(record: AttendanceRecord): Promise<void> {
       approved_at: record.approvedAt,
     });
   
-  if (error) console.error('Error syncing attendance:', error);
+  if (error) {
+    console.error('Error syncing attendance:', JSON.stringify(error, null, 2));
+    throw error;
+  }
 }
 
 // ==================== LEAVE REQUESTS ====================

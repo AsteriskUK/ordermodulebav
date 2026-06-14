@@ -4,6 +4,15 @@ import { get, set as idbSet, del } from 'idb-keyval';
 import { Order, OrderNote, OrderStatus, Batch, DeliveryCarrier, DeliveryType, AppUser, EodEvent, ReturnRecord, Department, AttendanceRecord, LeaveRequest, LeaveBalance } from './types';
 import { syncAttendance, syncLeaveRequest } from './supabase-store';
 
+// Generate proper UUID v4 for PostgreSQL compatibility
+function generateUUID(): string {
+  return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function(c) {
+    const r = Math.random() * 16 | 0;
+    const v = c === 'x' ? r : (r & 0x3 | 0x8);
+    return v.toString(16);
+  });
+}
+
 export interface EmailConfig {
   enabled: boolean;
   recipientEmail: string;
@@ -301,7 +310,7 @@ export const useOrderStore = create<OrderStore>()(
           );
           if (existing) return {}; // Already clocked in
           const record: AttendanceRecord = {
-            id: `att-${Date.now()}`,
+            id: generateUUID(),
             userId,
             date: today,
             clockIn: new Date().toISOString(),
@@ -338,7 +347,7 @@ export const useOrderStore = create<OrderStore>()(
         set((state) => {
           const newRequest: LeaveRequest = {
             ...request,
-            id: `leave-${Date.now()}`,
+            id: generateUUID(),
             requestedAt: new Date().toISOString(),
             status: 'pending',
           };
