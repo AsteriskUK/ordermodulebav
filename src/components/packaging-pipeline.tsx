@@ -180,21 +180,19 @@ export function PackagingPipeline() {
           <span className="text-slate-500">Viewing as:</span>
           <span className="font-medium text-slate-700">{currentUser.name}</span>
           <span className="text-slate-400">·</span>
-          {allowedCategories ? (
-            <>
-              <span className="text-slate-500">Departments:</span>
-              {userDepts.map((d) => (
-                <Badge key={d} variant="outline" className={`text-xs ${DEPARTMENT_CONFIG[d]?.color ?? ''}`}>
-                  {DEPARTMENT_CONFIG[d]?.label ?? d}
-                </Badge>
-              ))}
-              <span className="text-slate-400 ml-1">
-                (showing {visibleOrders.length} of {orders.length} orders)
-              </span>
-            </>
+          <span className="text-slate-500">Departments:</span>
+          {userDepts.length > 0 ? (
+            userDepts.map((d) => (
+              <Badge key={d} variant="outline" className={`text-xs ${DEPARTMENT_CONFIG[d]?.color ?? ''}`}>
+                {DEPARTMENT_CONFIG[d]?.label ?? d}
+              </Badge>
+            ))
           ) : (
-            <Badge variant="outline" className="text-xs bg-slate-100 text-slate-700">All departments</Badge>
+            <Badge variant="outline" className="text-xs bg-slate-100 text-slate-700">None</Badge>
           )}
+          <span className="text-slate-400 ml-1">
+            ({isAdmin ? 'Admin view' : `showing ${visibleOrders.length} of ${orders.length} orders`})
+          </span>
         </div>
       ) : (
         <div className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded px-3 py-2">
