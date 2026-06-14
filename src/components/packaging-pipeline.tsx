@@ -450,6 +450,15 @@ export function PackagingPipeline() {
                             )}
                             <Button
                               size="sm"
+                              variant="outline"
+                              className="h-6 text-xs px-2 text-blue-600 hover:text-blue-700 hover:bg-blue-50"
+                              onClick={() => setActiveOrderId(order.id)}
+                            >
+                              <MessageSquare className="h-3 w-3 mr-1" />
+                              Note
+                            </Button>
+                            <Button
+                              size="sm"
                               variant="ghost"
                               className="h-6 text-xs px-2 text-red-600 hover:text-red-700 hover:bg-red-50"
                               onClick={() => moveToHeld(order.id)}
