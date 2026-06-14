@@ -93,6 +93,11 @@ CREATE TABLE IF NOT EXISTS orders (
   metadata JSONB DEFAULT '{}',
   return_id TEXT,
   
+  -- Label printing
+  label_printed_at TIMESTAMPTZ,
+  label_carrier TEXT,
+  label_data TEXT[], -- base64 PDF(s)
+  
   created_at TIMESTAMPTZ DEFAULT NOW(),
   updated_at TIMESTAMPTZ DEFAULT NOW()
 );
@@ -128,12 +133,15 @@ CREATE TABLE IF NOT EXISTS returns (
   order_id UUID REFERENCES orders(id) ON DELETE SET NULL,
   sales_record_number TEXT,
   order_number TEXT,
+  buyer_username TEXT,
+  item_title TEXT,
   reason TEXT NOT NULL,
-  status TEXT DEFAULT 'pending' CHECK (status IN ('pending', 'approved', 'rejected', 'received', 'refunded', 'completed')),
   notes TEXT,
-  requested_at TIMESTAMPTZ DEFAULT NOW(),
-  resolved_at TIMESTAMPTZ,
-  resolved_by UUID REFERENCES users(id),
+  returned_at TIMESTAMPTZ DEFAULT NOW(),
+  processed_by_user_id UUID REFERENCES users(id),
+  processed_by_user_name TEXT,
+  refund_amount NUMERIC(10,2),
+  status TEXT DEFAULT 'pending' CHECK (status IN ('pending', 'received', 'refunded', 'rejected')),
   metadata JSONB DEFAULT '{}'
 );
 
@@ -207,6 +215,10 @@ CREATE INDEX IF NOT EXISTS idx_leave_user ON leave_requests(user_id);
 CREATE INDEX IF NOT EXISTS idx_leave_status ON leave_requests(status);
 CREATE INDEX IF NOT EXISTS idx_leave_dates ON leave_requests(start_date, end_date);
 
+CREATE INDEX IF NOT EXISTS idx_returns_order ON returns(order_id);
+CREATE INDEX IF NOT EXISTS idx_returns_status ON returns(status);
+CREATE INDEX IF NOT EXISTS idx_returns_returned_at ON returns(returned_at);
+
 -- ==================== TRIGGERS ====================
 
 -- Auto-update updated_at timestamp
@@ -228,6 +240,9 @@ CREATE TRIGGER update_attendance_updated_at BEFORE UPDATE ON attendance_records
   FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
 
 CREATE TRIGGER update_leave_balances_updated_at BEFORE UPDATE ON leave_balances
+  FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
+
+CREATE TRIGGER update_returns_updated_at BEFORE UPDATE ON returns
   FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
 
 -- ==================== ROW LEVEL SECURITY ====================

@@ -174,6 +174,9 @@ export async function fetchOrders(): Promise<Order[]> {
     dispatchedOnDate: o.dispatched_on_date,
     importedAt: o.imported_at,
     returnId: o.return_id,
+    labelPrintedAt: o.label_printed_at,
+    labelCarrier: o.label_carrier,
+    labelData: o.label_data,
     notes: o.order_notes?.map((n: any) => ({
       id: n.id,
       authorId: n.author_id,
@@ -240,6 +243,9 @@ export async function syncOrder(order: Order): Promise<void> {
       dispatched_on_date: order.dispatchedOnDate,
       imported_at: order.importedAt,
       return_id: order.returnId,
+      label_printed_at: order.labelPrintedAt,
+      label_carrier: order.labelCarrier,
+      label_data: order.labelData,
     });
   
   if (error) {
@@ -418,13 +424,42 @@ export async function syncReturn(ret: ReturnRecord): Promise<void> {
   if (error) console.error('Error syncing return:', error);
 }
 
+export async function fetchReturns(): Promise<ReturnRecord[]> {
+  const { data, error } = await supabase
+    .from('returns')
+    .select('*')
+    .order('returned_at', { ascending: false });
+  
+  if (error) {
+    console.error('Error fetching returns:', error);
+    return [];
+  }
+  
+  return data?.map(r => ({
+    id: r.id,
+    orderId: r.order_id,
+    salesRecordNumber: r.sales_record_number,
+    orderNumber: r.order_number,
+    buyerUsername: r.buyer_username,
+    itemTitle: r.item_title,
+    reason: r.reason,
+    notes: r.notes,
+    returnedAt: r.returned_at,
+    processedByUserId: r.processed_by_user_id,
+    processedByUserName: r.processed_by_user_name,
+    refundAmount: r.refund_amount,
+    status: r.status,
+  })) || [];
+}
+
 // ==================== FULL SYNC ====================
 
 export async function loadAllFromSupabase() {
-  const [users, batches, orders, attendanceRecords, leaveRequests, leaveBalances] = await Promise.all([
+  const [users, batches, orders, returns, attendanceRecords, leaveRequests, leaveBalances] = await Promise.all([
     fetchUsers(),
     fetchBatches(),
     fetchOrders(),
+    fetchReturns(),
     fetchAttendance(),
     fetchLeaveRequests(),
     fetchLeaveBalances(),
@@ -434,6 +469,7 @@ export async function loadAllFromSupabase() {
     users,
     batches,
     orders,
+    returns,
     attendanceRecords,
     leaveRequests,
     leaveBalances,

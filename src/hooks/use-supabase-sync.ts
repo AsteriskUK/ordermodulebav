@@ -34,10 +34,12 @@ export function useSupabaseSync() {
       
       const existingOrderIds = new Set(currentState.orders.map(o => o.id));
       const existingBatchIds = new Set(currentState.batches.map(b => b.id));
+      const existingReturnIds = new Set(currentState.returns.map(r => r.id));
       
-      // Add any orders/batches from Supabase that don't exist locally
+      // Add any orders/batches/returns from Supabase that don't exist locally
       const newOrders = data.orders.filter(o => !existingOrderIds.has(o.id));
       const newBatches = data.batches.filter(b => !existingBatchIds.has(b.id));
+      const newReturns = data.returns.filter(r => !existingReturnIds.has(r.id));
       
       useOrderStore.setState({
         // Users: Supabase has more users, use it if available
@@ -46,6 +48,8 @@ export function useSupabaseSync() {
         batches: [...currentState.batches, ...newBatches],
         // Orders: merge local + any from Supabase
         orders: [...currentState.orders, ...newOrders],
+        // Returns: merge local + any from Supabase
+        returns: [...currentState.returns, ...newReturns],
         // HR data: Supabase is source of truth for multi-device sync
         attendanceRecords: data.attendanceRecords.length > 0 
           ? data.attendanceRecords 
@@ -59,7 +63,7 @@ export function useSupabaseSync() {
       });
       
       setLastSync(new Date());
-      console.log('Synced from Supabase:', { newOrders: newOrders.length, newBatches: newBatches.length });
+      console.log('Synced from Supabase:', { newOrders: newOrders.length, newBatches: newBatches.length, newReturns: newReturns.length });
     } catch (err) {
       console.error('Error syncing from Supabase:', err);
       toast.error('Failed to sync from cloud');
