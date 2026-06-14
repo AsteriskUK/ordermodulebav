@@ -2,6 +2,7 @@ import { create } from 'zustand';
 import { persist, createJSONStorage } from 'zustand/middleware';
 import { get, set as idbSet, del } from 'idb-keyval';
 import { Order, OrderNote, OrderStatus, Batch, DeliveryCarrier, DeliveryType, AppUser, EodEvent, ReturnRecord, Department, AttendanceRecord, LeaveRequest, LeaveBalance } from './types';
+import { syncAttendance, syncLeaveRequest } from './supabase-store';
 
 export interface EmailConfig {
   enabled: boolean;
@@ -307,25 +308,32 @@ export const useOrderStore = create<OrderStore>()(
             status: 'present',
             notes,
           };
+          // Sync to Supabase in background
+          syncAttendance(record).catch(console.error);
           return { attendanceRecords: [...state.attendanceRecords, record] };
         }),
       clockOut: (userId) =>
         set((state) => {
           const today = new Date().toISOString().slice(0, 10);
-          return {
-            attendanceRecords: state.attendanceRecords.map((r) =>
-              r.userId === userId && r.date === today && !r.clockOut
-                ? { ...r, clockOut: new Date().toISOString() }
-                : r
-            ),
-          };
+          const updatedRecords = state.attendanceRecords.map((r) =>
+            r.userId === userId && r.date === today && !r.clockOut
+              ? { ...r, clockOut: new Date().toISOString() }
+              : r
+          );
+          // Sync to Supabase
+          const updated = updatedRecords.find(r => r.userId === userId && r.date === today);
+          if (updated) syncAttendance(updated).catch(console.error);
+          return { attendanceRecords: updatedRecords };
         }),
       updateAttendance: (recordId, updates) =>
-        set((state) => ({
-          attendanceRecords: state.attendanceRecords.map((r) =>
+        set((state) => {
+          const updatedRecords = state.attendanceRecords.map((r) =>
             r.id === recordId ? { ...r, ...updates } : r
-          ),
-        })),
+          );
+          const updated = updatedRecords.find(r => r.id === recordId);
+          if (updated) syncAttendance(updated).catch(console.error);
+          return { attendanceRecords: updatedRecords };
+        }),
       addLeaveRequest: (request) =>
         set((state) => {
           const newRequest: LeaveRequest = {
@@ -334,30 +342,40 @@ export const useOrderStore = create<OrderStore>()(
             requestedAt: new Date().toISOString(),
             status: 'pending',
           };
+          syncLeaveRequest(newRequest).catch(console.error);
           return { leaveRequests: [...state.leaveRequests, newRequest] };
         }),
       approveLeave: (requestId, approverId) =>
-        set((state) => ({
-          leaveRequests: state.leaveRequests.map((r) =>
+        set((state) => {
+          const updatedRequests = state.leaveRequests.map((r) =>
             r.id === requestId
-              ? { ...r, status: 'approved', approvedBy: approverId, approvedAt: new Date().toISOString() }
+              ? { ...r, status: 'approved' as const, approvedBy: approverId, approvedAt: new Date().toISOString() }
               : r
-          ),
-        })),
+          );
+          const updated = updatedRequests.find(r => r.id === requestId);
+          if (updated) syncLeaveRequest(updated).catch(console.error);
+          return { leaveRequests: updatedRequests };
+        }),
       rejectLeave: (requestId, reason) =>
-        set((state) => ({
-          leaveRequests: state.leaveRequests.map((r) =>
+        set((state) => {
+          const updatedRequests = state.leaveRequests.map((r) =>
             r.id === requestId
-              ? { ...r, status: 'rejected', rejectionReason: reason }
+              ? { ...r, status: 'rejected' as const, rejectionReason: reason }
               : r
-          ),
-        })),
+          );
+          const updated = updatedRequests.find(r => r.id === requestId);
+          if (updated) syncLeaveRequest(updated).catch(console.error);
+          return { leaveRequests: updatedRequests };
+        }),
       cancelLeave: (requestId) =>
-        set((state) => ({
-          leaveRequests: state.leaveRequests.map((r) =>
-            r.id === requestId ? { ...r, status: 'cancelled' } : r
-          ),
-        })),
+        set((state) => {
+          const updatedRequests = state.leaveRequests.map((r) =>
+            r.id === requestId ? { ...r, status: 'cancelled' as const } : r
+          );
+          const updated = updatedRequests.find(r => r.id === requestId);
+          if (updated) syncLeaveRequest(updated).catch(console.error);
+          return { leaveRequests: updatedRequests };
+        }),
       updateLeaveBalance: (userId, year, updates) =>
         set((state) => {
           const existing = state.leaveBalances.find(

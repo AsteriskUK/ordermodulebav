@@ -5,9 +5,13 @@ import { Sidebar } from './sidebar';
 import { EodScheduler } from './eod-scheduler';
 import { Menu } from 'lucide-react';
 import { Button } from './ui/button';
+import { useSupabaseSync } from '@/hooks/use-supabase-sync';
 
 export function AppShell({ children }: { children: React.ReactNode }) {
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+  
+  // Initialize Supabase sync (auto-syncs on load and periodically)
+  const { isSyncing, isOnline } = useSupabaseSync();
 
   return (
     <div className="flex h-screen overflow-hidden">
