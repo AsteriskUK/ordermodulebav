@@ -2,7 +2,7 @@ import { create } from 'zustand';
 import { persist, createJSONStorage } from 'zustand/middleware';
 import { get, set as idbSet, del } from 'idb-keyval';
 import { Order, OrderNote, OrderStatus, Batch, DeliveryCarrier, DeliveryType, AppUser, EodEvent, ReturnRecord, Department, AttendanceRecord, LeaveRequest, LeaveBalance } from './types';
-import { syncAttendance, syncLeaveRequest } from './supabase-store';
+import { syncAttendance, syncLeaveRequest, syncOrder, syncBatch } from './supabase-store';
 
 // Generate proper UUID v4 for PostgreSQL compatibility
 function generateUUID(): string {
@@ -120,6 +120,13 @@ export const useOrderStore = create<OrderStore>()(
           // Replace any existing order that shares a salesRecordNumber with an incoming order
           const incomingNums = new Set(ordersWithDefaults.map((o) => o.salesRecordNumber).filter(Boolean));
           const retained = state.orders.filter((o) => !incomingNums.has(o.salesRecordNumber));
+          
+          // Sync to Supabase in background
+          syncBatch(batch, state.currentUserId || undefined).catch(console.error);
+          ordersWithDefaults.forEach(order => {
+            syncOrder(order).catch(console.error);
+          });
+          
           return {
             orders: [...retained, ...ordersWithDefaults],
             batches: [...state.batches, batch],

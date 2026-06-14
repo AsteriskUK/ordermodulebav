@@ -219,7 +219,19 @@ export async function fetchAttendance(): Promise<AttendanceRecord[]> {
   })) || [];
 }
 
+// Helper to check if string is valid UUID
+function isValidUUID(str: string): boolean {
+  const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+  return uuidRegex.test(str);
+}
+
 export async function syncAttendance(record: AttendanceRecord): Promise<void> {
+  // Skip old format records that don't have valid UUIDs
+  if (!isValidUUID(record.id)) {
+    console.log('Skipping sync for old-format record:', record.id);
+    return;
+  }
+  
   const { error } = await supabase
     .from('attendance_records')
     .upsert({

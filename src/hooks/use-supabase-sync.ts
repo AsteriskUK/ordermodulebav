@@ -26,19 +26,40 @@ export function useSupabaseSync() {
     setIsSyncing(true);
     try {
       const data = await loadAllFromSupabase();
+      const currentState = useOrderStore.getState();
       
-      // Update store with Supabase data
+      // Merge strategy: keep local data, add missing items from Supabase
+      // For orders/batches - local is source of truth (CSV imports happen locally)
+      // For HR data - Supabase is source of truth (attendance/leave from other devices)
+      
+      const existingOrderIds = new Set(currentState.orders.map(o => o.id));
+      const existingBatchIds = new Set(currentState.batches.map(b => b.id));
+      
+      // Add any orders/batches from Supabase that don't exist locally
+      const newOrders = data.orders.filter(o => !existingOrderIds.has(o.id));
+      const newBatches = data.batches.filter(b => !existingBatchIds.has(b.id));
+      
       useOrderStore.setState({
-        users: data.users.length > 0 ? data.users : undefined,
-        batches: data.batches,
-        orders: data.orders,
-        attendanceRecords: data.attendanceRecords,
-        leaveRequests: data.leaveRequests,
-        leaveBalances: data.leaveBalances,
+        // Users: Supabase has more users, use it if available
+        users: data.users.length > 0 ? data.users : currentState.users,
+        // Batches: merge local + any from Supabase
+        batches: [...currentState.batches, ...newBatches],
+        // Orders: merge local + any from Supabase
+        orders: [...currentState.orders, ...newOrders],
+        // HR data: Supabase is source of truth for multi-device sync
+        attendanceRecords: data.attendanceRecords.length > 0 
+          ? data.attendanceRecords 
+          : currentState.attendanceRecords,
+        leaveRequests: data.leaveRequests.length > 0 
+          ? data.leaveRequests 
+          : currentState.leaveRequests,
+        leaveBalances: data.leaveBalances.length > 0 
+          ? data.leaveBalances 
+          : currentState.leaveBalances,
       });
       
       setLastSync(new Date());
-      console.log('Synced from Supabase:', data);
+      console.log('Synced from Supabase:', { newOrders: newOrders.length, newBatches: newBatches.length });
     } catch (err) {
       console.error('Error syncing from Supabase:', err);
       toast.error('Failed to sync from cloud');
