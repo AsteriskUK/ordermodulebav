@@ -384,9 +384,9 @@ export const useOrderStore = create<OrderStore>()(
         }),
     }),
     {
-      name: 'ebay-orders-idb-v5',
+      name: 'ebay-orders-idb-v6',
       storage: idbStorage(),
-      version: 5,
+      version: 6,
       migrate: async (persistedState: unknown, _fromVersion: number) => {
         // Always carry forward everything and patch any missing fields
         const s = (persistedState ?? {}) as Partial<OrderStore>;

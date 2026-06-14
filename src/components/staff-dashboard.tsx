@@ -1,8 +1,9 @@
 'use client';
 
-import { useMemo } from 'react';
+import { useMemo, useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { useOrderStore } from '@/lib/store';
+import { cn } from '@/lib/utils';
 import {
   ORDER_STATUS_CONFIG,
   DEPARTMENT_CONFIG,
@@ -26,6 +27,9 @@ import {
   User,
   TrendingUp,
   MessageSquare,
+  LogIn,
+  LogOut,
+  Coffee,
 } from 'lucide-react';
 
 const PIPELINE_STATUSES: { status: OrderStatus; icon: React.ElementType }[] = [
@@ -94,6 +98,39 @@ export function StaffDashboard() {
 
   const allOrders = useOrderStore((s) => s.orders);
   const totalNotes = allOrders.reduce((sum, o) => sum + (o.notes?.length ?? 0), 0);
+
+  // Attendance
+  const attendanceRecords = useOrderStore((s) => s.attendanceRecords);
+  const clockInAction = useOrderStore((s) => s.clockIn);
+  const clockOutAction = useOrderStore((s) => s.clockOut);
+  const updateAttendance = useOrderStore((s) => s.updateAttendance);
+  
+  const today = new Date().toISOString().slice(0, 10);
+  const myTodayAttendance = attendanceRecords.find(
+    (r) => r.userId === currentUserId && r.date === today
+  );
+  
+  const [currentTime, setCurrentTime] = useState(new Date());
+  useEffect(() => {
+    const timer = setInterval(() => setCurrentTime(new Date()), 1000);
+    return () => clearInterval(timer);
+  }, []);
+
+  const handleClockIn = () => {
+    if (!currentUserId) return;
+    clockInAction(currentUserId);
+  };
+
+  const handleClockOut = () => {
+    if (!currentUserId) return;
+    clockOutAction(currentUserId);
+  };
+
+  const handleBreak = () => {
+    if (!myTodayAttendance) return;
+    const newStatus = myTodayAttendance.status === 'half-day' ? 'present' : 'half-day';
+    updateAttendance(myTodayAttendance.id, { status: newStatus });
+  };
   const recentNote = allOrders
     .flatMap((o) => (o.notes ?? []).map((n) => ({ ...n, salesRecordNumber: o.salesRecordNumber })))
     .sort((a, b) => b.createdAt.localeCompare(a.createdAt))[0] ?? null;
@@ -132,6 +169,91 @@ export function StaffDashboard() {
           )}
         </div>
       </div>
+
+      {/* Big Clock In/Out Card */}
+      <Card className={cn(
+        "border-2 transition-all",
+        !myTodayAttendance?.clockIn ? "border-slate-200 bg-slate-50" :
+        !myTodayAttendance?.clockOut ? "border-green-200 bg-green-50" :
+        "border-blue-200 bg-blue-50"
+      )}>
+        <CardContent className="p-6">
+          <div className="flex flex-col md:flex-row items-center justify-between gap-6">
+            {/* Time Display */}
+            <div className="text-center md:text-left">
+              <div className="text-5xl md:text-6xl font-bold text-slate-800 tracking-tight">
+                {currentTime.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' })}
+              </div>
+              <div className="text-sm text-slate-500 mt-1">
+                {currentTime.toLocaleDateString('en-GB', { weekday: 'long', day: 'numeric', month: 'long' })}
+              </div>
+              {myTodayAttendance?.clockIn && (
+                <div className="text-xs text-slate-500 mt-2">
+                  Clocked in: {new Date(myTodayAttendance.clockIn).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' })}
+                  {myTodayAttendance.clockOut && (
+                    <span> • Out: {new Date(myTodayAttendance.clockOut).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' })}</span>
+                  )}
+                </div>
+              )}
+            </div>
+
+            {/* Action Buttons */}
+            <div className="flex items-center gap-3">
+              {!myTodayAttendance?.clockIn ? (
+                <Button 
+                  size="lg" 
+                  className="h-16 px-8 text-lg bg-green-600 hover:bg-green-700"
+                  onClick={handleClockIn}
+                >
+                  <LogIn className="h-6 w-6 mr-3" />
+                  Clock In
+                </Button>
+              ) : !myTodayAttendance?.clockOut ? (
+                <>
+                  <Button 
+                    size="lg" 
+                    variant="outline"
+                    className={cn(
+                      "h-16 px-6 text-base",
+                      myTodayAttendance.status === 'half-day' && "bg-yellow-100 border-yellow-300 text-yellow-700"
+                    )}
+                    onClick={handleBreak}
+                  >
+                    <Coffee className="h-5 w-5 mr-2" />
+                    {myTodayAttendance.status === 'half-day' ? 'End Break' : 'Break'}
+                  </Button>
+                  <Button 
+                    size="lg" 
+                    variant="default"
+                    className="h-16 px-8 text-lg bg-red-600 hover:bg-red-700"
+                    onClick={handleClockOut}
+                  >
+                    <LogOut className="h-6 w-6 mr-3" />
+                    Clock Out
+                  </Button>
+                </>
+              ) : (
+                <div className="flex items-center gap-3">
+                  <CheckCircle className="h-8 w-8 text-green-500" />
+                  <div>
+                    <div className="font-semibold text-slate-700">Done for today!</div>
+                    <div className="text-sm text-slate-500">
+                      {(() => {
+                        const start = new Date(myTodayAttendance.clockIn!).getTime();
+                        const end = new Date(myTodayAttendance.clockOut!).getTime();
+                        const diff = end - start;
+                        const hours = Math.floor(diff / 3600000);
+                        const mins = Math.floor((diff % 3600000) / 60000);
+                        return `${hours}h ${mins}m worked`;
+                      })()}
+                    </div>
+                  </div>
+                </div>
+              )}
+            </div>
+          </div>
+        </CardContent>
+      </Card>
 
       {/* Team Notes tile */}
       <Card

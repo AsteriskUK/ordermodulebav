@@ -2,7 +2,8 @@
 
 import { useState, useMemo } from 'react';
 import { useOrderStore } from '@/lib/store';
-import { AttendanceStatus, LeaveStatus, LeaveType, AttendanceRecord, LeaveRequest } from '@/lib/types';
+import { AttendanceStatus, LeaveStatus, LeaveType, AttendanceRecord, LeaveRequest, Department } from '@/lib/types';
+import { DEPARTMENT_CONFIG } from '@/lib/types';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
