@@ -423,6 +423,7 @@ export function CreateOrderForm() {
       notes: [],
       labelQty: parseInt(form.numberOfBoxes) || 1,
       isGSP: form.postToCountry !== 'United Kingdom' && form.postToCountry !== 'UK' && form.postToCountry !== '',
+      extendedLiability: false,
       importedAt: new Date().toISOString(),
       batchId,
     };
