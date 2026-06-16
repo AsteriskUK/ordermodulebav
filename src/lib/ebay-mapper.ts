@@ -134,6 +134,7 @@ export function mapEbayOrderToOrder(ebayOrder: EbayOrder, batchId: string): Orde
       comments: '',
       labelQty: 1,
       isGSP: (addr?.countryCode || 'GB') !== 'GB',
+      extendedLiability: false,
       importedAt: new Date().toISOString(),
       batchId,
     };
