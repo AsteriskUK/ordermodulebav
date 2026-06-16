@@ -150,6 +150,8 @@ export async function fetchOrders(): Promise<Order[]> {
     postToPostcode: o.post_to_postcode,
     postToCountry: o.post_to_country,
     isGSP: o.is_gsp,
+    extendedLiability: o.extended_liability,
+    amazonOrderId: o.amazon_order_id,
     itemNumber: o.item_number,
     itemTitle: o.item_title,
     customLabel: o.custom_label,
@@ -243,9 +245,9 @@ export async function syncOrder(order: Order): Promise<void> {
       dispatched_on_date: order.dispatchedOnDate,
       imported_at: order.importedAt,
       return_id: order.returnId,
-      label_printed_at: order.labelPrintedAt,
-      label_carrier: order.labelCarrier,
-      label_data: order.labelData,
+      // label_printed_at: order.labelPrintedAt, // TODO: Add column to Supabase
+      // label_carrier: order.labelCarrier, // TODO: Add column to Supabase
+      // label_data: order.labelData, // TODO: Add column to Supabase
     });
   
   if (error) {

@@ -549,7 +549,7 @@ export function CSVImport() {
               <table className="w-full text-xs">
                 <thead className="bg-slate-100">
                   <tr>
-                    <th className="p-2 text-left">Order ID</th>
+                    <th className="p-2 text-left">Amazon Order ID</th>
                     <th className="p-2 text-left">Customer</th>
                     <th className="p-2 text-left">Item</th>
                     <th className="p-2 text-left">Amount</th>
@@ -561,7 +561,7 @@ export function CSVImport() {
                   {preview.orders.slice(0, 15).map((order, i) => (
                     <tr key={i} className="border-t">
                       <td className="p-2 font-mono">
-                        {order.salesRecordNumber}
+                        {order.amazonOrderId || order.salesRecordNumber}
                       </td>
                       <td className="p-2">{order.postToName}</td>
                       <td className="p-2 max-w-[180px] truncate">

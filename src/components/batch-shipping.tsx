@@ -2,7 +2,7 @@
 
 import { useState, useMemo } from 'react';
 import { useOrderStore } from '@/lib/store';
-import { ORDER_STATUS_CONFIG, DeliveryCarrier, DeliveryType } from '@/lib/types';
+import { ORDER_STATUS_CONFIG, DeliveryCarrier, DeliveryType, DPDService } from '@/lib/types';
 import { generateBatchShipCSV, generateBundledShipCSV, generateCarrierCSV, generateCarrierBundleCSV, groupOrdersByBuyer, BundleGroup, deriveShipping } from '@/lib/csv-parser';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -206,6 +206,8 @@ export function BatchShipping() {
   const updateOrderCarrier = useOrderStore((s) => s.updateOrderCarrier);
   const updateOrderNumberOfBoxes = useOrderStore((s) => s.updateOrderNumberOfBoxes);
   const updateOrderTracking = useOrderStore((s) => s.updateOrderTracking);
+  const updateOrderDeliveryService = useOrderStore((s) => s.updateOrderDeliveryService);
+  const updateOrderExtendedLiability = useOrderStore((s) => s.updateOrderExtendedLiability);
   const purgeOrphanOrders = useOrderStore((s) => s.purgeOrphanOrders);
   const saveOrderLabels = useOrderStore((s) => s.saveOrderLabels);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
@@ -214,6 +216,7 @@ export function BatchShipping() {
   const [expandedBuyers, setExpandedBuyers] = useState<Set<string>>(new Set());
   const [selectedBuyerKeys, setSelectedBuyerKeys] = useState<Set<string>>(new Set());
   const [selectedCarrier, setSelectedCarrier] = useState<string>('standard');
+  const [selectedDPDService, setSelectedDPDService] = useState<DPDService>('next_day');
   const [aiChecking, setAiChecking] = useState(false);
   const [aiIssues, setAiIssues] = useState<{ id: string; issue: string }[] | null>(null);
 
@@ -403,7 +406,7 @@ export function BatchShipping() {
     const dpdBatch = ordersToBook.filter((o) => o.deliveryCarrier === 'DPD');
     const fedexBatch = ordersToBook.filter((o) => o.deliveryCarrier === 'FedEx');
     const shipDate = new Date().toISOString().slice(0, 10);
-    type ShipResult = { orderId: string; salesRecordNumber: string; trackingNumber?: string; parcelNumber?: string; consignmentNumber?: string; labelBase64?: string; allLabels?: string[] };
+    type ShipResult = { orderId: string; salesRecordNumber: string; trackingNumber?: string; parcelNumber?: string; consignmentNumber?: string; labelBase64?: string; allLabels?: string[]; labelPdfs?: string[]; labelHtmls?: string[] };
     type ShipFailure = { orderId: string; error: string };
     let succeeded: ShipResult[] = [];
     let failed: ShipFailure[] = [];
@@ -412,7 +415,7 @@ export function BatchShipping() {
         const res = await fetch('/api/dpd/create-shipment', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ orders: dpdBatch, collectionDate: shipDate }),
+          body: JSON.stringify({ orders: dpdBatch, collectionDate: shipDate, service: selectedDPDService }),
         });
         if (res.status === 503) {
           toast.error('DPD API not configured. Fill in DPD credentials in .env.local.');
@@ -440,12 +443,24 @@ export function BatchShipping() {
       for (const s of succeeded) {
         const tracking = s.trackingNumber || s.parcelNumber || s.consignmentNumber || '';
         if (tracking) updateOrderTracking(s.orderId, tracking);
-        const labels = s.allLabels?.length ? s.allLabels : s.labelBase64 ? [s.labelBase64] : [];
-        if (labels.length > 0) {
-          const carrier = ordersToBook.find((o) => o.id === s.orderId)?.deliveryCarrier ?? 'DPD';
-          saveOrderLabels(s.orderId, carrier, labels);
+        const carrier = ordersToBook.find((o) => o.id === s.orderId)?.deliveryCarrier ?? 'DPD';
+        const storageLabels = s.labelHtmls?.length ? s.labelHtmls
+          : s.labelPdfs?.length ? s.labelPdfs
+          : s.allLabels?.length ? s.allLabels
+          : s.labelBase64 ? [s.labelBase64] : [];
+        if (storageLabels.length > 0) saveOrderLabels(s.orderId, carrier, storageLabels);
+        // DPD HTML labels — write directly into a new tab
+        if (s.labelHtmls?.length) {
+          for (const html of s.labelHtmls) {
+            const win = window.open('', '_blank');
+            if (win) { win.document.open(); win.document.write(html); win.document.close(); }
+            totalLabels++;
+          }
         }
-        labels.forEach((b64, idx) => {
+        // PDF labels (FedEx or future DPD PDF)
+        const pdfLabels = s.labelPdfs?.length ? s.labelPdfs
+          : !s.labelHtmls?.length && s.labelBase64 ? [s.labelBase64] : [];
+        for (const b64 of pdfLabels) {
           const binary = atob(b64);
           const bytes = new Uint8Array(binary.length);
           for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
@@ -453,13 +468,11 @@ export function BatchShipping() {
           const url = URL.createObjectURL(blob);
           const a = document.createElement('a');
           a.href = url;
-          a.download = labels.length > 1
-            ? `label-${s.salesRecordNumber}-box${idx + 1}.pdf`
-            : `label-${s.salesRecordNumber}.pdf`;
+          a.download = `label-${s.salesRecordNumber}.pdf`;
           a.click();
           URL.revokeObjectURL(url);
           totalLabels++;
-        });
+        }
       }
       if (succeeded.length > 0) toast.success(`${succeeded.length} shipment${succeeded.length !== 1 ? 's' : ''} booked — ${totalLabels} label${totalLabels !== 1 ? 's' : ''} downloaded`);
       if (failed.length > 0) {
@@ -479,20 +492,25 @@ export function BatchShipping() {
   const reprintLabels = (order: typeof exportableOrders[number]) => {
     const labels = order.labelData;
     if (!labels?.length) { toast.error('No stored label for this order'); return; }
-    labels.forEach((b64, idx) => {
-      const binary = atob(b64);
-      const bytes = new Uint8Array(binary.length);
-      for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
-      const blob = new Blob([bytes], { type: 'application/pdf' });
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = labels.length > 1
-        ? `label-${order.salesRecordNumber}-box${idx + 1}.pdf`
-        : `label-${order.salesRecordNumber}.pdf`;
-      a.click();
-      URL.revokeObjectURL(url);
-    });
+    for (const labelData of labels) {
+      // DPD HTML labels start with '<' or contain typical HTML tags
+      const isDpdHtml = labelData.trimStart().startsWith('<') || order.labelCarrier === 'DPD';
+      if (isDpdHtml) {
+        const win = window.open('', '_blank');
+        if (win) { win.document.open(); win.document.write(labelData); win.document.close(); }
+      } else {
+        const binary = atob(labelData);
+        const bytes = new Uint8Array(binary.length);
+        for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+        const blob = new Blob([bytes], { type: 'application/pdf' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `label-${order.salesRecordNumber}.pdf`;
+        a.click();
+        URL.revokeObjectURL(url);
+      }
+    }
     toast.success(`Reprinted ${labels.length} label${labels.length !== 1 ? 's' : ''} for #${order.salesRecordNumber}`);
   };
 
@@ -717,6 +735,23 @@ export function BatchShipping() {
               <SelectItem value="fedex">FedEx</SelectItem>
             </SelectContent>
           </Select>
+          {selectedCarrier === 'dpd' && (
+            <Select value={selectedDPDService} onValueChange={(value) => value && setSelectedDPDService(value as DPDService)}>
+              <SelectTrigger className="w-[150px]">
+                <SelectValue placeholder="Select service" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="next_day">NEXT DAY</SelectItem>
+                <SelectItem value="by_1030">BY 10:30</SelectItem>
+                <SelectItem value="saturday_by_1030">SATURDAY BY 10:30</SelectItem>
+                <SelectItem value="by_12">BY 12</SelectItem>
+                <SelectItem value="sunday_by_12">SUNDAY BY 12</SelectItem>
+                <SelectItem value="saturday_by_12">SATURDAY BY 12</SelectItem>
+                <SelectItem value="saturday">SATURDAY</SelectItem>
+                <SelectItem value="sunday">SUNDAY</SelectItem>
+              </SelectContent>
+            </Select>
+          )}
           <Button size="sm" onClick={handleExport}>
             <Download className="h-3 w-3 mr-1" />
             Download {selectedCarrier === 'standard' ? 'Batch Ship' : selectedCarrier.toUpperCase()} CSV
@@ -754,6 +789,23 @@ export function BatchShipping() {
               <SelectItem value="fedex">FedEx</SelectItem>
             </SelectContent>
           </Select>
+          {selectedCarrier === 'dpd' && (
+            <Select value={selectedDPDService} onValueChange={(value) => value && setSelectedDPDService(value as DPDService)}>
+              <SelectTrigger className="w-[150px]">
+                <SelectValue placeholder="Select service" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="next_day">NEXT DAY</SelectItem>
+                <SelectItem value="by_1030">BY 10:30</SelectItem>
+                <SelectItem value="saturday_by_1030">SATURDAY BY 10:30</SelectItem>
+                <SelectItem value="by_12">BY 12</SelectItem>
+                <SelectItem value="sunday_by_12">SUNDAY BY 12</SelectItem>
+                <SelectItem value="saturday_by_12">SATURDAY BY 12</SelectItem>
+                <SelectItem value="saturday">SATURDAY</SelectItem>
+                <SelectItem value="sunday">SUNDAY</SelectItem>
+              </SelectContent>
+            </Select>
+          )}
           <Button size="sm" onClick={handleExportBundles} className="bg-amber-600 hover:bg-amber-700">
             <Download className="h-3 w-3 mr-1" />
             Download {selectedCarrier === 'standard' ? 'Bundled Labels' : selectedCarrier.toUpperCase() + ' Bundled'} CSV
@@ -809,7 +861,7 @@ export function BatchShipping() {
                         )}
                       </button>
                     </TableHead>
-                    <TableHead className="text-xs">Order #</TableHead>
+                    <TableHead className="text-xs">Amazon Order ID</TableHead>
                     <TableHead className="text-xs">Recipient</TableHead>
                     <TableHead className="text-xs">Address</TableHead>
                     <TableHead className="text-xs">Postcode</TableHead>
@@ -820,6 +872,7 @@ export function BatchShipping() {
                     <TableHead className="text-xs">Service</TableHead>
                     <TableHead className="text-xs">Tracking #</TableHead>
                     <TableHead className="text-xs">Status</TableHead>
+                    <TableHead className="text-xs">Ext. Liability</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
@@ -839,7 +892,7 @@ export function BatchShipping() {
                           </button>
                         </TableCell>
                         <TableCell className="font-mono text-xs">
-                          {primary.salesRecordNumber}
+                          {primary.amazonOrderId || primary.salesRecordNumber}
                           {isMultiItem && <span title="Multi-item order"><PackageOpen className="h-3 w-3 inline ml-1 text-amber-500" /></span>}
                         </TableCell>
                         <TableCell className="text-xs font-medium">
@@ -901,18 +954,38 @@ export function BatchShipping() {
                           </Select>
                         </TableCell>
                         <TableCell onClick={(e) => e.stopPropagation()}>
-                          <Select
-                            value={primary.deliveryType || 'standard'}
-                            onValueChange={(v) => ids.forEach((id) => updateOrderCarrier(id, primary.deliveryCarrier || 'FedEx', v as DeliveryType))}
-                          >
-                            <SelectTrigger className="h-7 text-xs w-[90px]"><SelectValue /></SelectTrigger>
-                            <SelectContent>
-                              <SelectItem value="standard">Standard</SelectItem>
-                              <SelectItem value="next_day">Next Day</SelectItem>
-                              <SelectItem value="express">Express</SelectItem>
-                              <SelectItem value="collection">Collection</SelectItem>
-                            </SelectContent>
-                          </Select>
+                          <div className="flex flex-col gap-1">
+                            <Select
+                              value={primary.deliveryType || 'standard'}
+                              onValueChange={(v) => ids.forEach((id) => updateOrderCarrier(id, primary.deliveryCarrier || 'FedEx', v as DeliveryType))}
+                            >
+                              <SelectTrigger className="h-7 text-xs w-[90px]"><SelectValue /></SelectTrigger>
+                              <SelectContent>
+                                <SelectItem value="standard">Standard</SelectItem>
+                                <SelectItem value="next_day">Next Day</SelectItem>
+                                <SelectItem value="express">Express</SelectItem>
+                                <SelectItem value="collection">Collection</SelectItem>
+                              </SelectContent>
+                            </Select>
+                            {primary.deliveryCarrier === 'DPD' && (
+                              <Select
+                                value={primary.deliveryService ?? 'next_day'}
+                                onValueChange={(v) => v && ids.forEach((id) => updateOrderDeliveryService(id, v))}
+                              >
+                                <SelectTrigger className="h-7 text-xs w-[120px]"><SelectValue /></SelectTrigger>
+                                <SelectContent>
+                                  <SelectItem value="next_day">NEXT DAY</SelectItem>
+                                  <SelectItem value="by_1030">BY 10:30</SelectItem>
+                                  <SelectItem value="saturday_by_1030">SAT BY 10:30</SelectItem>
+                                  <SelectItem value="by_12">BY 12</SelectItem>
+                                  <SelectItem value="sunday_by_12">SUN BY 12</SelectItem>
+                                  <SelectItem value="saturday_by_12">SAT BY 12</SelectItem>
+                                  <SelectItem value="saturday">SATURDAY</SelectItem>
+                                  <SelectItem value="sunday">SUNDAY</SelectItem>
+                                </SelectContent>
+                              </Select>
+                            )}
+                          </div>
                         </TableCell>
                         <TableCell onClick={(e) => e.stopPropagation()}>
                           <TrackingCell
@@ -940,6 +1013,15 @@ export function BatchShipping() {
                               </button>
                             ) : null}
                           </div>
+                        </TableCell>
+                        <TableCell onClick={(e) => e.stopPropagation()}>
+                          <input
+                            type="checkbox"
+                            checked={primary.extendedLiability || false}
+                            onChange={(e) => ids.forEach((id) => updateOrderExtendedLiability(id, e.target.checked))}
+                            className="h-4 w-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500"
+                            title="Extended Liability"
+                          />
                         </TableCell>
                       </TableRow>
                     );

@@ -3,6 +3,16 @@ export type OrderStatus = 'pending' | 'assembling' | 'checking' | 'packing' | 'p
 export type DeliveryCarrier = 'DPD' | 'FedEx' | 'Parcelforce' | 'Royal Mail' | 'Other';
 export type DeliveryType = 'standard' | 'next_day' | 'express' | 'collection';
 
+export type DPDService = 
+  | 'next_day'
+  | 'by_1030'
+  | 'saturday_by_1030'
+  | 'by_12'
+  | 'sunday_by_12'
+  | 'saturday_by_12'
+  | 'saturday'
+  | 'sunday';
+
 export type UserRole = 'admin' | 'manager' | 'staff' | 'comms';
 
 export type Department =
@@ -78,10 +88,22 @@ export interface ReturnRecord {
   reason: string;
   notes: string;
   returnedAt: string;
+  createdByUserId?: string;
+  createdByUserName?: string;
   processedByUserId?: string;
   processedByUserName?: string;
   refundAmount?: number;
-  status: 'pending' | 'received' | 'refunded' | 'rejected';
+  status: 'pending' | 'received' | 'refunded' | 'rejected' | 'replacement';
+  resolution?: 'refund' | 'replacement';
+  returnTrackingNumber?: string;
+  receivedNotes?: string;
+  replacementItems?: ReplacementItem[];
+}
+
+export interface ReplacementItem {
+  itemTitle: string;
+  quantity: number;
+  notes?: string;
 }
 
 export interface EodReport {
@@ -106,6 +128,7 @@ export interface Order {
   id: string;
   salesRecordNumber: string;
   orderNumber: string;
+  amazonOrderId?: string; // For Amazon orders
   buyerUsername: string;
   buyerName: string;
   buyerEmail: string;
@@ -142,7 +165,7 @@ export interface Order {
   trackingNumber: string;
   deliveryCarrier: DeliveryCarrier;
   deliveryType: DeliveryType;
-  // Status
+  // Status - always pending regardless of dispatched
   status: OrderStatus;
   category: string;
   comments: string;
@@ -151,6 +174,8 @@ export interface Order {
   labelQty: number;
   // GSP / international
   isGSP: boolean;
+  // Extended liability
+  extendedLiability: boolean;
   // Return tracking
   returnId?: string;
   // Printed label storage

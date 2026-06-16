@@ -1,7 +1,7 @@
 import { create } from 'zustand';
 import { persist, createJSONStorage } from 'zustand/middleware';
 import { get, set as idbSet, del } from 'idb-keyval';
-import { Order, OrderNote, OrderStatus, Batch, DeliveryCarrier, DeliveryType, AppUser, EodEvent, ReturnRecord, Department, AttendanceRecord, LeaveRequest, LeaveBalance } from './types';
+import { Order, OrderNote, OrderStatus, Batch, DeliveryCarrier, DeliveryType, AppUser, EodEvent, ReturnRecord, ReplacementItem, Department, AttendanceRecord, LeaveRequest, LeaveBalance } from './types';
 import { syncAttendance, syncLeaveRequest, syncLeaveBalance, syncOrder, syncBatch, syncUser, deleteUserFromSupabase, syncReturn } from './supabase-store';
 
 // Generate proper UUID v4 for PostgreSQL compatibility
@@ -59,6 +59,8 @@ interface OrderStore {
   updateOrderCategory: (orderId: string, category: string) => void;
   updateOrderPriority: (orderId: string, priority: number) => void;
   updateOrderNumberOfBoxes: (orderId: string, numberOfBoxes: number) => void;
+  updateOrderExtendedLiability: (orderId: string, extendedLiability: boolean) => void;
+  updateOrderDeliveryService: (orderId: string, deliveryService: string) => void;
   saveOrderLabels: (orderId: string, carrier: string, labels: string[]) => void;
   bulkUpdateStatus: (orderIds: string[], status: OrderStatus) => void;
   deleteOrder: (orderId: string) => void;
@@ -72,6 +74,8 @@ interface OrderStore {
   clearEodEvents: () => void;
   addReturn: (ret: ReturnRecord) => void;
   updateReturn: (returnId: string, updates: Partial<ReturnRecord>) => void;
+  processReturn: (returnId: string, resolution: 'refund' | 'replacement', processedByUserId: string, processedByUserName: string) => void;
+  addReplacementItem: (returnId: string, item: ReplacementItem) => void;
   // HR Actions
   attendanceRecords: AttendanceRecord[];
   leaveRequests: LeaveRequest[];
@@ -121,11 +125,18 @@ export const useOrderStore = create<OrderStore>()(
           const incomingNums = new Set(ordersWithDefaults.map((o) => o.salesRecordNumber).filter(Boolean));
           const retained = state.orders.filter((o) => !incomingNums.has(o.salesRecordNumber));
           
-          // Sync to Supabase in background
-          syncBatch(batch, state.currentUserId || undefined).catch(console.error);
-          ordersWithDefaults.forEach(order => {
-            syncOrder(order).catch(console.error);
-          });
+          // Sync to Supabase in background - batch first, then orders
+          (async () => {
+            try {
+              await syncBatch(batch, state.currentUserId || undefined);
+              // Only sync orders after batch is confirmed
+              for (const order of ordersWithDefaults) {
+                await syncOrder(order).catch(err => console.error('Order sync error:', err));
+              }
+            } catch (err) {
+              console.error('Batch sync error:', err);
+            }
+          })();
           
           return {
             orders: [...retained, ...ordersWithDefaults],
@@ -253,6 +264,24 @@ export const useOrderStore = create<OrderStore>()(
           if (updatedOrder) syncOrder(updatedOrder).catch(console.error);
           return { orders: updatedOrders };
         }),
+      updateOrderExtendedLiability: (orderId, extendedLiability) =>
+        set((state) => {
+          const updatedOrders = state.orders.map((o) =>
+            o.id === orderId ? { ...o, extendedLiability } : o
+          );
+          const updatedOrder = updatedOrders.find(o => o.id === orderId);
+          if (updatedOrder) syncOrder(updatedOrder).catch(console.error);
+          return { orders: updatedOrders };
+        }),
+      updateOrderDeliveryService: (orderId, deliveryService) =>
+        set((state) => {
+          const updatedOrders = state.orders.map((o) =>
+            o.id === orderId ? { ...o, deliveryService } : o
+          );
+          const updatedOrder = updatedOrders.find(o => o.id === orderId);
+          if (updatedOrder) syncOrder(updatedOrder).catch(console.error);
+          return { orders: updatedOrders };
+        }),
       saveOrderLabels: (orderId, carrier, labels) =>
         set((state) => {
           const updatedOrders = state.orders.map((o) =>
@@ -354,6 +383,27 @@ export const useOrderStore = create<OrderStore>()(
       updateReturn: (returnId, updates) => {
         set((state) => {
           const updatedReturns = state.returns.map((r) => r.id === returnId ? { ...r, ...updates } : r);
+          const updated = updatedReturns.find(r => r.id === returnId);
+          if (updated) syncReturn(updated).catch(console.error);
+          return { returns: updatedReturns };
+        });
+      },
+      processReturn: (returnId, resolution, processedByUserId, processedByUserName) => {
+        set((state) => {
+          const newStatus = resolution === 'refund' ? 'refunded' : 'replacement';
+          const updatedReturns = state.returns.map((r) =>
+            r.id === returnId ? { ...r, resolution, status: newStatus as any, processedByUserId, processedByUserName } : r
+          );
+          const updated = updatedReturns.find(r => r.id === returnId);
+          if (updated) syncReturn(updated).catch(console.error);
+          return { returns: updatedReturns };
+        });
+      },
+      addReplacementItem: (returnId, item) => {
+        set((state) => {
+          const updatedReturns = state.returns.map((r) =>
+            r.id === returnId ? { ...r, replacementItems: [...(r.replacementItems || []), item] } : r
+          );
           const updated = updatedReturns.find(r => r.id === returnId);
           if (updated) syncReturn(updated).catch(console.error);
           return { returns: updatedReturns };

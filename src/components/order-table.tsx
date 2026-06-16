@@ -458,7 +458,7 @@ export function OrderTable() {
                     </button>
                   </TableCell>
                   <TableCell className="font-mono text-xs whitespace-nowrap">
-                    <div>{order.salesRecordNumber}</div>
+                    <div>{order.amazonOrderId || order.salesRecordNumber}</div>
                     {order.buyerUsername && (
                       <div className="text-slate-400 text-[10px]">{order.buyerUsername}</div>
                     )}

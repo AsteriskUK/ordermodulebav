@@ -348,6 +348,7 @@ function parseEbayCSV(content: string, batchId: string): Order[] {
                !!(row['Post to country'] && row['Post to country'] !== 'United Kingdom' && row['Post to country'] !== 'GB'),
         importedAt: new Date().toISOString(),
         batchId,
+        extendedLiability: false,
       };
     });
 }
@@ -414,6 +415,7 @@ function parseBackMarketCSV(content: string, batchId: string): Order[] {
         isGSP: !!(row.shipping_country && row.shipping_country !== 'GB' && row.shipping_country !== 'United Kingdom'),
         importedAt: new Date().toISOString(),
         batchId,
+        extendedLiability: false,
       };
     });
 }
@@ -438,6 +440,7 @@ function parseAmazonCSV(content: string, batchId: string): Order[] {
         id: generateUUID(),
         salesRecordNumber: row['order-item-id'] || row['order-id'] || '',
         orderNumber: row['order-id'] || '',
+        amazonOrderId: row['order-item-id'] || '',
         buyerUsername: '',
         buyerName: row['buyer-name'] || '',
         buyerEmail: row['buyer-email'] || '',
@@ -474,6 +477,7 @@ function parseAmazonCSV(content: string, batchId: string): Order[] {
         isGSP: !!(row['ship-country'] && row['ship-country'] !== 'GB'),
         importedAt: new Date().toISOString(),
         batchId,
+        extendedLiability: false,
       };
     });
 }
@@ -535,6 +539,7 @@ function parseTemuCSV(content: string, batchId: string): Order[] {
         isGSP: !!(row['ship country'] && row['ship country'] !== 'United Kingdom' && row['ship country'] !== 'GB'),
         importedAt: new Date().toISOString(),
         batchId,
+        extendedLiability: false,
       };
     });
 }
@@ -599,6 +604,7 @@ function parseOnBuyCSV(content: string, batchId: string): Order[] {
         isGSP: !!(row['Delivery Address Country'] && row['Delivery Address Country'] !== 'United Kingdom' && row['Delivery Address Country'] !== 'GB'),
         importedAt: new Date().toISOString(),
         batchId,
+        extendedLiability: false,
       };
     });
 }
