@@ -1,22 +1,25 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { cookies } from 'next/headers';
 
 const TOKEN_URL = 'https://api.ebay.com/identity/v1/oauth2/token';
+
+function serializeCookie(name: string, value: string, maxAge: number): string {
+  return `${name}=${encodeURIComponent(value)}; HttpOnly; Secure; SameSite=Lax; Path=/; Max-Age=${maxAge}`;
+}
 
 export async function GET(req: NextRequest) {
   const { searchParams } = new URL(req.url);
   const code = searchParams.get('code');
   const error = searchParams.get('error');
 
+  const appUrl = process.env.NEXT_PUBLIC_APP_URL || 'https://ebaypicking.netlify.app';
+
   if (error || !code) {
-    const appUrl = process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000';
     return NextResponse.redirect(`${appUrl}/import?ebay_error=${error || 'no_code'}`);
   }
 
   const clientId = process.env.EBAY_CLIENT_ID!;
   const clientSecret = process.env.EBAY_CLIENT_SECRET!;
   const ruName = process.env.EBAY_RU_NAME!;
-  const appUrl = process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000';
 
   console.log('[eBay callback] clientId prefix:', clientId.slice(0, 12), 'suffix:', clientId.slice(-8));
   console.log('[eBay callback] ruName:', ruName);
@@ -49,33 +52,15 @@ export async function GET(req: NextRequest) {
     refresh_token_expires_in: number;
   };
 
-  const cookieStore = await cookies();
   const expiresAt = Date.now() + data.expires_in * 1000;
-  const refreshExpiresAt = Date.now() + data.refresh_token_expires_in * 1000;
 
-  cookieStore.set('ebay_access_token', data.access_token, {
-    httpOnly: true,
-    secure: true,
-    sameSite: 'lax',
-    maxAge: data.expires_in,
-    path: '/',
-  });
-  cookieStore.set('ebay_refresh_token', data.refresh_token, {
-    httpOnly: true,
-    secure: true,
-    sameSite: 'lax',
-    maxAge: data.refresh_token_expires_in,
-    path: '/',
-  });
-  cookieStore.set('ebay_token_expires_at', String(expiresAt), {
-    httpOnly: true,
-    secure: true,
-    sameSite: 'lax',
-    maxAge: data.refresh_token_expires_in,
-    path: '/',
-  });
+  // Set cookies via response headers (proper way for App Router)
+  const response = NextResponse.redirect(`${appUrl}/import?ebay_connected=1`);
+  response.headers.append('Set-Cookie', serializeCookie('ebay_access_token', data.access_token, data.expires_in));
+  response.headers.append('Set-Cookie', serializeCookie('ebay_refresh_token', data.refresh_token, data.refresh_token_expires_in));
+  response.headers.append('Set-Cookie', serializeCookie('ebay_token_expires_at', String(expiresAt), data.refresh_token_expires_in));
 
-  console.log('[eBay callback] Cookies set successfully, redirecting to import');
+  console.log('[eBay callback] Cookies set via headers, redirecting to import');
 
-  return NextResponse.redirect(`${appUrl}/import?ebay_connected=1`);
+  return response;
 }
