@@ -18,8 +18,9 @@ export async function GET(req: NextRequest) {
     console.log('[eBay callback] appUrl:', appUrl, 'code exists:', !!code, 'error:', error);
 
     if (error || !code) {
-      console.log('[eBay callback] Missing code or error present, redirecting to error');
-      return NextResponse.redirect(`${appUrl}/import?ebay_error=${error || 'no_code'}`);
+      console.log('[eBay callback] Missing code or error present, error:', error, 'code:', code);
+      const errorParam = error ? encodeURIComponent(error) : 'no_code';
+      return NextResponse.redirect(`${appUrl}/import?ebay_error=${errorParam}`);
     }
 
     const clientId = process.env.EBAY_CLIENT_ID;
@@ -75,13 +76,35 @@ export async function GET(req: NextRequest) {
 
     const expiresAt = Date.now() + data.expires_in * 1000;
 
+    // Check for debug mode
+    const isDebug = searchParams.get('debug') === '1';
+
     // Set cookies via response headers (proper way for App Router)
-    const response = NextResponse.redirect(`${appUrl}/import?ebay_connected=1`);
+    const redirectUrl = `${appUrl}/import?ebay_connected=1`;
+
+    if (isDebug) {
+      // Return JSON in debug mode to see what's happening
+      return NextResponse.json({
+        success: true,
+        redirectUrl,
+        cookies: {
+          ebay_access_token: 'set',
+          ebay_refresh_token: 'set',
+          ebay_token_expires_at: 'set',
+        },
+        tokenPreview: {
+          access_token_prefix: data.access_token.slice(0, 20),
+          refresh_token_prefix: data.refresh_token.slice(0, 20),
+        },
+      });
+    }
+
+    const response = NextResponse.redirect(redirectUrl);
     response.headers.append('Set-Cookie', serializeCookie('ebay_access_token', data.access_token, data.expires_in));
     response.headers.append('Set-Cookie', serializeCookie('ebay_refresh_token', data.refresh_token, data.refresh_token_expires_in));
     response.headers.append('Set-Cookie', serializeCookie('ebay_token_expires_at', String(expiresAt), data.refresh_token_expires_in));
 
-    console.log('[eBay callback] Cookies set via headers, redirecting to:', `${appUrl}/import?ebay_connected=1`);
+    console.log('[eBay callback] Cookies set via headers, redirecting to:', redirectUrl);
 
     return response;
   } catch (err) {
