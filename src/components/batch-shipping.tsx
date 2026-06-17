@@ -956,7 +956,7 @@ export function BatchShipping() {
                         <TableCell onClick={(e) => e.stopPropagation()}>
                           {primary.deliveryCarrier === 'DPD' ? (
                             <Select
-                              value={primary.deliveryService ?? 'next_day'}
+                              value={(['next_day','by_1030','saturday_by_1030','by_12','sunday_by_12','saturday_by_12','saturday','sunday'] as string[]).includes(primary.deliveryService ?? '') ? primary.deliveryService! : 'next_day'}
                               onValueChange={(v) => v && ids.forEach((id) => updateOrderDeliveryService(id, v))}
                             >
                               <SelectTrigger className="h-7 text-xs w-[120px]"><SelectValue /></SelectTrigger>
