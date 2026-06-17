@@ -3,19 +3,15 @@ import { cookies } from 'next/headers';
 import { mapEbayOrderToOrder } from '@/lib/ebay-mapper';
 import { Order, Batch } from '@/lib/types';
 
-const SANDBOX_BASE = 'https://api.sandbox.ebay.com';
-const PROD_BASE = 'https://api.ebay.com';
-const SANDBOX_TOKEN_URL = 'https://api.sandbox.ebay.com/identity/v1/oauth2/token';
-const PROD_TOKEN_URL = 'https://api.ebay.com/identity/v1/oauth2/token';
+const BASE_URL = 'https://api.ebay.com';
+const TOKEN_URL = 'https://api.ebay.com/identity/v1/oauth2/token';
 
 async function refreshAccessToken(refreshToken: string): Promise<string | null> {
-  const isSandbox = process.env.EBAY_ENV === 'SANDBOX';
   const clientId = process.env.EBAY_CLIENT_ID!;
   const clientSecret = process.env.EBAY_CLIENT_SECRET!;
-  const tokenUrl = isSandbox ? SANDBOX_TOKEN_URL : PROD_TOKEN_URL;
   const credentials = Buffer.from(`${clientId}:${clientSecret}`).toString('base64');
 
-  const res = await fetch(tokenUrl, {
+  const res = await fetch(TOKEN_URL, {
     method: 'POST',
     headers: {
       'Authorization': `Basic ${credentials}`,
@@ -91,8 +87,6 @@ export async function GET(req: NextRequest) {
   const filter = searchParams.get('filter') || 'orderfulfillmentstatus:{NOT_STARTED|IN_PROGRESS}';
 
   const fromDate = new Date(Date.now() - daysBack * 24 * 60 * 60 * 1000).toISOString();
-  const isSandbox = process.env.EBAY_ENV === 'SANDBOX';
-  const baseUrl = isSandbox ? SANDBOX_BASE : PROD_BASE;
 
   const allOrders: Order[] = [];
   let offset = 0;
@@ -108,7 +102,7 @@ export async function GET(req: NextRequest) {
   };
 
   while (true) {
-    const url = `${baseUrl}/sell/fulfillment/v1/order?filter=${encodeURIComponent(filter)}&creationdate:[${fromDate}..]&limit=${limit}&offset=${offset}`;
+    const url = `${BASE_URL}/sell/fulfillment/v1/order?filter=${encodeURIComponent(filter)}&creationdate:[${fromDate}..]&limit=${limit}&offset=${offset}`;
 
     const res = await fetch(url, {
       headers: {

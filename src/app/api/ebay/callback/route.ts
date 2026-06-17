@@ -1,8 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { cookies } from 'next/headers';
 
-const SANDBOX_TOKEN_URL = 'https://api.sandbox.ebay.com/identity/v1/oauth2/token';
-const PROD_TOKEN_URL = 'https://api.ebay.com/identity/v1/oauth2/token';
+const TOKEN_URL = 'https://api.ebay.com/identity/v1/oauth2/token';
 
 export async function GET(req: NextRequest) {
   const { searchParams } = new URL(req.url);
@@ -14,16 +13,14 @@ export async function GET(req: NextRequest) {
     return NextResponse.redirect(`${appUrl}/import?ebay_error=${error || 'no_code'}`);
   }
 
-  const isSandbox = process.env.EBAY_ENV === 'SANDBOX';
   const clientId = process.env.EBAY_CLIENT_ID!;
   const clientSecret = process.env.EBAY_CLIENT_SECRET!;
   const ruName = process.env.EBAY_RU_NAME!;
-  const tokenUrl = isSandbox ? SANDBOX_TOKEN_URL : PROD_TOKEN_URL;
   const appUrl = process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000';
 
   const credentials = Buffer.from(`${clientId}:${clientSecret}`).toString('base64');
 
-  const res = await fetch(tokenUrl, {
+  const res = await fetch(TOKEN_URL, {
     method: 'POST',
     headers: {
       'Authorization': `Basic ${credentials}`,
