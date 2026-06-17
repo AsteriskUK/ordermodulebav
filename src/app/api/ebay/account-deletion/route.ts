@@ -18,10 +18,18 @@ export async function GET(req: NextRequest) {
     );
   }
 
+  // eBay spec: SHA-256 of challengeCode + verificationToken + endpoint
+  const hashInput = challengeCode + verificationToken + endpoint;
   const challengeResponse = crypto
     .createHash('sha256')
-    .update(challengeCode + verificationToken + endpoint)
+    .update(hashInput)
     .digest('hex');
+
+  console.log('[eBay Challenge] challengeCode:', challengeCode);
+  console.log('[eBay Challenge] verificationToken length:', verificationToken.length);
+  console.log('[eBay Challenge] endpoint:', endpoint);
+  console.log('[eBay Challenge] hashInput:', hashInput);
+  console.log('[eBay Challenge] challengeResponse:', challengeResponse);
 
   return NextResponse.json({ challengeResponse });
 }
