@@ -18,6 +18,9 @@ export async function GET(req: NextRequest) {
   const ruName = process.env.EBAY_RU_NAME!;
   const appUrl = process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000';
 
+  console.log('[eBay callback] clientId prefix:', clientId.slice(0, 12), 'suffix:', clientId.slice(-8));
+  console.log('[eBay callback] ruName:', ruName);
+
   const credentials = Buffer.from(`${clientId}:${clientSecret}`).toString('base64');
 
   const res = await fetch(TOKEN_URL, {
@@ -35,7 +38,7 @@ export async function GET(req: NextRequest) {
 
   if (!res.ok) {
     const body = await res.text();
-    console.error('[eBay callback] Token exchange failed:', body);
+    console.error('[eBay callback] Token exchange failed:', res.status, body);
     return NextResponse.redirect(`${appUrl}/import?ebay_error=token_exchange_failed`);
   }
 
