@@ -55,22 +55,27 @@ export async function GET(req: NextRequest) {
 
   cookieStore.set('ebay_access_token', data.access_token, {
     httpOnly: true,
-    secure: process.env.NODE_ENV === 'production',
+    secure: true,
+    sameSite: 'lax',
     maxAge: data.expires_in,
     path: '/',
   });
   cookieStore.set('ebay_refresh_token', data.refresh_token, {
     httpOnly: true,
-    secure: process.env.NODE_ENV === 'production',
+    secure: true,
+    sameSite: 'lax',
     maxAge: data.refresh_token_expires_in,
     path: '/',
   });
   cookieStore.set('ebay_token_expires_at', String(expiresAt), {
     httpOnly: true,
-    secure: process.env.NODE_ENV === 'production',
+    secure: true,
+    sameSite: 'lax',
     maxAge: data.refresh_token_expires_in,
     path: '/',
   });
+
+  console.log('[eBay callback] Cookies set successfully, redirecting to import');
 
   return NextResponse.redirect(`${appUrl}/import?ebay_connected=1`);
 }
