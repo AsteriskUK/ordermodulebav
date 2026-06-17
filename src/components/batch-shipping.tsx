@@ -954,7 +954,24 @@ export function BatchShipping() {
                           </Select>
                         </TableCell>
                         <TableCell onClick={(e) => e.stopPropagation()}>
-                          <div className="flex flex-col gap-1">
+                          {primary.deliveryCarrier === 'DPD' ? (
+                            <Select
+                              value={primary.deliveryService ?? 'next_day'}
+                              onValueChange={(v) => v && ids.forEach((id) => updateOrderDeliveryService(id, v))}
+                            >
+                              <SelectTrigger className="h-7 text-xs w-[120px]"><SelectValue /></SelectTrigger>
+                              <SelectContent>
+                                <SelectItem value="next_day">NEXT DAY</SelectItem>
+                                <SelectItem value="by_1030">BY 10:30</SelectItem>
+                                <SelectItem value="saturday_by_1030">SAT BY 10:30</SelectItem>
+                                <SelectItem value="by_12">BY 12</SelectItem>
+                                <SelectItem value="sunday_by_12">SUN BY 12</SelectItem>
+                                <SelectItem value="saturday_by_12">SAT BY 12</SelectItem>
+                                <SelectItem value="saturday">SATURDAY</SelectItem>
+                                <SelectItem value="sunday">SUNDAY</SelectItem>
+                              </SelectContent>
+                            </Select>
+                          ) : (
                             <Select
                               value={primary.deliveryType || 'standard'}
                               onValueChange={(v) => ids.forEach((id) => updateOrderCarrier(id, primary.deliveryCarrier || 'FedEx', v as DeliveryType))}
@@ -967,25 +984,7 @@ export function BatchShipping() {
                                 <SelectItem value="collection">Collection</SelectItem>
                               </SelectContent>
                             </Select>
-                            {primary.deliveryCarrier === 'DPD' && (
-                              <Select
-                                value={primary.deliveryService ?? 'next_day'}
-                                onValueChange={(v) => v && ids.forEach((id) => updateOrderDeliveryService(id, v))}
-                              >
-                                <SelectTrigger className="h-7 text-xs w-[120px]"><SelectValue /></SelectTrigger>
-                                <SelectContent>
-                                  <SelectItem value="next_day">NEXT DAY</SelectItem>
-                                  <SelectItem value="by_1030">BY 10:30</SelectItem>
-                                  <SelectItem value="saturday_by_1030">SAT BY 10:30</SelectItem>
-                                  <SelectItem value="by_12">BY 12</SelectItem>
-                                  <SelectItem value="sunday_by_12">SUN BY 12</SelectItem>
-                                  <SelectItem value="saturday_by_12">SAT BY 12</SelectItem>
-                                  <SelectItem value="saturday">SATURDAY</SelectItem>
-                                  <SelectItem value="sunday">SUNDAY</SelectItem>
-                                </SelectContent>
-                              </Select>
-                            )}
-                          </div>
+                          )}
                         </TableCell>
                         <TableCell onClick={(e) => e.stopPropagation()}>
                           <TrackingCell
