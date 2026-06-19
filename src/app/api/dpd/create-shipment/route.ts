@@ -23,6 +23,18 @@ function sanitizeAddressLine(value: string, maxLength = 30): string {
   return (value || '').trim().slice(0, maxLength);
 }
 
+function sanitizeReference(value: string, maxLength = 30): string {
+  return (value || '').trim().slice(0, maxLength);
+}
+
+function sanitizeEmail(value: string, maxLength = 100): string {
+  return (value || '').trim().slice(0, maxLength);
+}
+
+function sanitizeInstructions(value: string, maxLength = 100): string {
+  return (value || '').trim().slice(0, maxLength);
+}
+
 // DPD docs example collection address for diagnostic testing
 const DPD_DOCS_COLLECTION = {
   contactDetails: { contactName: 'My Contact', telephone: '01215002500' },
@@ -181,7 +193,7 @@ async function orderToPayload(order: Order, service: string): Promise<any> {
     ? DPD_DOCS_COLLECTION
     : {
         contactDetails: {
-          contactName: 'Warehouse',
+          contactName: sanitizeAddressLine('Warehouse'),
           telephone: sanitizePhone(process.env.DPD_COLLECTION_PHONE || ''),
         },
         address: collectionAddress,
@@ -191,13 +203,13 @@ async function orderToPayload(order: Order, service: string): Promise<any> {
     ? DPD_DOCS_DELIVERY
     : {
         contactDetails: {
-          contactName: order.postToName,
+          contactName: sanitizeAddressLine(order.postToName),
           telephone: sanitizePhone(order.postToPhone || ''),
         },
         address: deliveryAddress,
         notificationDetails: {
           mobile: sanitizePhone(order.postToPhone || ''),
-          email: order.buyerEmail || '',
+          email: sanitizeEmail(order.buyerEmail || ''),
         },
       };
 
@@ -211,10 +223,10 @@ async function orderToPayload(order: Order, service: string): Promise<any> {
       totalWeight: numberOfBoxes,
       currency: 'GBP',
       networkCode,
-      shippingRef1: order.salesRecordNumber,
+      shippingRef1: sanitizeReference(order.salesRecordNumber),
       shippingRef2: '',
       shippingRef3: '',
-      deliveryInstructions: '',
+      deliveryInstructions: sanitizeInstructions(''),
     },
   };
 
