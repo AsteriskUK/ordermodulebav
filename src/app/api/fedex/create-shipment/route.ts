@@ -6,6 +6,39 @@ function notConfigured() {
   return !process.env.FEDEX_CLIENT_ID || !process.env.FEDEX_CLIENT_SECRET || !process.env.FEDEX_ACCOUNT_NUMBER;
 }
 
+function sanitizeFedExString(value: string, maxLength: number): string {
+  return (value || '').trim().slice(0, maxLength);
+}
+
+function sanitizeFedExPhone(value: string): string {
+  return (value || '').replace(/\D/g, '').slice(0, 15);
+}
+
+function sanitizeFedExAddressLines(address1: string, address2: string): string[] {
+  const line1 = sanitizeFedExString(address1, 35);
+  const line2 = sanitizeFedExString(address2, 35);
+  const lines: string[] = [];
+  if (line1.length >= 3) lines.push(line1);
+  if (line2.length >= 3) lines.push(line2);
+
+  // If address line 1 is too short, merge with line 2 if possible
+  if (line1.length > 0 && line1.length < 3 && line2.length >= 3) {
+    const combined = sanitizeFedExString(`${line1} ${line2}`, 35);
+    if (combined.length >= 3) return [combined];
+  }
+
+  if (lines.length > 0) return lines;
+
+  // Fallback for empty/invalid addresses
+  return ['Unknown Address'];
+}
+
+function ensureMinLength(value: string, minLength: number, fallback: string): string {
+  const trimmed = value.trim();
+  if (trimmed.length >= minLength) return trimmed;
+  return fallback;
+}
+
 function orderToPayload(order: Order, shipDate: string): FedExShipmentRequest {
   const isInternational = order.postToCountry !== 'United Kingdom' && order.postToCountry !== 'GB';
   const isNextDay = order.deliveryType === 'next_day' || order.deliveryType === 'express';
@@ -17,19 +50,22 @@ function orderToPayload(order: Order, shipDate: string): FedExShipmentRequest {
   const numberOfBoxes = order.numberOfBoxes ?? 1;
 
   const recipientAddress = {
-    streetLines: [order.postToAddress1, order.postToAddress2].filter(Boolean) as string[],
-    city: order.postToCity,
-    stateOrProvinceCode: order.postToCounty || undefined,
-    postalCode: order.postToPostcode,
+    streetLines: sanitizeFedExAddressLines(order.postToAddress1, order.postToAddress2),
+    city: ensureMinLength(sanitizeFedExString(order.postToCity, 35), 3, sanitizeFedExString(order.postToCounty || '', 35) || 'Unknown'),
+    stateOrProvinceCode: order.postToCounty ? sanitizeFedExString(order.postToCounty, 3) : undefined,
+    postalCode: sanitizeFedExString(order.postToPostcode, 16),
     countryCode: order.postToCountry === 'United Kingdom' ? 'GB' : (order.postToCountry || 'GB'),
   };
 
   const shipperAddress = {
-    streetLines: [(process.env.FEDEX_SHIPPER_ADDRESS1 || '')],
-    city: process.env.FEDEX_SHIPPER_CITY || '',
-    postalCode: process.env.FEDEX_SHIPPER_POSTCODE || '',
+    streetLines: sanitizeFedExAddressLines(process.env.FEDEX_SHIPPER_ADDRESS1 || '', process.env.FEDEX_SHIPPER_ADDRESS2 || ''),
+    city: ensureMinLength(sanitizeFedExString(process.env.FEDEX_SHIPPER_CITY || '', 35), 3, 'Unknown'),
+    postalCode: sanitizeFedExString(process.env.FEDEX_SHIPPER_POSTCODE || '', 16),
     countryCode: 'GB',
   };
+
+  const recipientPhone = sanitizeFedExPhone(order.postToPhone || '');
+  const recipientName = sanitizeFedExString(order.postToName || order.buyerUsername || '', 35);
 
   return {
     shipDatestamp: shipDate,
@@ -38,18 +74,18 @@ function orderToPayload(order: Order, shipDate: string): FedExShipmentRequest {
     pickupType: 'USE_SCHEDULED_PICKUP',
     shipper: {
       contact: {
-        personName: process.env.FEDEX_SHIPPER_NAME || 'Warehouse',
-        phoneNumber: process.env.FEDEX_SHIPPER_PHONE || '',
-        companyName: process.env.FEDEX_SHIPPER_COMPANY || '',
+        personName: sanitizeFedExString(process.env.FEDEX_SHIPPER_NAME || 'Warehouse', 35),
+        phoneNumber: sanitizeFedExPhone(process.env.FEDEX_SHIPPER_PHONE || '').replace(/^$/, '0000000000'),
+        companyName: sanitizeFedExString(process.env.FEDEX_SHIPPER_COMPANY || '', 35),
       },
       address: shipperAddress,
     },
     recipients: [
       {
         contact: {
-          personName: order.postToName,
-          phoneNumber: order.postToPhone || '',
-          emailAddress: order.buyerEmail || '',
+          personName: ensureMinLength(recipientName, 3, 'Recipient'),
+          phoneNumber: recipientPhone.replace(/^$/, '0000000000'),
+          emailAddress: sanitizeFedExString(order.buyerEmail || '', 100),
         },
         address: recipientAddress,
       },
@@ -70,7 +106,7 @@ function orderToPayload(order: Order, shipDate: string): FedExShipmentRequest {
     requestedPackageLineItems: Array.from({ length: numberOfBoxes }, () => ({
       weight: { units: 'KG' as const, value: 1 },
       customerReferences: [
-        { customerReferenceType: 'CUSTOMER_REFERENCE' as const, value: order.salesRecordNumber },
+        { customerReferenceType: 'CUSTOMER_REFERENCE' as const, value: sanitizeFedExString(order.salesRecordNumber, 30) },
       ],
     })),
   };
