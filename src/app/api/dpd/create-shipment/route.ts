@@ -247,7 +247,9 @@ export async function POST(req: NextRequest) {
     orders.map(async (order): Promise<ShipResult> => {
       try {
         console.log(`[DPD API] Processing order ${order.salesRecordNumber}...`);
-        const payload = await orderToPayload(order, service);
+        const orderService = order.deliveryService || service || 'next_day';
+        console.log(`[DPD API] Order ${order.salesRecordNumber} using service: ${orderService} (deliveryService=${order.deliveryService}, bodyService=${service})`);
+        const payload = await orderToPayload(order, orderService);
         console.log(`[DPD API] Payload for ${order.salesRecordNumber}:`, JSON.stringify(payload, null, 2));
         const res = await createDPDShipment(payload);
         console.log(`[DPD API] Response for ${order.salesRecordNumber}:`, JSON.stringify(res, null, 2));
