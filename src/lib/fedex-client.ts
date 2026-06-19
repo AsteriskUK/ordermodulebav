@@ -130,22 +130,54 @@ export async function createFedExShipment(payload: FedExShipmentRequest): Promis
     accountNumber: { value: accountNumber },
   };
 
-  const res = await fetch(`${base}/ship/v1/shipments`, {
-    method: 'POST',
-    headers: {
-      'Authorization': `Bearer ${token}`,
-      'Content-Type': 'application/json',
-      'X-locale': 'en_GB',
-    },
-    body: JSON.stringify(body),
-  });
+  const maxRetries = 3;
+  let lastError: Error | null = null;
 
-  const data = await res.json() as FedExShipmentResponse;
+  for (let attempt = 0; attempt <= maxRetries; attempt++) {
+    try {
+      const res = await fetch(`${base}/ship/v1/shipments`, {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json',
+          'X-locale': 'en_GB',
+        },
+        body: JSON.stringify(body),
+      });
 
-  if (!res.ok || data.errors?.length) {
-    const detail = data.errors?.map((e) => e.message).join('; ') || res.statusText;
-    throw new Error(`FedEx API error: ${detail}`);
+      const data = await res.json() as FedExShipmentResponse;
+      console.log(`[FedEx] create shipment attempt ${attempt + 1}: status=${res.status}, errors=${data.errors?.length ?? 0}`);
+
+      if (!res.ok || data.errors?.length) {
+        const detail = data.errors?.map((e) => e.message).join('; ') || res.statusText;
+        // Retry on transient errors (503, 502, 429, or explicit "service is currently unavailable")
+        const isTransient = res.status === 503 || res.status === 502 || res.status === 429 || /unavailable|rate limit|try again later/i.test(detail);
+        if (isTransient && attempt < maxRetries) {
+          console.warn(`[FedEx] Transient error, retrying: ${detail}`);
+          lastError = new Error(`FedEx API error: ${detail}`);
+          const delay = 1000 * Math.pow(2, attempt);
+          await new Promise((resolve) => setTimeout(resolve, delay));
+          continue;
+        }
+        throw new Error(`FedEx API error: ${detail}`);
+      }
+
+      return data;
+    } catch (err) {
+      if (attempt === maxRetries) {
+        console.error('[FedEx] Max retries exceeded:', err);
+        throw lastError || err;
+      }
+      // Network or parsing errors that aren't from the API response itself
+      if (err instanceof Error && err.message.includes('FedEx API error:')) {
+        throw err;
+      }
+      console.warn(`[FedEx] Network/parsing error on attempt ${attempt + 1}, retrying:`, err);
+      lastError = err instanceof Error ? err : new Error(String(err));
+      const delay = 1000 * Math.pow(2, attempt);
+      await new Promise((resolve) => setTimeout(resolve, delay));
+    }
   }
 
-  return data;
+  throw lastError || new Error('FedEx shipment creation failed after retries');
 }
