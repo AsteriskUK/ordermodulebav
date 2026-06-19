@@ -19,6 +19,10 @@ function sanitizePostcode(postcode: string): string {
   return (postcode || '').trim().slice(0, 8);
 }
 
+function sanitizeAddressLine(value: string, maxLength = 30): string {
+  return (value || '').trim().slice(0, maxLength);
+}
+
 // DPD docs example collection address for diagnostic testing
 const DPD_DOCS_COLLECTION = {
   contactDetails: { contactName: 'My Contact', telephone: '01215002500' },
@@ -128,9 +132,9 @@ async function orderToPayload(order: Order, service: string): Promise<any> {
     ? DPD_DOCS_COLLECTION.address
     : {
         organisation: '',
-        street: process.env.DPD_COLLECTION_ADDRESS1 || '',
+        street: sanitizeAddressLine(process.env.DPD_COLLECTION_ADDRESS1 || ''),
         locality: '',
-        town: process.env.DPD_COLLECTION_CITY || '',
+        town: sanitizeAddressLine(process.env.DPD_COLLECTION_CITY || ''),
         county: '',
         postcode: sanitizePostcode(process.env.DPD_COLLECTION_POSTCODE || ''),
         countryCode: 'GB',
@@ -140,10 +144,10 @@ async function orderToPayload(order: Order, service: string): Promise<any> {
     ? DPD_DOCS_DELIVERY.address
     : {
         organisation: '',
-        street: order.postToAddress1,
-        locality: (order.postToAddress2 || '').replace(/ebay[a-z0-9]+/gi, '').trim(),
-        town: order.postToCity,
-        county: order.postToCounty || '',
+        street: sanitizeAddressLine(order.postToAddress1),
+        locality: sanitizeAddressLine((order.postToAddress2 || '').replace(/ebay[a-z0-9]+/gi, '').trim()),
+        town: sanitizeAddressLine(order.postToCity),
+        county: sanitizeAddressLine(order.postToCounty || ''),
         postcode: sanitizePostcode(order.postToPostcode),
         countryCode: order.postToCountry === 'United Kingdom' ? 'GB' : (order.postToCountry || 'GB'),
       };
