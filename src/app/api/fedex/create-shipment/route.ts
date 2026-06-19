@@ -91,7 +91,7 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: 'No orders provided' }, { status: 400 });
   }
 
-  type ShipResult = { ok: true; orderId: string; salesRecordNumber: string; trackingNumber?: string; labelBase64?: string; allLabels?: string[] } | { ok: false; orderId: string; salesRecordNumber: string; error: string };
+  type ShipResult = { ok: true; orderId: string; salesRecordNumber: string; trackingNumber?: string; labelBase64?: string; allLabels?: string[]; labelPdfs?: string[] } | { ok: false; orderId: string; salesRecordNumber: string; error: string };
 
   const results: ShipResult[] = await Promise.all(
     orders.map(async (order): Promise<ShipResult> => {
@@ -104,7 +104,8 @@ export async function POST(req: NextRequest) {
           ?.map((p: { packageDocuments?: { encodedLabel?: string }[] }) => p?.packageDocuments?.[0]?.encodedLabel)
           .filter(Boolean) as string[] | undefined;
         const labelBase64 = allLabels?.[0];
-        return { ok: true, orderId: order.id, salesRecordNumber: order.salesRecordNumber, trackingNumber, labelBase64, allLabels };
+        console.log(`[FedEx API] Order ${order.salesRecordNumber}: tracking=${trackingNumber}, labels=${allLabels?.length ?? 0}`);
+        return { ok: true, orderId: order.id, salesRecordNumber: order.salesRecordNumber, trackingNumber, labelBase64, allLabels, labelPdfs: allLabels };
       } catch (e) {
         return { ok: false, orderId: order.id, salesRecordNumber: order.salesRecordNumber, error: e instanceof Error ? e.message : String(e) };
       }

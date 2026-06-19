@@ -441,6 +441,7 @@ export function BatchShipping() {
       }
       let totalLabels = 0;
       for (const s of succeeded) {
+        console.log('[Book Labels] processing result:', s.orderId, 'tracking=', s.trackingNumber, 'labelPdfs=', s.labelPdfs?.length, 'allLabels=', s.allLabels?.length, 'labelBase64=', !!s.labelBase64, 'labelHtmls=', s.labelHtmls?.length);
         const tracking = s.trackingNumber || s.parcelNumber || s.consignmentNumber || '';
         if (tracking) updateOrderTracking(s.orderId, tracking);
         const carrier = ordersToBook.find((o) => o.id === s.orderId)?.deliveryCarrier ?? 'DPD';
@@ -448,6 +449,7 @@ export function BatchShipping() {
           : s.labelPdfs?.length ? s.labelPdfs
           : s.allLabels?.length ? s.allLabels
           : s.labelBase64 ? [s.labelBase64] : [];
+        console.log('[Book Labels] storageLabels count:', storageLabels.length, 'carrier:', carrier);
         if (storageLabels.length > 0) saveOrderLabels(s.orderId, carrier, storageLabels);
         // DPD HTML labels — write directly into a new tab
         if (s.labelHtmls?.length) {
@@ -460,6 +462,7 @@ export function BatchShipping() {
         // PDF labels (FedEx or future DPD PDF)
         const pdfLabels = s.labelPdfs?.length ? s.labelPdfs
           : !s.labelHtmls?.length && s.labelBase64 ? [s.labelBase64] : [];
+        console.log('[Book Labels] pdfLabels count:', pdfLabels.length);
         for (const b64 of pdfLabels) {
           const binary = atob(b64);
           const bytes = new Uint8Array(binary.length);
