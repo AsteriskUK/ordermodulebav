@@ -42,6 +42,7 @@ import {
   ArrowUp,
   ArrowDown,
   CheckCircle2,
+  Trash,
 } from 'lucide-react';
 import { generateBatchShipCSV } from '@/lib/csv-parser';
 import { DeliveryBadge } from './delivery-badge';
@@ -56,15 +57,18 @@ export function OrderTable() {
   const updateOrderPriority = useOrderStore((s) => s.updateOrderPriority);
   const updateOrderCategory = useOrderStore((s) => s.updateOrderCategory);
   const bulkUpdateStatus = useOrderStore((s) => s.bulkUpdateStatus);
+  const deleteOrder = useOrderStore((s) => s.deleteOrder);
 
   const searchParams = useSearchParams();
-  const [search, setSearch] = useState('');
+  const [search, setSearch] = useState(() => searchParams.get('search') || '');
   const [statusFilter, setStatusFilter] = useState(() => searchParams.get('status') || 'all');
   const [categoryFilter, setCategoryFilter] = useState('all');
 
   useEffect(() => {
     const s = searchParams.get('status');
     if (s) setStatusFilter(s);
+    const q = searchParams.get('search');
+    if (q) setSearch(q);
   }, [searchParams]);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [page, setPage] = useState(0);
@@ -81,8 +85,15 @@ export function OrderTable() {
     }
   };
 
+  const handleDeleteOrder = (order: Order) => {
+    if (window.confirm(`Are you sure you want to delete order ${order.salesRecordNumber}? It will be moved to Recently Deleted and can be restored.`)) {
+      deleteOrder(order.id);
+      toast.success(`Order ${order.salesRecordNumber} moved to Recently Deleted`);
+    }
+  };
+
   const filtered = useMemo(() => {
-    let result = [...orders];
+    let result = [...orders].filter((o) => !o.deletedAt); // Filter out deleted orders
     if (statusFilter !== 'all') {
       result = result.filter((o) => o.status === statusFilter);
     }
@@ -613,6 +624,13 @@ export function OrderTable() {
                           }
                         >
                           Place on Hold
+                        </DropdownMenuItem>
+                        <DropdownMenuItem
+                          onClick={() => handleDeleteOrder(order)}
+                          className="text-red-600 focus:text-red-600"
+                        >
+                          <Trash className="h-4 w-4 mr-2" />
+                          Delete Order
                         </DropdownMenuItem>
                       </DropdownMenuContent>
                     </DropdownMenu>

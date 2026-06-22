@@ -271,7 +271,12 @@ function parseEbayCSV(content: string, batchId: string): Order[] {
   let ctx: RowContext | null = null;
 
   return result.data
-    .filter((row) => row['Sales record number'] || row['Order number'] || (ctx && row['Item title']))
+    .filter((row) => {
+      // eBay multi-item bundles have a summary row with address/postage but no item details.
+      // Only create orders for rows that represent actual items.
+      const hasItemDetails = row['Item title'] || row['Item number'] || row['Quantity'] || row['Sold for'];
+      return hasItemDetails && (row['Sales record number'] || row['Order number']);
+    })
     .map((row): Order => {
       const salesRecordNumber = row['Sales record number'] || ctx?.salesRecordNumber || '';
       const orderNumber = row['Order number'] || ctx?.orderNumber || '';

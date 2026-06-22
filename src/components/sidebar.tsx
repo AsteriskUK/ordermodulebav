@@ -19,6 +19,8 @@ import {
   MessageSquare,
   FilePlus,
   UsersRound,
+  Trash,
+  RefreshCw,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useOrderStore } from '@/lib/store';
@@ -35,6 +37,8 @@ const ALL_NAV = [
   { name: 'Notes', href: '/notes', icon: MessageSquare, staffVisible: true },
   { name: 'Batches', href: '/batches', icon: Package, staffVisible: false },
   { name: 'Returns', href: '/returns', icon: PackageOpen, staffVisible: false },
+  { name: 'Replacements', href: '/replacements', icon: RefreshCw, staffVisible: false },
+  { name: 'Recently Deleted', href: '/recently-deleted', icon: Trash, staffVisible: false },
   { name: 'Reports', href: '/reports', icon: BarChart2, staffVisible: false },
   { name: 'EOD Report', href: '/eod', icon: FileBarChart2, staffVisible: false },
   { name: 'HR Module', href: '/hr', icon: UsersRound, staffVisible: true },
@@ -47,6 +51,7 @@ export function Sidebar({ collapsed, onToggle }: { collapsed: boolean; onToggle:
   const currentUserId = useOrderStore((s) => s.currentUserId);
   const currentUser = users.find((u) => u.id === currentUserId);
   const totalNotes = useOrderStore((s) => s.orders.reduce((sum, o) => sum + (o.notes?.length ?? 0), 0));
+  const deletedOrdersCount = useOrderStore((s) => s.orders.filter((o) => o.deletedAt).length);
 
   const setCurrentUser = useOrderStore((s) => s.setCurrentUser);
   const isAdminOrManager = currentUser?.role === 'admin' || currentUser?.role === 'manager';
@@ -107,6 +112,11 @@ export function Sidebar({ collapsed, onToggle }: { collapsed: boolean; onToggle:
               {!collapsed && item.href === '/notes' && totalNotes > 0 && (
                 <span className="ml-auto bg-blue-500 text-white text-[10px] font-bold rounded-full px-1.5 py-0.5 leading-none">
                   {totalNotes}
+                </span>
+              )}
+              {!collapsed && item.href === '/recently-deleted' && deletedOrdersCount > 0 && (
+                <span className="ml-auto bg-red-500 text-white text-[10px] font-bold rounded-full px-1.5 py-0.5 leading-none">
+                  {deletedOrdersCount}
                 </span>
               )}
             </Link>

@@ -98,6 +98,7 @@ export interface ReturnRecord {
   returnTrackingNumber?: string;
   receivedNotes?: string;
   replacementItems?: ReplacementItem[];
+  replacementOrderId?: string;
 }
 
 export interface ReplacementItem {
@@ -185,6 +186,11 @@ export interface Order {
   // Metadata
   importedAt: string;
   batchId: string;
+  // Soft delete
+  deletedAt?: string;
+  // Replacement linkage
+  isReplacement?: boolean;
+  originalOrderId?: string;
 }
 
 export interface Batch {

@@ -24,24 +24,58 @@ export async function getFedExToken(): Promise<string> {
   const clientSecret = process.env.FEDEX_CLIENT_SECRET;
   if (!clientId || !clientSecret) throw new Error('FEDEX_CLIENT_ID or FEDEX_CLIENT_SECRET not set');
 
-  const res = await fetch(`${getBase()}/oauth/token`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-    body: new URLSearchParams({
-      grant_type: 'client_credentials',
-      client_id: clientId,
-      client_secret: clientSecret,
-    }),
-  });
+  const maxRetries = 3;
+  let lastError: Error | null = null;
 
-  if (!res.ok) {
-    const body = await res.text();
-    throw new Error(`FedEx auth failed: ${res.status} ${body}`);
+  for (let attempt = 0; attempt <= maxRetries; attempt++) {
+    try {
+      const res = await fetch(`${getBase()}/oauth/token`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        body: new URLSearchParams({
+          grant_type: 'client_credentials',
+          client_id: clientId,
+          client_secret: clientSecret,
+        }),
+      });
+
+      if (res.ok) {
+        const data = await res.json() as { access_token: string; expires_in: number };
+        _cachedToken = { token: data.access_token, expiresAt: Date.now() + data.expires_in * 1000 };
+        console.log(`[FedEx] Auth succeeded on attempt ${attempt + 1}`);
+        return data.access_token;
+      }
+
+      const body = await res.text();
+      const isRetryable = res.status === 403 || res.status === 429 || res.status === 502 || res.status === 503;
+      
+      if (isRetryable && attempt < maxRetries) {
+        console.warn(`[FedEx] Auth failed with retryable status ${res.status}, retrying attempt ${attempt + 1}: ${body.slice(0, 100)}...`);
+        lastError = new Error(`FedEx auth failed: ${res.status} ${body}`);
+        const delay = 1000 * Math.pow(2, attempt) + Math.random() * 1000; // Add jitter
+        await new Promise((resolve) => setTimeout(resolve, delay));
+        continue;
+      }
+
+      throw new Error(`FedEx auth failed: ${res.status} ${body}`);
+    } catch (err) {
+      if (attempt === maxRetries) {
+        console.error('[FedEx] Auth max retries exceeded:', err);
+        throw lastError || err instanceof Error ? err : new Error(String(err));
+      }
+      if (err instanceof Error && !err.message.includes('FedEx auth failed')) {
+        // Network or other errors that aren't from the auth response itself
+        console.warn(`[FedEx] Auth network error on attempt ${attempt + 1}, retrying:`, err);
+        lastError = err;
+        const delay = 1000 * Math.pow(2, attempt) + Math.random() * 1000;
+        await new Promise((resolve) => setTimeout(resolve, delay));
+        continue;
+      }
+      throw err;
+    }
   }
 
-  const data = await res.json() as { access_token: string; expires_in: number };
-  _cachedToken = { token: data.access_token, expiresAt: Date.now() + data.expires_in * 1000 };
-  return data.access_token;
+  throw lastError || new Error('FedEx authentication failed after retries');
 }
 
 export interface FedExAddress {
@@ -84,7 +118,14 @@ export interface FedExShipmentRequest {
   labelSpecification: {
     labelFormatType: 'COMMON2D';
     imageType: 'PDF';
-    labelStockType: 'PAPER_85X11_TOP_HALF_LABEL';
+    labelStockType:
+      | 'PAPER_4X6'
+      | 'PAPER_4X8.25'
+      | 'PAPER_4X9'
+      | 'PAPER_4X11'
+      | 'PAPER_8.5X11_BOTTOM_HALF_LABEL'
+      | 'PAPER_8.5X11_TOP_HALF_LABEL'
+      | 'PAPER_85X11_TOP_HALF_LABEL';
   };
   requestedPackageLineItems: {
     weight: { units: 'KG'; value: number };
@@ -145,13 +186,38 @@ export async function createFedExShipment(payload: FedExShipmentRequest): Promis
         body: JSON.stringify(body),
       });
 
-      const data = await res.json() as FedExShipmentResponse;
+      let data: FedExShipmentResponse;
+      try {
+        const text = await res.text();
+        if (!text.trim().startsWith('{')) {
+          const err = new Error(`FedEx returned non-JSON response (${res.status}): ${text.slice(0, 200)}...`);
+          if (attempt < maxRetries) {
+            console.warn(`[FedEx] Transient non-JSON response, retrying: ${err.message}`);
+            lastError = err;
+            const delay = 1000 * Math.pow(2, attempt);
+            await new Promise((resolve) => setTimeout(resolve, delay));
+            continue;
+          }
+          throw err;
+        }
+        data = JSON.parse(text) as FedExShipmentResponse;
+      } catch (parseErr) {
+        const err = new Error(`FedEx API response parsing failed: ${parseErr instanceof Error ? parseErr.message : String(parseErr)}`);
+        if (attempt < maxRetries) {
+          console.warn(`[FedEx] Transient parsing error, retrying: ${err.message}`);
+          lastError = err;
+          const delay = 1000 * Math.pow(2, attempt);
+          await new Promise((resolve) => setTimeout(resolve, delay));
+          continue;
+        }
+        throw err;
+      }
       console.log(`[FedEx] create shipment attempt ${attempt + 1}: status=${res.status}, errors=${data.errors?.length ?? 0}`);
 
       if (!res.ok || data.errors?.length) {
         const detail = data.errors?.map((e) => e.message).join('; ') || res.statusText;
         // Retry on transient errors (503, 502, 429, or explicit "service is currently unavailable")
-        const isTransient = res.status === 503 || res.status === 502 || res.status === 429 || /unavailable|rate limit|try again later/i.test(detail);
+        const isTransient = res.status === 503 || res.status === 502 || res.status === 429 || /unavailable|unexpected error|working to resolve|rate limit|try again later|check back later/i.test(detail);
         if (isTransient && attempt < maxRetries) {
           console.warn(`[FedEx] Transient error, retrying: ${detail}`);
           lastError = new Error(`FedEx API error: ${detail}`);
@@ -180,4 +246,50 @@ export async function createFedExShipment(payload: FedExShipmentRequest): Promis
   }
 
   throw lastError || new Error('FedEx shipment creation failed after retries');
+}
+
+export interface FedExTrackingResponse {
+  output?: {
+    trackingResults?: {
+      trackingNumberInfo?: {
+        trackingNumber: string;
+      };
+      scanEvents?: {
+        date: string;
+        time: string;
+        scanType: string;
+        scanLocation?: string;
+      }[];
+    }[];
+  };
+  errors?: { code: string; message: string }[];
+}
+
+export async function trackFedExShipment(trackingNumber: string): Promise<FedExTrackingResponse> {
+  const base = getBase();
+  const token = await getFedExToken();
+
+  const res = await fetch(`${base}/track/v1/trackingnumbers`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'Authorization': `Bearer ${token}`,
+      'X-locale': 'en_GB',
+    },
+    body: JSON.stringify({
+      includeDetailedScans: true,
+      trackingInfo: [{
+        trackingNumberInfo: {
+          trackingNumber,
+        }
+      }]
+    }),
+  });
+
+  if (!res.ok) {
+    const body = await res.text();
+    throw new Error(`FedEx tracking API error: ${res.status} ${body}`);
+  }
+
+  return res.json() as FedExTrackingResponse;
 }

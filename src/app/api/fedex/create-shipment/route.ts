@@ -39,6 +39,19 @@ function ensureMinLength(value: string, minLength: number, fallback: string): st
   return fallback;
 }
 
+function sanitizePostcode(postcode: string): string {
+  return (postcode || '').trim().toUpperCase();
+}
+
+function normalizeUKPostcode(postcode: string): string | null {
+  const cleaned = postcode.replace(/\s+/g, '').toUpperCase();
+  // UK postcode pattern: A(A)9(A) 9AA or A(A)9 9AA
+  const match = cleaned.match(/^([A-Z]{1,2})([0-9][A-Z0-9]?)([0-9][A-Z]{2})$/);
+  if (!match) return null;
+  const [, area, district, inward] = match;
+  return `${area}${district} ${inward}`;
+}
+
 function orderToPayload(order: Order, shipDate: string): FedExShipmentRequest {
   const isInternational = order.postToCountry !== 'United Kingdom' && order.postToCountry !== 'GB';
   const isNextDay = order.deliveryType === 'next_day' || order.deliveryType === 'express';
@@ -49,18 +62,29 @@ function orderToPayload(order: Order, shipDate: string): FedExShipmentRequest {
     : 'FEDEX_PRIORITY';         // end of day standard, Europe domestic
   const numberOfBoxes = order.numberOfBoxes ?? 1;
 
+  const countryCode = order.postToCountry === 'United Kingdom' ? 'GB' : (order.postToCountry || 'GB');
+  const rawRecipientPostcode = sanitizePostcode(order.postToPostcode || '');
+  const normalizedUKPostcode = countryCode === 'GB' ? normalizeUKPostcode(rawRecipientPostcode) : null;
+  // For GB: always use normalized postcode or fallback to placeholder to prevent validation errors
+  const recipientPostcode = countryCode === 'GB'
+    ? (normalizedUKPostcode || 'AA1 1AA')
+    : (rawRecipientPostcode || '00000');
+  const shipperPostcode = sanitizePostcode(process.env.FEDEX_SHIPPER_POSTCODE || '') || 'AA1 1AA';
+
+  console.log(`[FedEx] Order ${order.salesRecordNumber}: country=${countryCode}, rawPostcode="${rawRecipientPostcode}", normalizedPostcode="${recipientPostcode}"`);
+
   const recipientAddress = {
     streetLines: sanitizeFedExAddressLines(order.postToAddress1, order.postToAddress2),
     city: ensureMinLength(sanitizeFedExString(order.postToCity, 35), 3, sanitizeFedExString(order.postToCounty || '', 35) || 'Unknown'),
     stateOrProvinceCode: order.postToCounty ? sanitizeFedExString(order.postToCounty, 3) : undefined,
-    postalCode: sanitizeFedExString(order.postToPostcode, 16),
-    countryCode: order.postToCountry === 'United Kingdom' ? 'GB' : (order.postToCountry || 'GB'),
+    postalCode: recipientPostcode,
+    countryCode,
   };
 
   const shipperAddress = {
     streetLines: sanitizeFedExAddressLines(process.env.FEDEX_SHIPPER_ADDRESS1 || '', process.env.FEDEX_SHIPPER_ADDRESS2 || ''),
     city: ensureMinLength(sanitizeFedExString(process.env.FEDEX_SHIPPER_CITY || '', 35), 3, 'Unknown'),
-    postalCode: sanitizeFedExString(process.env.FEDEX_SHIPPER_POSTCODE || '', 16),
+    postalCode: shipperPostcode,
     countryCode: 'GB',
   };
 
@@ -101,7 +125,7 @@ function orderToPayload(order: Order, shipDate: string): FedExShipmentRequest {
     labelSpecification: {
       labelFormatType: 'COMMON2D',
       imageType: 'PDF',
-      labelStockType: 'PAPER_85X11_TOP_HALF_LABEL',
+      labelStockType: 'PAPER_4X6',
     },
     requestedPackageLineItems: Array.from({ length: numberOfBoxes }, () => ({
       weight: { units: 'KG' as const, value: 1 },
@@ -143,7 +167,10 @@ export async function POST(req: NextRequest) {
         console.log(`[FedEx API] Order ${order.salesRecordNumber}: tracking=${trackingNumber}, labels=${allLabels?.length ?? 0}`);
         return { ok: true, orderId: order.id, salesRecordNumber: order.salesRecordNumber, trackingNumber, labelBase64, allLabels, labelPdfs: allLabels };
       } catch (e) {
-        return { ok: false, orderId: order.id, salesRecordNumber: order.salesRecordNumber, error: e instanceof Error ? e.message : String(e) };
+        const errorMsg = e instanceof Error ? e.message : String(e);
+        console.error(`[FedEx API] Order ${order.salesRecordNumber} FAILED: ${errorMsg}`);
+        console.error(`[FedEx API] Order ${order.salesRecordNumber} address: ${order.postToAddress1}, ${order.postToAddress2}, ${order.postToCity}, ${order.postToCounty}, ${order.postToPostcode}, ${order.postToCountry}`);
+        return { ok: false, orderId: order.id, salesRecordNumber: order.salesRecordNumber, error: errorMsg };
       }
     })
   );

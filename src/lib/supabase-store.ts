@@ -179,6 +179,8 @@ export async function fetchOrders(): Promise<Order[]> {
     labelPrintedAt: o.label_printed_at,
     labelCarrier: o.label_carrier,
     labelData: o.label_data,
+    isReplacement: o.metadata?.is_replacement,
+    originalOrderId: o.metadata?.original_order_id,
     notes: o.order_notes?.map((n: any) => ({
       id: n.id,
       authorId: n.author_id,
@@ -245,6 +247,10 @@ export async function syncOrder(order: Order): Promise<void> {
       dispatched_on_date: order.dispatchedOnDate,
       imported_at: order.importedAt,
       return_id: order.returnId,
+      metadata: {
+        is_replacement: order.isReplacement,
+        original_order_id: order.originalOrderId,
+      },
       // label_printed_at: order.labelPrintedAt, // TODO: Add column to Supabase
       // label_carrier: order.labelCarrier, // TODO: Add column to Supabase
       // label_data: order.labelData, // TODO: Add column to Supabase
@@ -407,6 +413,20 @@ export async function syncLeaveBalance(balance: LeaveBalance): Promise<void> {
 // ==================== RETURNS ====================
 
 export async function syncReturn(ret: ReturnRecord): Promise<void> {
+  if (!isValidUUID(ret.id)) {
+    console.log('Skipping sync for return with invalid ID:', ret.id);
+    return;
+  }
+  const metadata = Object.fromEntries(
+    Object.entries({
+      resolution: ret.resolution,
+      replacement_items: ret.replacementItems,
+      replacement_order_id: ret.replacementOrderId,
+      return_tracking_number: ret.returnTrackingNumber,
+      received_notes: ret.receivedNotes,
+    }).filter(([, v]) => v !== undefined)
+  );
+
   const { error } = await supabase
     .from('returns')
     .upsert({
@@ -421,9 +441,13 @@ export async function syncReturn(ret: ReturnRecord): Promise<void> {
       processed_by_user_id: ret.processedByUserId,
       processed_by_user_name: ret.processedByUserName,
       refund_amount: ret.refundAmount,
+      metadata,
     });
-  
-  if (error) console.error('Error syncing return:', error);
+
+  if (error) {
+    console.error('Error syncing return:', JSON.stringify(error, null, 2));
+    console.error('Return data:', { id: ret.id, status: ret.status, metadata });
+  }
 }
 
 export async function fetchReturns(): Promise<ReturnRecord[]> {
@@ -451,6 +475,11 @@ export async function fetchReturns(): Promise<ReturnRecord[]> {
     processedByUserName: r.processed_by_user_name,
     refundAmount: r.refund_amount,
     status: r.status,
+    resolution: r.metadata?.resolution,
+    replacementItems: r.metadata?.replacement_items,
+    replacementOrderId: r.metadata?.replacement_order_id,
+    returnTrackingNumber: r.metadata?.return_tracking_number,
+    receivedNotes: r.metadata?.received_notes,
   })) || [];
 }
 

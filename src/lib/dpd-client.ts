@@ -364,3 +364,44 @@ export async function getDPDLabels(shipmentId: string): Promise<DPDLabelResult[]
 
   throw new Error('DPD returned no label data');
 }
+
+export interface DPDTrackingResponse {
+  data: {
+    trackingInfo?: {
+      trackingResult?: {
+        consignmentNumber?: string;
+        parcelInfo?: {
+          trackingNumber?: string;
+          events?: {
+            date: string;
+            time: string;
+            description: string;
+            location?: string;
+          }[];
+        }[];
+      };
+    };
+  };
+  errors?: string[];
+}
+
+export async function trackDPDShipment(trackingNumber: string): Promise<DPDTrackingResponse> {
+  const baseUrl = getBaseUrl();
+  const token = await getAccessToken();
+
+  const res = await fetch(`${baseUrl}/shipping/tracking?trackingNumber=${encodeURIComponent(trackingNumber)}`, {
+    method: 'GET',
+    headers: {
+      'Authorization': `Bearer ${token}`,
+      'Content-Type': 'application/json',
+    },
+  });
+
+  if (!res.ok) {
+    const body = await res.text();
+    throw new Error(`DPD tracking API error: ${res.status} ${body}`);
+  }
+
+  const data = await res.json();
+  return data as DPDTrackingResponse;
+}

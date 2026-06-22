@@ -64,7 +64,10 @@ interface OrderStore {
   saveOrderLabels: (orderId: string, carrier: string, labels: string[]) => void;
   bulkUpdateStatus: (orderIds: string[], status: OrderStatus) => void;
   deleteOrder: (orderId: string) => void;
+  restoreOrder: (orderId: string) => void;
   purgeOrphanOrders: () => void;
+  getDeletedOrders: () => Order[];
+  permanentDeleteOrder: (orderId: string) => void;
   deleteBatch: (batchId: string) => void;
   addUser: (user: AppUser) => void;
   updateUser: (userId: string, updates: Partial<AppUser>) => void;
@@ -76,6 +79,7 @@ interface OrderStore {
   updateReturn: (returnId: string, updates: Partial<ReturnRecord>) => void;
   processReturn: (returnId: string, resolution: 'refund' | 'replacement', processedByUserId: string, processedByUserName: string) => void;
   addReplacementItem: (returnId: string, item: ReplacementItem) => void;
+  createReplacementOrder: (returnId: string) => Order;
   // HR Actions
   attendanceRecords: AttendanceRecord[];
   leaveRequests: LeaveRequest[];
@@ -92,18 +96,18 @@ interface OrderStore {
 
 export const useOrderStore = create<OrderStore>()(
   persist(
-    (set) => ({
-      orders: [],
-      batches: [],
-      eodEvents: [],
-      returns: [],
-      attendanceRecords: [],
-      leaveRequests: [],
-      leaveBalances: [],
+    (set, get) => ({
+      orders: [] as Order[],
+      batches: [] as Batch[],
+      eodEvents: [] as EodEvent[],
+      returns: [] as ReturnRecord[],
+      attendanceRecords: [] as AttendanceRecord[],
+      leaveRequests: [] as LeaveRequest[],
+      leaveBalances: [] as LeaveBalance[],
       users: [
-        { id: 'admin-1', name: 'Admin', role: 'admin', roles: ['admin'], department: 'management', departments: ['management'] as Department[], pin: '1234' },
-      ],
-      currentUserId: null,
+        { id: 'admin-1', name: 'Admin', role: 'admin', roles: ['admin'], department: 'management', departments: ['management'], pin: '1234' },
+      ] as AppUser[],
+      currentUserId: null as string | null,
       emailConfig: {
         enabled: false,
         recipientEmail: '',
@@ -344,6 +348,24 @@ export const useOrderStore = create<OrderStore>()(
         }),
       deleteOrder: (orderId) =>
         set((state) => ({
+          orders: state.orders.map((o) =>
+            o.id === orderId ? { ...o, deletedAt: new Date().toISOString() } : o
+          ),
+        })),
+      restoreOrder: (orderId) =>
+        set((state) => ({
+          orders: state.orders.map((o) =>
+            o.id === orderId ? { ...o, deletedAt: undefined } : o
+          ),
+        })),
+      getDeletedOrders: (): Order[] => {
+        const state = get();
+        return state.orders.filter((o) => o.deletedAt).sort((a, b) =>
+          new Date(b.deletedAt!).getTime() - new Date(a.deletedAt!).getTime()
+        );
+      },
+      permanentDeleteOrder: (orderId) =>
+        set((state) => ({
           orders: state.orders.filter((o) => o.id !== orderId),
         })),
       deleteBatch: (batchId) =>
@@ -390,9 +412,9 @@ export const useOrderStore = create<OrderStore>()(
       },
       processReturn: (returnId, resolution, processedByUserId, processedByUserName) => {
         set((state) => {
-          const newStatus = resolution === 'refund' ? 'refunded' : 'replacement';
+          const newStatus: ReturnRecord['status'] = resolution === 'refund' ? 'refunded' : 'replacement';
           const updatedReturns = state.returns.map((r) =>
-            r.id === returnId ? { ...r, resolution, status: newStatus as any, processedByUserId, processedByUserName } : r
+            r.id === returnId ? { ...r, resolution, status: newStatus, processedByUserId, processedByUserName } : r
           );
           const updated = updatedReturns.find(r => r.id === returnId);
           if (updated) syncReturn(updated).catch(console.error);
@@ -408,6 +430,81 @@ export const useOrderStore = create<OrderStore>()(
           if (updated) syncReturn(updated).catch(console.error);
           return { returns: updatedReturns };
         });
+      },
+      createReplacementOrder: (returnId) => {
+        const state = get();
+        const ret = state.returns.find((r) => r.id === returnId);
+        if (!ret) throw new Error('Return not found');
+        if (ret.replacementOrderId) {
+          const existing = state.orders.find((o) => o.id === ret.replacementOrderId);
+          if (existing) return existing;
+        }
+
+        const originalOrder = state.orders.find((o) => o.id === ret.orderId);
+        if (!originalOrder) throw new Error('Original order not found');
+
+        const replacementItem = ret.replacementItems?.[0];
+        const now = new Date().toISOString();
+        const newOrderId = generateUUID();
+        const salesRecordNumber = `REPL-${originalOrder.salesRecordNumber}`;
+
+        let batch = state.batches.find((b) => b.name === 'Replacements');
+        if (!batch) {
+          batch = { id: generateUUID(), name: 'Replacements', importedAt: now, orderCount: 1, source: 'manual' };
+        } else {
+          batch = { ...batch, orderCount: batch.orderCount + 1 };
+        }
+
+        const newOrder: Order = {
+          ...originalOrder,
+          id: newOrderId,
+          salesRecordNumber,
+          orderNumber: `REPL-${originalOrder.orderNumber}`,
+          status: 'pending',
+          itemTitle: replacementItem?.itemTitle ?? originalOrder.itemTitle,
+          quantity: replacementItem?.quantity ?? originalOrder.quantity,
+          soldFor: 0,
+          postageAndPackaging: 0,
+          totalPrice: 0,
+          isReplacement: true,
+          originalOrderId: originalOrder.id,
+          returnId: ret.id,
+          importedAt: now,
+          batchId: batch.id,
+          saleDate: now,
+          paidOnDate: now,
+          postByDate: now,
+          dispatchedOnDate: '',
+          trackingNumber: '',
+          deliveryService: '',
+          comments: `Replacement for return ${ret.id}`,
+          notes: [
+            {
+              id: generateUUID(),
+              text: 'Replacement order created from return',
+              authorId: 'system',
+              authorName: 'System',
+              createdAt: now,
+            },
+          ],
+        };
+
+        set((state) => ({
+          orders: [...state.orders, newOrder],
+          batches: state.batches.some((b) => b.id === batch.id)
+            ? state.batches.map((b) => (b.id === batch.id ? batch : b))
+            : [...state.batches, batch],
+          returns: state.returns.map((r) =>
+            r.id === returnId ? { ...r, replacementOrderId: newOrderId } : r
+          ),
+        }));
+
+        syncBatch(batch, state.currentUserId || undefined).catch(console.error);
+        syncOrder(newOrder).catch(console.error);
+        const updatedReturn = get().returns.find((r) => r.id === returnId);
+        if (updatedReturn) syncReturn(updatedReturn).catch(console.error);
+
+        return newOrder;
       },
       // HR Actions
       clockIn: (userId, notes) =>

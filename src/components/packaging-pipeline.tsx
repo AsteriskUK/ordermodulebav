@@ -78,11 +78,13 @@ export function PackagingPipeline() {
       (o.postToAddress1 && o.postToAddress1.trim() !== '') ||
       (o.postToPostcode && o.postToPostcode.trim() !== '')
     );
-    let filtered = nonOrphans;
+    // Exclude deleted orders
+    const activeOrders = nonOrphans.filter((o) => !o.deletedAt);
+    let filtered = activeOrders;
     if (!allowedCategories) {
-      filtered = nonOrphans;
+      filtered = activeOrders;
     } else {
-      filtered = nonOrphans.filter((o) => allowedCategories.includes(o.category));
+      filtered = activeOrders.filter((o) => allowedCategories.includes(o.category));
     }
     
     return filtered.sort((a, b) => {
@@ -108,8 +110,10 @@ export function PackagingPipeline() {
     () => visibleOrders.filter((o) => o.status === 'packing'),
     [visibleOrders]
   );
-  // Packed orders are removed from queue (no longer shown)
-  const packedOrders = useMemo(() => [], []);
+  const packedOrders = useMemo(
+    () => visibleOrders.filter((o) => o.status === 'packed'),
+    [visibleOrders]
+  );
   const shippedOrders = useMemo(
     () => visibleOrders.filter((o) => o.status === 'shipped'),
     [visibleOrders]

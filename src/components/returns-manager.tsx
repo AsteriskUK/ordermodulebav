@@ -2,7 +2,7 @@
 
 import { useState, useMemo } from 'react';
 import { useOrderStore } from '@/lib/store';
-import { ReturnRecord } from '@/lib/types';
+import { ReturnRecord, ReplacementItem } from '@/lib/types';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -13,7 +13,10 @@ import {
 import {
   Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
 } from '@/components/ui/table';
-import { PackageOpen, Plus, Search, CheckCircle, XCircle, Truck } from 'lucide-react';
+import {
+  Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter,
+} from '@/components/ui/dialog';
+import { PackageOpen, Plus, Search, CheckCircle, XCircle, Truck, Replace } from 'lucide-react';
 import { toast } from 'sonner';
 
 const RETURN_REASONS = [
@@ -36,7 +39,11 @@ const STATUS_CONFIG: Record<ReturnRecord['status'], { label: string; color: stri
 };
 
 function genId() {
-  return `ret-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`;
+  return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, (c) => {
+    const r = Math.random() * 16 | 0;
+    const v = c === 'x' ? r : (r & 0x3 | 0x8);
+    return v.toString(16);
+  });
 }
 
 export function ReturnsManager() {
@@ -46,12 +53,21 @@ export function ReturnsManager() {
   const currentUserId = useOrderStore((s) => s.currentUserId);
   const addReturn = useOrderStore((s) => s.addReturn);
   const updateReturn = useOrderStore((s) => s.updateReturn);
+  const processReturn = useOrderStore((s) => s.processReturn);
+  const addReplacementItem = useOrderStore((s) => s.addReplacementItem);
+  const createReplacementOrder = useOrderStore((s) => s.createReplacementOrder);
 
   const currentUser = users.find((u) => u.id === currentUserId);
 
   const [search, setSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState<string>('all');
   const [showForm, setShowForm] = useState(false);
+
+  // Replacement dialog
+  const [replaceReturn, setReplaceReturn] = useState<ReturnRecord | null>(null);
+  const [replacementItemTitle, setReplacementItemTitle] = useState('');
+  const [replacementQty, setReplacementQty] = useState('1');
+  const [replacementNotes, setReplacementNotes] = useState('');
 
   // New return form
   const [orderSearch, setOrderSearch] = useState('');
@@ -120,6 +136,25 @@ export function ReturnsManager() {
     setNotes('');
     setRefundAmount('');
     setReason(RETURN_REASONS[0]);
+  };
+
+  const handleCreateReplacement = () => {
+    if (!replaceReturn) return;
+    const title = replacementItemTitle.trim();
+    if (!title) { toast.error('Enter replacement item title'); return; }
+    const qty = parseInt(replacementQty, 10);
+    if (isNaN(qty) || qty < 1) { toast.error('Enter a valid quantity'); return; }
+
+    const item: ReplacementItem = { itemTitle: title, quantity: qty, notes: replacementNotes.trim() || undefined };
+    addReplacementItem(replaceReturn.id, item);
+    processReturn(replaceReturn.id, 'replacement', currentUser?.id || '', currentUser?.name || '');
+    const newOrder = createReplacementOrder(replaceReturn.id);
+
+    toast.success(`Replacement order #${newOrder.salesRecordNumber} created`);
+    setReplaceReturn(null);
+    setReplacementItemTitle('');
+    setReplacementQty('1');
+    setReplacementNotes('');
   };
 
   const totalRefunded = returns
@@ -300,12 +335,18 @@ export function ReturnsManager() {
                           </Button>
                         )}
                         {(ret.status === 'pending' || ret.status === 'received') && (
+                          <Button size="sm" variant="outline" className="h-6 text-xs px-2 text-purple-700 border-purple-300"
+                            onClick={() => { setReplaceReturn(ret); setReplacementItemTitle(ret.itemTitle); }}>
+                            <Replace className="h-3 w-3 mr-1" />Replace
+                          </Button>
+                        )}
+                        {(ret.status === 'pending' || ret.status === 'received') && (
                           <Button size="sm" variant="outline" className="h-6 text-xs px-2 text-green-700 border-green-300"
                             onClick={() => { updateReturn(ret.id, { status: 'refunded' }); toast.success('Return refunded'); }}>
                             <CheckCircle className="h-3 w-3 mr-1" />Refund
                           </Button>
                         )}
-                        {ret.status !== 'rejected' && ret.status !== 'refunded' && (
+                        {ret.status !== 'rejected' && ret.status !== 'refunded' && ret.status !== 'replacement' && (
                           <Button size="sm" variant="outline" className="h-6 text-xs px-2 text-red-600 border-red-200"
                             onClick={() => { updateReturn(ret.id, { status: 'rejected' }); toast.error('Return rejected'); }}>
                             <XCircle className="h-3 w-3 mr-1" />Reject
@@ -320,6 +361,50 @@ export function ReturnsManager() {
           )}
         </CardContent>
       </Card>
+
+      {/* Replacement dialog */}
+      <Dialog open={!!replaceReturn} onOpenChange={(open) => { if (!open) setReplaceReturn(null); }}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Create Replacement</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-3 py-2">
+            <p className="text-sm text-slate-500">
+              Return #{replaceReturn?.salesRecordNumber} — {replaceReturn?.itemTitle}
+            </p>
+            <div>
+              <label className="text-xs text-slate-500 block mb-1">Replacement item title</label>
+              <Input
+                value={replacementItemTitle}
+                onChange={(e) => setReplacementItemTitle(e.target.value)}
+                placeholder="Item to send as replacement"
+              />
+            </div>
+            <div>
+              <label className="text-xs text-slate-500 block mb-1">Quantity</label>
+              <Input
+                type="number"
+                min={1}
+                value={replacementQty}
+                onChange={(e) => setReplacementQty(e.target.value)}
+                className="w-32"
+              />
+            </div>
+            <div>
+              <label className="text-xs text-slate-500 block mb-1">Notes</label>
+              <Input
+                value={replacementNotes}
+                onChange={(e) => setReplacementNotes(e.target.value)}
+                placeholder="Optional notes..."
+              />
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setReplaceReturn(null)}>Cancel</Button>
+            <Button onClick={handleCreateReplacement}>Create Replacement Order</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

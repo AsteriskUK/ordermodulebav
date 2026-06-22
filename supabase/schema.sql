@@ -141,7 +141,7 @@ CREATE TABLE IF NOT EXISTS returns (
   processed_by_user_id UUID REFERENCES users(id),
   processed_by_user_name TEXT,
   refund_amount NUMERIC(10,2),
-  status TEXT DEFAULT 'pending' CHECK (status IN ('pending', 'received', 'refunded', 'rejected')),
+  status TEXT DEFAULT 'pending' CHECK (status IN ('pending', 'received', 'refunded', 'rejected', 'replacement')),
   metadata JSONB DEFAULT '{}'
 );
 
@@ -219,6 +219,12 @@ CREATE INDEX IF NOT EXISTS idx_returns_order ON returns(order_id);
 CREATE INDEX IF NOT EXISTS idx_returns_status ON returns(status);
 CREATE INDEX IF NOT EXISTS idx_returns_returned_at ON returns(returned_at);
 
+-- ==================== MIGRATIONS ====================
+
+-- Allow replacement status for existing returns tables
+ALTER TABLE returns DROP CONSTRAINT IF EXISTS returns_status_check;
+ALTER TABLE returns ADD CONSTRAINT returns_status_check CHECK (status IN ('pending', 'received', 'refunded', 'rejected', 'replacement'));
+
 -- ==================== TRIGGERS ====================
 
 -- Auto-update updated_at timestamp
@@ -230,19 +236,19 @@ BEGIN
 END;
 $$ language 'plpgsql';
 
-CREATE TRIGGER update_users_updated_at BEFORE UPDATE ON users
+CREATE OR REPLACE TRIGGER update_users_updated_at BEFORE UPDATE ON users
   FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
 
-CREATE TRIGGER update_orders_updated_at BEFORE UPDATE ON orders
+CREATE OR REPLACE TRIGGER update_orders_updated_at BEFORE UPDATE ON orders
   FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
 
-CREATE TRIGGER update_attendance_updated_at BEFORE UPDATE ON attendance_records
+CREATE OR REPLACE TRIGGER update_attendance_updated_at BEFORE UPDATE ON attendance_records
   FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
 
-CREATE TRIGGER update_leave_balances_updated_at BEFORE UPDATE ON leave_balances
+CREATE OR REPLACE TRIGGER update_leave_balances_updated_at BEFORE UPDATE ON leave_balances
   FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
 
-CREATE TRIGGER update_returns_updated_at BEFORE UPDATE ON returns
+CREATE OR REPLACE TRIGGER update_returns_updated_at BEFORE UPDATE ON returns
   FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
 
 -- ==================== ROW LEVEL SECURITY ====================
@@ -258,16 +264,38 @@ ALTER TABLE attendance_records ENABLE ROW LEVEL SECURITY;
 ALTER TABLE leave_requests ENABLE ROW LEVEL SECURITY;
 ALTER TABLE leave_balances ENABLE ROW LEVEL SECURITY;
 
--- Create policies (basic - allow all for now, can be refined)
-CREATE POLICY "Allow all" ON users FOR ALL USING (true);
-CREATE POLICY "Allow all" ON batches FOR ALL USING (true);
-CREATE POLICY "Allow all" ON orders FOR ALL USING (true);
-CREATE POLICY "Allow all" ON order_notes FOR ALL USING (true);
-CREATE POLICY "Allow all" ON eod_events FOR ALL USING (true);
-CREATE POLICY "Allow all" ON returns FOR ALL USING (true);
-CREATE POLICY "Allow all" ON attendance_records FOR ALL USING (true);
-CREATE POLICY "Allow all" ON leave_requests FOR ALL USING (true);
-CREATE POLICY "Allow all" ON leave_balances FOR ALL USING (true);
+-- Create policies (basic - allow all for now, can be refined) only if not present
+DO $$
+BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_policies WHERE schemaname = 'public' AND tablename = 'users' AND policyname = 'Allow all') THEN
+    CREATE POLICY "Allow all" ON users FOR ALL USING (true);
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_policies WHERE schemaname = 'public' AND tablename = 'batches' AND policyname = 'Allow all') THEN
+    CREATE POLICY "Allow all" ON batches FOR ALL USING (true);
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_policies WHERE schemaname = 'public' AND tablename = 'orders' AND policyname = 'Allow all') THEN
+    CREATE POLICY "Allow all" ON orders FOR ALL USING (true);
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_policies WHERE schemaname = 'public' AND tablename = 'order_notes' AND policyname = 'Allow all') THEN
+    CREATE POLICY "Allow all" ON order_notes FOR ALL USING (true);
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_policies WHERE schemaname = 'public' AND tablename = 'eod_events' AND policyname = 'Allow all') THEN
+    CREATE POLICY "Allow all" ON eod_events FOR ALL USING (true);
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_policies WHERE schemaname = 'public' AND tablename = 'returns' AND policyname = 'Allow all') THEN
+    CREATE POLICY "Allow all" ON returns FOR ALL USING (true);
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_policies WHERE schemaname = 'public' AND tablename = 'attendance_records' AND policyname = 'Allow all') THEN
+    CREATE POLICY "Allow all" ON attendance_records FOR ALL USING (true);
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_policies WHERE schemaname = 'public' AND tablename = 'leave_requests' AND policyname = 'Allow all') THEN
+    CREATE POLICY "Allow all" ON leave_requests FOR ALL USING (true);
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_policies WHERE schemaname = 'public' AND tablename = 'leave_balances' AND policyname = 'Allow all') THEN
+    CREATE POLICY "Allow all" ON leave_balances FOR ALL USING (true);
+  END IF;
+END
+$$;
 
 -- ==================== INITIAL DATA ====================
 
