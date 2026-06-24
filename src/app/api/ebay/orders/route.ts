@@ -103,13 +103,21 @@ export async function GET(req: NextRequest) {
       },
     });
 
+    const rawBody = await res.text();
+    console.log('[eBay orders] status:', res.status, 'body preview:', rawBody.slice(0, 300));
+
     if (!res.ok) {
-      const body = await res.text();
-      console.error('[eBay orders] API error:', res.status, body);
-      return NextResponse.json({ error: 'ebay_api_error', message: body }, { status: res.status });
+      console.error('[eBay orders] API error:', res.status, rawBody);
+      return NextResponse.json({ error: 'ebay_api_error', message: rawBody }, { status: res.status });
     }
 
-    const data = await res.json() as { orders?: unknown[]; total?: number };
+    let data: { orders?: unknown[]; total?: number };
+    try {
+      data = JSON.parse(rawBody);
+    } catch {
+      console.error('[eBay orders] Failed to parse JSON:', rawBody.slice(0, 500));
+      return NextResponse.json({ error: 'invalid_json', message: rawBody.slice(0, 500) }, { status: 502 });
+    }
     const pageOrders = data.orders || [];
 
     for (const ebayOrder of pageOrders) {
