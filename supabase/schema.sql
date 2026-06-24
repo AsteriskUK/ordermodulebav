@@ -219,6 +219,13 @@ CREATE INDEX IF NOT EXISTS idx_returns_order ON returns(order_id);
 CREATE INDEX IF NOT EXISTS idx_returns_status ON returns(status);
 CREATE INDEX IF NOT EXISTS idx_returns_returned_at ON returns(returned_at);
 
+-- App settings (key-value store for tokens etc.)
+CREATE TABLE IF NOT EXISTS app_settings (
+  key TEXT PRIMARY KEY,
+  value TEXT NOT NULL,
+  updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+
 -- ==================== MIGRATIONS ====================
 
 -- Allow replacement status for existing returns tables

@@ -1,10 +1,26 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { cookies } from 'next/headers';
+import { createClient } from '@supabase/supabase-js';
 import { mapEbayOrderToOrder } from '@/lib/ebay-mapper';
 import { Order, Batch } from '@/lib/types';
 
 const BASE_URL = 'https://api.ebay.com';
 const TOKEN_URL = 'https://api.ebay.com/identity/v1/oauth2/token';
+
+function getSupabase() {
+  return createClient(
+    process.env.NEXT_PUBLIC_SUPABASE_URL!,
+    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
+  );
+}
+
+async function getDbSetting(key: string): Promise<string | null> {
+  const { data } = await getSupabase().from('app_settings').select('value').eq('key', key).single();
+  return data?.value ?? null;
+}
+
+async function setDbSetting(key: string, value: string) {
+  await getSupabase().from('app_settings').upsert({ key, value, updated_at: new Date().toISOString() });
+}
 
 async function refreshAccessToken(refreshToken: string): Promise<string | null> {
   const clientId = process.env.EBAY_CLIENT_ID!;
@@ -27,55 +43,30 @@ async function refreshAccessToken(refreshToken: string): Promise<string | null> 
   if (!res.ok) return null;
   const data = await res.json() as { access_token: string; expires_in: number };
 
-  const cookieStore = await cookies();
-  cookieStore.set('ebay_access_token', data.access_token, {
-    httpOnly: true,
-    secure: process.env.NODE_ENV === 'production',
-    maxAge: data.expires_in,
-    path: '/',
-  });
-  cookieStore.set('ebay_token_expires_at', String(Date.now() + data.expires_in * 1000), {
-    httpOnly: true,
-    secure: process.env.NODE_ENV === 'production',
-    maxAge: data.expires_in,
-    path: '/',
-  });
+  const expiresAt = Date.now() + data.expires_in * 1000;
+  await setDbSetting('ebay_access_token', data.access_token);
+  await setDbSetting('ebay_token_expires_at', String(expiresAt));
 
   return data.access_token;
 }
 
 export async function GET(req: NextRequest) {
-  // Prefer hardcoded refresh token from env (single-seller setup)
+  // Env var takes priority (manual override)
   const envRefreshToken = process.env.EBAY_REFRESH_TOKEN;
 
-  const cookieStore = await cookies();
-  const cookieAccessToken = cookieStore.get('ebay_access_token')?.value;
-  const cookieRefreshToken = cookieStore.get('ebay_refresh_token')?.value;
-  const expiresAt = Number(cookieStore.get('ebay_token_expires_at')?.value || '0');
+  const dbRefreshToken = envRefreshToken ?? await getDbSetting('ebay_refresh_token');
+  const dbAccessToken = await getDbSetting('ebay_access_token');
+  const expiresAt = Number(await getDbSetting('ebay_token_expires_at') ?? '0');
 
-  const refreshToken = envRefreshToken || cookieRefreshToken;
-
-  if (!cookieAccessToken && !refreshToken) {
-    return NextResponse.json({ error: 'not_connected', message: 'Not connected to eBay. Add EBAY_REFRESH_TOKEN to .env.local or connect via /api/ebay/auth.' }, { status: 401 });
+  if (!dbRefreshToken) {
+    return NextResponse.json({ error: 'not_connected', message: 'Not connected to eBay. Connect via /api/ebay/auth.' }, { status: 401 });
   }
 
-  let accessToken: string | undefined = cookieAccessToken;
+  let accessToken: string | null = dbAccessToken;
 
-  // If using env refresh token, always get a fresh access token (no cookie caching needed)
-  if (envRefreshToken) {
-    const fresh = await refreshAccessToken(envRefreshToken);
-    if (!fresh) {
-      return NextResponse.json({ error: 'token_error', message: 'Failed to obtain access token using EBAY_REFRESH_TOKEN. Token may be expired — re-run the OAuth flow.' }, { status: 401 });
-    }
-    accessToken = fresh;
-  } else {
-    // Auto-refresh cookie token if within 5 minutes of expiry
-    if (accessToken && expiresAt && Date.now() > expiresAt - 5 * 60 * 1000 && cookieRefreshToken) {
-      accessToken = await refreshAccessToken(cookieRefreshToken) || accessToken;
-    }
-    if (!accessToken && cookieRefreshToken) {
-      accessToken = await refreshAccessToken(cookieRefreshToken) ?? undefined;
-    }
+  // Refresh if missing or within 5 minutes of expiry
+  if (!accessToken || (expiresAt && Date.now() > expiresAt - 5 * 60 * 1000)) {
+    accessToken = await refreshAccessToken(dbRefreshToken);
   }
 
   if (!accessToken) {

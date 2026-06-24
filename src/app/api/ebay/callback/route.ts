@@ -1,9 +1,13 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { createClient } from '@supabase/supabase-js';
 
 const TOKEN_URL = 'https://api.ebay.com/identity/v1/oauth2/token';
 
-function serializeCookie(name: string, value: string, maxAge: number): string {
-  return `${name}=${encodeURIComponent(value)}; HttpOnly; Secure; SameSite=Lax; Path=/; Max-Age=${maxAge}`;
+function getSupabase() {
+  return createClient(
+    process.env.NEXT_PUBLIC_SUPABASE_URL!,
+    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
+  );
 }
 
 export async function GET(req: NextRequest) {
@@ -18,7 +22,6 @@ export async function GET(req: NextRequest) {
     console.log('[eBay callback] appUrl:', appUrl, 'code exists:', !!code, 'error:', error);
 
     if (error || !code) {
-      console.log('[eBay callback] Missing code or error present, error:', error, 'code:', code);
       const errorParam = error ? encodeURIComponent(error) : 'no_code';
       return NextResponse.redirect(`${appUrl}/import?ebay_error=${errorParam}`);
     }
@@ -27,22 +30,12 @@ export async function GET(req: NextRequest) {
     const clientSecret = process.env.EBAY_CLIENT_SECRET;
     const ruName = process.env.EBAY_RU_NAME;
 
-    console.log('[eBay callback] Env vars present:', {
-      hasClientId: !!clientId,
-      hasClientSecret: !!clientSecret,
-      hasRuName: !!ruName,
-    });
-
     if (!clientId || !clientSecret || !ruName) {
       console.error('[eBay callback] Missing env vars');
       return NextResponse.redirect(`${appUrl}/import?ebay_error=missing_env_vars`);
     }
 
-    console.log('[eBay callback] clientId prefix:', clientId.slice(0, 12), 'suffix:', clientId.slice(-8));
-    console.log('[eBay callback] ruName:', ruName);
-
     const credentials = Buffer.from(`${clientId}:${clientSecret}`).toString('base64');
-    console.log('[eBay callback] Credentials encoded, fetching token...');
 
     const res = await fetch(TOKEN_URL, {
       method: 'POST',
@@ -72,51 +65,24 @@ export async function GET(req: NextRequest) {
       refresh_token_expires_in: number;
     };
 
-    console.log('[eBay callback] Token received, has refresh_token:', !!data.refresh_token);
+    console.log('[eBay callback] Token received, storing in Supabase...');
 
+    // Store tokens in Supabase so they survive across requests without relying on cookies
+    const supabase = getSupabase();
     const expiresAt = Date.now() + data.expires_in * 1000;
+    const { error: dbError } = await supabase.from('app_settings').upsert([
+      { key: 'ebay_access_token', value: data.access_token, updated_at: new Date().toISOString() },
+      { key: 'ebay_refresh_token', value: data.refresh_token, updated_at: new Date().toISOString() },
+      { key: 'ebay_token_expires_at', value: String(expiresAt), updated_at: new Date().toISOString() },
+    ]);
 
-    // Check for debug mode
-    const isDebug = searchParams.get('debug') === '1';
-
-    // Set cookies via response headers (proper way for App Router)
-    const redirectUrl = `${appUrl}/import?ebay_connected=1`;
-
-    if (isDebug) {
-      // Return JSON in debug mode to see what's happening
-      return NextResponse.json({
-        success: true,
-        redirectUrl,
-        cookies: {
-          ebay_access_token: 'set',
-          ebay_refresh_token: 'set',
-          ebay_token_expires_at: 'set',
-        },
-        tokenPreview: {
-          access_token_prefix: data.access_token.slice(0, 20),
-          refresh_token_prefix: data.refresh_token.slice(0, 20),
-        },
-      });
+    if (dbError) {
+      console.error('[eBay callback] Supabase store error:', dbError);
+      return NextResponse.redirect(`${appUrl}/import?ebay_error=db_store_failed`);
     }
 
-    // Use a 200 HTML response with meta-refresh instead of a 3xx redirect.
-    // Netlify (and some browsers) drop Set-Cookie headers on redirect responses,
-    // so cookies must be set on a normal 200 response to be stored reliably.
-    const html = `<!DOCTYPE html><html><head><meta charset="utf-8">
-<meta http-equiv="refresh" content="0;url=${redirectUrl}">
-</head><body>Connecting to eBay&hellip;</body></html>`;
-
-    const response = new NextResponse(html, {
-      status: 200,
-      headers: { 'Content-Type': 'text/html' },
-    });
-    response.headers.append('Set-Cookie', serializeCookie('ebay_access_token', data.access_token, data.expires_in));
-    response.headers.append('Set-Cookie', serializeCookie('ebay_refresh_token', data.refresh_token, data.refresh_token_expires_in));
-    response.headers.append('Set-Cookie', serializeCookie('ebay_token_expires_at', String(expiresAt), data.refresh_token_expires_in));
-
-    console.log('[eBay callback] Cookies set on 200 response, meta-refresh to:', redirectUrl);
-
-    return response;
+    console.log('[eBay callback] Tokens stored in Supabase, redirecting to import');
+    return NextResponse.redirect(`${appUrl}/import?ebay_connected=1`);
   } catch (err) {
     console.error('[eBay callback] Unexpected error:', err);
     const appUrl = process.env.NEXT_PUBLIC_APP_URL || 'https://frolicking-macaron-750199.netlify.app';

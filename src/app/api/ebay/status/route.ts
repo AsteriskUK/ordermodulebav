@@ -1,13 +1,29 @@
 import { NextResponse } from 'next/server';
-import { cookies } from 'next/headers';
+import { createClient } from '@supabase/supabase-js';
+
+function getSupabase() {
+  return createClient(
+    process.env.NEXT_PUBLIC_SUPABASE_URL!,
+    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
+  );
+}
 
 export async function GET() {
-  const envToken = process.env.EBAY_REFRESH_TOKEN;
-  if (envToken) {
+  // Env var takes priority (manual override)
+  if (process.env.EBAY_REFRESH_TOKEN) {
     return NextResponse.json({ connected: true, source: 'env' });
   }
 
-  const cookieStore = await cookies();
-  const refreshToken = cookieStore.get('ebay_refresh_token')?.value;
-  return NextResponse.json({ connected: !!refreshToken, source: 'cookie' });
+  try {
+    const supabase = getSupabase();
+    const { data } = await supabase
+      .from('app_settings')
+      .select('value')
+      .eq('key', 'ebay_refresh_token')
+      .single();
+
+    return NextResponse.json({ connected: !!data?.value, source: 'db' });
+  } catch {
+    return NextResponse.json({ connected: false, source: 'db' });
+  }
 }
