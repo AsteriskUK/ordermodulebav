@@ -173,6 +173,11 @@ export function CSVImport() {
   const [ebayFetching, setEbayFetching] = useState(false);
   const [ebayDays, setEbayDays] = useState(7);
 
+  // Backmarket direct import state
+  const [backmarketConnected, setBackmarketConnected] = useState<boolean | null>(null);
+  const [backmarketFetching, setBackmarketFetching] = useState(false);
+  const [backmarketDays, setBackmarketDays] = useState(7);
+
   const addOrders = useOrderStore((s) => s.addOrders);
   const updateOrderCategory = useOrderStore((s) => s.updateOrderCategory);
   const [aiCategorising, setAiCategorising] = useState(false);
@@ -190,7 +195,50 @@ export function CSVImport() {
     } else {
       checkEbayStatus();
     }
+    checkBackmarketStatus();
   }, []);
+
+  async function checkBackmarketStatus() {
+    try {
+      const res = await fetch('/api/backmarket/status');
+      if (res.ok) {
+        const data = await res.json() as { connected: boolean };
+        setBackmarketConnected(data.connected);
+      } else {
+        setBackmarketConnected(false);
+      }
+    } catch {
+      setBackmarketConnected(false);
+    }
+  }
+
+  async function handleBackmarketImport() {
+    setBackmarketFetching(true);
+    try {
+      const res = await fetch(`/api/backmarket/orders?days=${backmarketDays}`);
+      if (res.status === 401) {
+        setBackmarketConnected(false);
+        toast.error('Backmarket credentials not configured.');
+        return;
+      }
+      if (!res.ok) {
+        const err = await res.json() as { message?: string };
+        toast.error(`Backmarket API error: ${err.message || res.statusText}`);
+        return;
+      }
+      const data = await res.json() as { orders: Order[]; batch: Batch };
+      if (data.orders.length === 0) {
+        toast.info('No orders found in Backmarket for this period.');
+        return;
+      }
+      setPreview({ orders: data.orders, format: 'backmarket', fileName: data.batch.name });
+      toast.success(`Fetched ${data.orders.length} orders from Backmarket`);
+    } catch (e) {
+      toast.error(`Failed to fetch Backmarket orders: ${e instanceof Error ? e.message : 'Unknown error'}`);
+    } finally {
+      setBackmarketFetching(false);
+    }
+  }
 
   async function checkEbayStatus() {
     try {
@@ -419,6 +467,52 @@ export function CSVImport() {
                   </Button>
                 )
               )}
+            </div>
+          </div>
+        </CardContent>
+      </Card>
+
+      {/* Backmarket Direct Import */}
+      <Card className="border-indigo-200 bg-indigo-50">
+        <CardContent className="pt-5">
+          <div className="flex items-center justify-between flex-wrap gap-3">
+            <div className="flex items-center gap-3">
+              <ShoppingBag className="h-6 w-6 text-indigo-600" />
+              <div>
+                <p className="font-semibold text-slate-800">Import from Backmarket</p>
+                <p className="text-xs text-slate-500">Fetch paid orders directly via Backmarket API</p>
+              </div>
+              {backmarketConnected === true && (
+                <span className="flex items-center gap-1 text-xs text-green-700 bg-green-100 border border-green-300 rounded-full px-2 py-0.5">
+                  <Wifi className="h-3 w-3" /> Connected
+                </span>
+              )}
+              {backmarketConnected === false && (
+                <span className="flex items-center gap-1 text-xs text-red-700 bg-red-100 border border-red-300 rounded-full px-2 py-0.5">
+                  <WifiOff className="h-3 w-3" /> Not configured
+                </span>
+              )}
+            </div>
+            <div className="flex items-center gap-2">
+              <label className="text-xs text-slate-600">Last</label>
+              <select
+                value={backmarketDays}
+                onChange={(e) => setBackmarketDays(Number(e.target.value))}
+                className="h-8 border rounded px-2 text-xs bg-white"
+              >
+                {[1, 3, 7, 14, 30].map((d) => (
+                  <option key={d} value={d}>{d} days</option>
+                ))}
+              </select>
+              <Button
+                size="sm"
+                className="bg-indigo-600 hover:bg-indigo-700 text-white"
+                onClick={handleBackmarketImport}
+                disabled={backmarketFetching}
+              >
+                <RefreshCw className={`h-3.5 w-3.5 mr-1.5 ${backmarketFetching ? 'animate-spin' : ''}`} />
+                {backmarketFetching ? 'Fetching...' : 'Fetch Orders'}
+              </Button>
             </div>
           </div>
         </CardContent>
