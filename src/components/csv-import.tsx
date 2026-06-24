@@ -186,6 +186,9 @@ export function CSVImport() {
     } else if (params.get('ebay_error')) {
       toast.error(`eBay connection failed: ${params.get('ebay_error')}`);
       window.history.replaceState({}, '', '/import');
+      checkEbayStatus();
+    } else {
+      checkEbayStatus();
     }
   }, []);
 
@@ -203,8 +206,6 @@ export function CSVImport() {
       setEbayConnected(false);
     }
   }
-
-  useEffect(() => { checkEbayStatus(); }, []);
 
   async function handleEbayImport() {
     setEbayFetching(true);

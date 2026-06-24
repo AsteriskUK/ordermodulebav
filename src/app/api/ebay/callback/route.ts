@@ -99,12 +99,22 @@ export async function GET(req: NextRequest) {
       });
     }
 
-    const response = NextResponse.redirect(redirectUrl);
+    // Use a 200 HTML response with meta-refresh instead of a 3xx redirect.
+    // Netlify (and some browsers) drop Set-Cookie headers on redirect responses,
+    // so cookies must be set on a normal 200 response to be stored reliably.
+    const html = `<!DOCTYPE html><html><head><meta charset="utf-8">
+<meta http-equiv="refresh" content="0;url=${redirectUrl}">
+</head><body>Connecting to eBay&hellip;</body></html>`;
+
+    const response = new NextResponse(html, {
+      status: 200,
+      headers: { 'Content-Type': 'text/html' },
+    });
     response.headers.append('Set-Cookie', serializeCookie('ebay_access_token', data.access_token, data.expires_in));
     response.headers.append('Set-Cookie', serializeCookie('ebay_refresh_token', data.refresh_token, data.refresh_token_expires_in));
     response.headers.append('Set-Cookie', serializeCookie('ebay_token_expires_at', String(expiresAt), data.refresh_token_expires_in));
 
-    console.log('[eBay callback] Cookies set via headers, redirecting to:', redirectUrl);
+    console.log('[eBay callback] Cookies set on 200 response, meta-refresh to:', redirectUrl);
 
     return response;
   } catch (err) {
