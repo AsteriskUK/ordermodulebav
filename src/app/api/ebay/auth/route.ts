@@ -5,6 +5,7 @@ const AUTH_URL = 'https://auth.ebay.com/oauth2/authorize';
 const SCOPES = [
   'https://api.ebay.com/oauth/api_scope/sell.fulfillment.readonly',
   'https://api.ebay.com/oauth/api_scope/sell.fulfillment',
+  'https://api.ebay.com/oauth/api_scope/sell.messaging.write',
 ].join(' ');
 
 export async function GET() {

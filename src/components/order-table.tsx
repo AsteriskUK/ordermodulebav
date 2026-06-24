@@ -43,11 +43,14 @@ import {
   ArrowDown,
   CheckCircle2,
   Trash,
+  ShoppingBag,
 } from 'lucide-react';
 import { generateBatchShipCSV } from '@/lib/csv-parser';
 import { DeliveryBadge } from './delivery-badge';
 import { toast } from 'sonner';
 import { OrderDetailDialog } from './order-detail-dialog';
+import { EbayMessageDialog } from './ebay-message-dialog';
+import { EbayNewMessageDialog } from './ebay-new-message-dialog';
 
 const PAGE_SIZE = 25;
 
@@ -73,6 +76,8 @@ export function OrderTable() {
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [page, setPage] = useState(0);
   const [selectedOrder, setSelectedOrder] = useState<Order | null>(null);
+  const [messagingOrder, setMessagingOrder] = useState<Order | null>(null);
+  const [showNewMessage, setShowNewMessage] = useState(false);
   const [sortDir, setSortDir] = useState<'desc' | 'asc'>('desc');
   const [sortField, setSortField] = useState<string>('postByDate');
 
@@ -315,6 +320,10 @@ export function OrderTable() {
             <Button size="sm" variant="outline" onClick={handleExportShipping}>
               <Download className="h-3 w-3 mr-1" />
               Export Shipping CSV
+            </Button>
+            <Button size="sm" variant="outline" onClick={() => setShowNewMessage(true)} className="border-amber-300 text-amber-700 hover:bg-amber-50">
+              <ShoppingBag className="h-3 w-3 mr-1" />
+              New eBay Message
             </Button>
           </div>
         )}
@@ -625,6 +634,12 @@ export function OrderTable() {
                         >
                           Place on Hold
                         </DropdownMenuItem>
+                        {order.buyerUsername && (
+                          <DropdownMenuItem onClick={() => setMessagingOrder(order)}>
+                            <ShoppingBag className="h-4 w-4 mr-2 text-amber-600" />
+                            Message Buyer (eBay)
+                          </DropdownMenuItem>
+                        )}
                         <DropdownMenuItem
                           onClick={() => handleDeleteOrder(order)}
                           className="text-red-600 focus:text-red-600"
@@ -680,6 +695,19 @@ export function OrderTable() {
           order={selectedOrder}
           onClose={() => setSelectedOrder(null)}
         />
+      )}
+
+      {/* eBay message dialog (from order row) */}
+      {messagingOrder && (
+        <EbayMessageDialog
+          order={messagingOrder}
+          onClose={() => setMessagingOrder(null)}
+        />
+      )}
+
+      {/* New eBay message (any buyer) */}
+      {showNewMessage && (
+        <EbayNewMessageDialog onClose={() => setShowNewMessage(false)} />
       )}
     </div>
   );

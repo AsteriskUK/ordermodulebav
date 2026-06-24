@@ -226,6 +226,27 @@ CREATE TABLE IF NOT EXISTS app_settings (
   updated_at TIMESTAMPTZ DEFAULT NOW()
 );
 
+-- eBay buyer messages (sent and received)
+CREATE TABLE IF NOT EXISTS ebay_messages (
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  ebay_message_id TEXT UNIQUE,     -- eBay's own message ID (for dedup on inbox sync)
+  direction TEXT DEFAULT 'sent',   -- sent | received
+  order_id TEXT NOT NULL,
+  item_id TEXT,
+  buyer_username TEXT NOT NULL,
+  buyer_name TEXT,
+  item_title TEXT,
+  contact_reason TEXT,
+  message_text TEXT NOT NULL,
+  sent_by_id TEXT,                 -- staff user id (for sent messages)
+  sent_by_name TEXT,
+  sent_at TIMESTAMPTZ DEFAULT NOW(),
+  status TEXT DEFAULT 'sent'       -- sent | failed | unread | read
+);
+
+CREATE INDEX IF NOT EXISTS idx_ebay_messages_order_id ON ebay_messages(order_id);
+CREATE INDEX IF NOT EXISTS idx_ebay_messages_sent_at ON ebay_messages(sent_at DESC);
+
 -- ==================== MIGRATIONS ====================
 
 -- Allow replacement status for existing returns tables

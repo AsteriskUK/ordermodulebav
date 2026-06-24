@@ -34,7 +34,7 @@ const ALL_NAV = [
   { name: 'Batch Shipping', href: '/shipping', icon: Truck, staffVisible: false },
   { name: 'Order Sheet', href: '/orders', icon: ClipboardList, staffVisible: false },
   { name: 'Queue', href: '/packaging', icon: Workflow, staffVisible: true },
-  { name: 'Notes', href: '/notes', icon: MessageSquare, staffVisible: true },
+  { name: 'Messages', href: '/notes', icon: MessageSquare, staffVisible: true },
   { name: 'Batches', href: '/batches', icon: Package, staffVisible: false },
   { name: 'Returns', href: '/returns', icon: PackageOpen, staffVisible: false },
   { name: 'Replacements', href: '/replacements', icon: RefreshCw, staffVisible: false },

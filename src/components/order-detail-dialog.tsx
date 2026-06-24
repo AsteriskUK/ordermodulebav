@@ -20,7 +20,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
-import { MapPin, Package, User, Truck, MessageSquare, Send, Trash2 } from 'lucide-react';
+import { MapPin, Package, User, Truck, MessageSquare, Send, Trash2, ShoppingBag } from 'lucide-react';
 import { DeliveryBadge } from './delivery-badge';
 import { toast } from 'sonner';
 
@@ -44,6 +44,56 @@ export function OrderDetailDialog({ order, onClose }: Props) {
   const [numberOfBoxes, setNumberOfBoxes] = useState((order.numberOfBoxes ?? 1).toString());
   const [noteText, setNoteText] = useState('');
   const notesEndRef = useRef<HTMLDivElement>(null);
+
+  // eBay messaging
+  const [ebayMsgText, setEbayMsgText] = useState('');
+  const [ebayMsgReason, setEbayMsgReason] = useState('SHIPPING');
+  const [ebayMsgSending, setEbayMsgSending] = useState(false);
+  const isEbayOrder = order.batchId?.startsWith('ebay-') || liveOrder.salesRecordNumber?.includes('-');
+
+  const QUICK_MESSAGES = {
+    SHIPPING: [
+      `Hi, your order #${order.salesRecordNumber} has been dispatched and is on its way. Your tracking number is ${order.trackingNumber || '[TRACKING]'}. Please allow 2-3 working days for delivery.`,
+      `Hi, we wanted to let you know there is a slight delay with your order #${order.salesRecordNumber}. We apologise for any inconvenience and will dispatch as soon as possible.`,
+    ],
+    ITEM: [
+      `Hi, regarding your order #${order.salesRecordNumber} for "${order.itemTitle}" — could you please confirm which variation you require? ${order.variation ? `We have it listed as: ${order.variation}` : ''}`.trim(),
+      `Hi, thank you for your order #${order.salesRecordNumber}. We just wanted to confirm the details are correct before we dispatch.`,
+    ],
+  };
+
+  async function handleSendEbayMessage() {
+    if (!ebayMsgText.trim()) return;
+    if (!order.buyerUsername) {
+      toast.error('No eBay buyer username found for this order');
+      return;
+    }
+    setEbayMsgSending(true);
+    try {
+      const res = await fetch('/api/ebay/messages', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          orderId: order.salesRecordNumber,
+          itemId: order.itemNumber,
+          recipientUsername: order.buyerUsername,
+          contactReason: ebayMsgReason,
+          text: ebayMsgText,
+        }),
+      });
+      if (!res.ok) {
+        const err = await res.json() as { message?: string };
+        toast.error(`Failed to send: ${err.message || 'Unknown error'}`);
+        return;
+      }
+      toast.success('Message sent to buyer via eBay inbox');
+      setEbayMsgText('');
+    } catch {
+      toast.error('Failed to send message');
+    } finally {
+      setEbayMsgSending(false);
+    }
+  }
 
   useEffect(() => {
     notesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -375,6 +425,71 @@ export function OrderDetailDialog({ order, onClose }: Props) {
                 : '-'}
             </p>
           </div>
+
+          {/* eBay Buyer Messaging */}
+          {isEbayOrder && (
+            <div>
+              <h4 className="text-sm font-semibold text-slate-700 flex items-center gap-2 mb-2">
+                <ShoppingBag className="h-4 w-4 text-amber-600" /> Message Buyer via eBay
+              </h4>
+              {!order.buyerUsername && (
+                <p className="text-xs text-amber-600 bg-amber-50 border border-amber-200 rounded p-2 mb-2">
+                  No eBay username found for this order. Messages can only be sent to orders imported via the eBay API.
+                </p>
+              )}
+              <div className="space-y-2">
+                {/* Reason selector */}
+                <div className="flex items-center gap-2">
+                  <label className="text-xs text-slate-500 w-16 shrink-0">Reason:</label>
+                  <Select value={ebayMsgReason} onValueChange={(v) => v && setEbayMsgReason(v)}>
+                    <SelectTrigger className="h-8 text-xs">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="SHIPPING">Shipping update</SelectItem>
+                      <SelectItem value="ITEM">Item / variation query</SelectItem>
+                      <SelectItem value="ORDER">General order update</SelectItem>
+                      <SelectItem value="DELAY">Dispatch delay</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+                {/* Quick message templates */}
+                {(QUICK_MESSAGES[ebayMsgReason as keyof typeof QUICK_MESSAGES] ?? []).length > 0 && (
+                  <div className="flex flex-wrap gap-1">
+                    <span className="text-xs text-slate-400 self-center">Quick:</span>
+                    {(QUICK_MESSAGES[ebayMsgReason as keyof typeof QUICK_MESSAGES] ?? []).map((msg, i) => (
+                      <button
+                        key={i}
+                        onClick={() => setEbayMsgText(msg)}
+                        className="text-xs px-2 py-0.5 bg-slate-100 hover:bg-amber-100 border border-slate-200 rounded-full text-slate-600 hover:text-amber-700 transition-colors"
+                      >
+                        Template {i + 1}
+                      </button>
+                    ))}
+                  </div>
+                )}
+                {/* Message textarea */}
+                <textarea
+                  className="w-full border rounded-lg p-2 text-sm min-h-[80px] resize-none focus:ring-2 focus:ring-amber-400 focus:border-transparent"
+                  placeholder="Type your message to the buyer..."
+                  value={ebayMsgText}
+                  onChange={(e) => setEbayMsgText(e.target.value)}
+                  disabled={!order.buyerUsername}
+                />
+                <div className="flex items-center justify-between">
+                  <span className="text-xs text-slate-400">{ebayMsgText.length}/2000 chars</span>
+                  <button
+                    onClick={handleSendEbayMessage}
+                    disabled={!ebayMsgText.trim() || ebayMsgSending || !order.buyerUsername}
+                    className="px-3 py-1.5 bg-amber-600 text-white rounded-lg text-sm hover:bg-amber-700 disabled:opacity-40 disabled:cursor-not-allowed flex items-center gap-1.5"
+                  >
+                    <Send className="h-3.5 w-3.5" />
+                    {ebayMsgSending ? 'Sending…' : 'Send to eBay Inbox'}
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
 
           <div className="flex gap-3 pt-2">
             <Button onClick={handleSave}>Save Changes</Button>
