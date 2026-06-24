@@ -88,8 +88,8 @@ export function mapEbayOrderToOrder(ebayOrder: EbayOrder, batchId: string): Orde
   // One Order per line item — merging into a single shipment row happens at display time in batch shipping
   return lineItems.map((item, idx) => {
     const itemTotal = parseFloat(item.lineItemCost?.value || '0') * item.quantity;
-    const variation = item.properties
-      ?.filter((p) => p.name !== 'SKU')
+    const variation = (Array.isArray(item.properties) ? item.properties : [])
+      .filter((p) => p.name !== 'SKU')
       .map((p) => `${p.name}: ${p.value}`)
       .join(', ') || '';
 
