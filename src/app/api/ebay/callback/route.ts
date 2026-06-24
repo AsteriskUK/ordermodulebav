@@ -14,7 +14,7 @@ export async function GET(req: NextRequest) {
     const code = searchParams.get('code');
     const error = searchParams.get('error');
 
-    const appUrl = process.env.NEXT_PUBLIC_APP_URL || 'https://ebaypicking.netlify.app';
+    const appUrl = process.env.NEXT_PUBLIC_APP_URL || 'https://frolicking-macaron-750199.netlify.app';
     console.log('[eBay callback] appUrl:', appUrl, 'code exists:', !!code, 'error:', error);
 
     if (error || !code) {
@@ -109,7 +109,7 @@ export async function GET(req: NextRequest) {
     return response;
   } catch (err) {
     console.error('[eBay callback] Unexpected error:', err);
-    const appUrl = process.env.NEXT_PUBLIC_APP_URL || 'https://ebaypicking.netlify.app';
+    const appUrl = process.env.NEXT_PUBLIC_APP_URL || 'https://frolicking-macaron-750199.netlify.app';
     return NextResponse.redirect(`${appUrl}/import?ebay_error=callback_exception`);
   }
 }
