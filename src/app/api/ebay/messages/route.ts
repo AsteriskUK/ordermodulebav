@@ -1,8 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
 
-const BASE_URL = 'https://api.ebay.com/sell/messaging/v1';
+const MSG_BASE = 'https://api.ebay.com/commerce/message/v1';
 const TOKEN_URL = 'https://api.ebay.com/identity/v1/oauth2/token';
+const MSG_SCOPE = 'https://api.ebay.com/oauth/api_scope/commerce.message';
 
 function getSupabase() {
   return createClient(
@@ -30,7 +31,6 @@ async function getAccessToken(): Promise<string | null> {
     return accessToken;
   }
 
-  // Refresh
   const credentials = Buffer.from(`${process.env.EBAY_CLIENT_ID}:${process.env.EBAY_CLIENT_SECRET}`).toString('base64');
   const res = await fetch(TOKEN_URL, {
     method: 'POST',
@@ -38,79 +38,85 @@ async function getAccessToken(): Promise<string | null> {
     body: new URLSearchParams({
       grant_type: 'refresh_token',
       refresh_token: refreshToken,
-      scope: 'https://api.ebay.com/oauth/api_scope/sell.messaging.write',
+      scope: MSG_SCOPE,
     }),
   });
 
   if (!res.ok) return null;
   const data = await res.json() as { access_token: string; expires_in: number };
   const newExpiry = Date.now() + data.expires_in * 1000;
-  await supabase.from('app_settings').upsert([
+  await getSupabase().from('app_settings').upsert([
     { key: 'ebay_access_token', value: data.access_token, updated_at: new Date().toISOString() },
     { key: 'ebay_token_expires_at', value: String(newExpiry), updated_at: new Date().toISOString() },
   ]);
   return data.access_token;
 }
 
-// GET /api/ebay/messages?orderId=xxx — fetch message thread for an order
+// GET /api/ebay/messages?orderId=xxx — fetch messages for an order from Supabase
 export async function GET(req: NextRequest) {
   const orderId = new URL(req.url).searchParams.get('orderId');
   if (!orderId) return NextResponse.json({ error: 'orderId required' }, { status: 400 });
 
-  const token = await getAccessToken();
-  if (!token) return NextResponse.json({ error: 'not_connected' }, { status: 401 });
+  const supabase = getSupabase();
+  const { data: messages, error } = await supabase
+    .from('ebay_messages')
+    .select('*')
+    .eq('order_id', orderId)
+    .order('sent_at', { ascending: true });
 
-  const res = await fetch(`${BASE_URL}/contact_buyer?item_id=${encodeURIComponent(orderId)}`, {
-    headers: {
-      'Authorization': `Bearer ${token}`,
-      'X-EBAY-C-MARKETPLACE-ID': 'EBAY_GB',
-    },
-  });
-
-  if (!res.ok) {
-    const body = await res.text();
-    console.error('[eBay messages] fetch error:', res.status, body);
-    return NextResponse.json({ error: 'ebay_error', message: body }, { status: res.status });
-  }
-
-  const data = await res.json();
-  return NextResponse.json(data);
+  if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+  return NextResponse.json({ messages: messages ?? [] });
 }
 
-// POST /api/ebay/messages — send a message to a buyer
+// POST /api/ebay/messages — send a message to a buyer via eBay Message API
 export async function POST(req: NextRequest) {
   const token = await getAccessToken();
   if (!token) return NextResponse.json({ error: 'not_connected' }, { status: 401 });
 
   const body = await req.json() as {
     orderId: string;
-    itemId: string;
-    recipientUsername: string;
+    itemId?: string;
+    recipientUsername: string;   // buyer's eBay username (for new conversations)
+    conversationId?: string;     // if replying to an existing conversation
     buyerName?: string;
     itemTitle?: string;
-    contactReason: string;
+    contactReason?: string;
     text: string;
     sentById?: string;
     sentByName?: string;
   };
 
-  const { orderId, itemId, recipientUsername, buyerName, itemTitle, contactReason, text, sentById, sentByName } = body;
+  const { orderId, itemId, recipientUsername, conversationId, buyerName, itemTitle, contactReason, text, sentById, sentByName } = body;
 
-  if (!orderId || !itemId || !recipientUsername || !text) {
-    return NextResponse.json({ error: 'Missing required fields: orderId, itemId, recipientUsername, text' }, { status: 400 });
+  if (!text?.trim()) {
+    return NextResponse.json({ error: 'Missing required field: text' }, { status: 400 });
+  }
+  if (!conversationId && !recipientUsername) {
+    return NextResponse.json({ error: 'Either conversationId or recipientUsername is required' }, { status: 400 });
   }
 
-  const payload = {
-    recipientUsername,
-    subject: contactReason === 'SHIPPING' ? 'Shipping update for your order' :
-             contactReason === 'ITEM' ? 'Information about your item' : 'Update regarding your order',
-    text,
-    orderId,
-    itemId,
-    contactReason: contactReason || 'ORDER',
+  // Build eBay sendMessage payload
+  const payload: Record<string, unknown> = {
+    messageText: text,
   };
 
-  const res = await fetch(`${BASE_URL}/contact_buyer`, {
+  if (conversationId) {
+    // Reply in existing conversation
+    payload.conversationId = conversationId;
+  } else {
+    // New conversation
+    payload.otherPartyUsername = recipientUsername;
+  }
+
+  // Attach listing reference if we have an item ID
+  if (itemId) {
+    payload.reference = {
+      referenceId: itemId,
+      referenceType: 'LISTING',
+    };
+  }
+
+  const res = await fetch(`${MSG_BASE}/send_message`, {
     method: 'POST',
     headers: {
       'Authorization': `Bearer ${token}`,
@@ -120,11 +126,12 @@ export async function POST(req: NextRequest) {
     body: JSON.stringify(payload),
   });
 
+  const supabase = getSupabase();
+
   if (!res.ok) {
     const errBody = await res.text();
     console.error('[eBay messages] send error:', res.status, errBody);
-    // Save failed attempt to Supabase for audit trail
-    await getSupabase().from('ebay_messages').insert({
+    await supabase.from('ebay_messages').insert({
       order_id: orderId,
       item_id: itemId,
       buyer_username: recipientUsername,
@@ -134,13 +141,17 @@ export async function POST(req: NextRequest) {
       message_text: text,
       sent_by_id: sentById,
       sent_by_name: sentByName,
+      direction: 'sent',
       status: 'failed',
     });
     return NextResponse.json({ error: 'send_failed', message: errBody }, { status: res.status });
   }
 
+  const responseData = await res.json() as { messageId?: string; createdDate?: string };
+
   // Save sent message to Supabase
-  await getSupabase().from('ebay_messages').insert({
+  await supabase.from('ebay_messages').insert({
+    ebay_message_id: responseData.messageId,
     order_id: orderId,
     item_id: itemId,
     buyer_username: recipientUsername,
@@ -150,8 +161,10 @@ export async function POST(req: NextRequest) {
     message_text: text,
     sent_by_id: sentById,
     sent_by_name: sentByName,
+    sent_at: responseData.createdDate ?? new Date().toISOString(),
+    direction: 'sent',
     status: 'sent',
   });
 
-  return NextResponse.json({ success: true });
+  return NextResponse.json({ success: true, messageId: responseData.messageId });
 }

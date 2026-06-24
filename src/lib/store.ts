@@ -120,13 +120,28 @@ export const useOrderStore = create<OrderStore>()(
       },
       addOrders: (newOrders, batch) =>
         set((state) => {
-          const ordersWithDefaults = newOrders.map(order => ({
-            ...order,
-            priority: order.priority ?? 5,
-            numberOfBoxes: order.numberOfBoxes ?? 1,
-          }));
+          const incomingNums = new Set(newOrders.map((o) => o.salesRecordNumber).filter(Boolean));
+          const existingByNum = new Map(state.orders.filter((o) => incomingNums.has(o.salesRecordNumber)).map((o) => [o.salesRecordNumber, o]));
+
+          const ordersWithDefaults = newOrders.map(order => {
+            const existing = existingByNum.get(order.salesRecordNumber);
+            return {
+              ...order,
+              priority: order.priority ?? 5,
+              numberOfBoxes: order.numberOfBoxes ?? 1,
+              // Preserve existing team notes and label data when re-importing
+              notes: existing?.notes && existing.notes.length > 0 ? existing.notes : order.notes,
+              labelPrintedAt: existing?.labelPrintedAt ?? order.labelPrintedAt,
+              labelCarrier: existing?.labelCarrier ?? order.labelCarrier,
+              labelData: existing?.labelData ?? order.labelData,
+              status: existing?.status ?? order.status,
+              category: existing?.category ?? order.category,
+              trackingNumber: existing?.trackingNumber ?? order.trackingNumber,
+              deliveryCarrier: existing?.deliveryCarrier ?? order.deliveryCarrier,
+              deliveryType: existing?.deliveryType ?? order.deliveryType,
+            };
+          });
           // Replace any existing order that shares a salesRecordNumber with an incoming order
-          const incomingNums = new Set(ordersWithDefaults.map((o) => o.salesRecordNumber).filter(Boolean));
           const retained = state.orders.filter((o) => !incomingNums.has(o.salesRecordNumber));
           
           // Sync to Supabase in background - batch first, then orders

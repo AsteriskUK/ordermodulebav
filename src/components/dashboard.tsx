@@ -1,6 +1,7 @@
 'use client';
 
 import { useRouter } from 'next/navigation';
+import { useEffect, useState } from 'react';
 import { useOrderStore } from '@/lib/store';
 import { ORDER_STATUS_CONFIG, OrderStatus } from '@/lib/types';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -19,21 +20,9 @@ import {
   PauseCircle,
   PackageOpen,
   Archive,
-  MessageSquare,
   Store,
   Inbox,
 } from 'lucide-react';
-import { useEffect, useState } from 'react';
-
-interface MsgCount { platform: string; unread: number; total: number; }
-
-const PLATFORM_STYLES: Record<string, { label: string; bg: string; text: string; badge: string; logo: string }> = {
-  ebay:       { label: 'eBay',        bg: 'bg-yellow-50 border-yellow-300',  text: 'text-yellow-800', badge: 'bg-yellow-500', logo: '/ebay.png'        },
-  amazon:     { label: 'Amazon',      bg: 'bg-orange-50 border-orange-300',  text: 'text-orange-800', badge: 'bg-orange-500', logo: '/amazon.png'      },
-  backmarket: { label: 'Back Market', bg: 'bg-green-50 border-green-300',    text: 'text-green-800',  badge: 'bg-green-600',  logo: '/backmarket.svg'  },
-  onbuy:      { label: 'OnBuy',       bg: 'bg-cyan-50 border-cyan-300',      text: 'text-cyan-800',   badge: 'bg-cyan-600',   logo: '/onbuy.svg'       },
-  temu:       { label: 'Temu',        bg: 'bg-rose-50 border-rose-300',      text: 'text-rose-800',   badge: 'bg-rose-500',   logo: '/temu.png'        },
-};
 
 const statusIcons: Record<OrderStatus, React.ElementType> = {
   pending: Clock,
@@ -51,11 +40,20 @@ const statusIcons: Record<OrderStatus, React.ElementType> = {
   archived: Archive,
 };
 
+const PLATFORM_STYLES: Record<string, { label: string; bg: string; border: string; badge: string; logo: string }> = {
+  ebay:       { label: 'eBay',        bg: 'bg-yellow-50',  border: 'border-yellow-300', badge: 'bg-red-500',    logo: '/ebay.png'       },
+  amazon:     { label: 'Amazon',      bg: 'bg-orange-50',  border: 'border-orange-300', badge: 'bg-red-500',    logo: '/amazon.png'     },
+  backmarket: { label: 'Back Market', bg: 'bg-green-50',   border: 'border-green-300',  badge: 'bg-red-500',    logo: '/backmarket.svg' },
+  onbuy:      { label: 'OnBuy',       bg: 'bg-cyan-50',    border: 'border-cyan-300',   badge: 'bg-red-500',    logo: '/onbuy.svg'      },
+  temu:       { label: 'Temu',        bg: 'bg-rose-50',    border: 'border-rose-300',   badge: 'bg-red-500',    logo: '/temu.png'       },
+};
+
+interface MsgCount { platform: string; unread: number; total: number; }
+
 export function Dashboard() {
   const router = useRouter();
   const orders = useOrderStore((s) => s.orders);
   const batches = useOrderStore((s) => s.batches);
-
   const [msgCounts, setMsgCounts] = useState<MsgCount[]>([]);
 
   useEffect(() => {
@@ -63,8 +61,7 @@ export function Dashboard() {
       try {
         const res = await fetch('/api/ebay/messages/inbox');
         if (!res.ok) return;
-        const { messages } = await res.json() as { messages: Array<{ direction: string; status: string; order_id: string; buyer_username: string }> };
-        // For now all messages are eBay — future platforms will tag their source
+        const { messages } = await res.json() as { messages: Array<{ direction: string; status: string }> };
         const ebayUnread = messages.filter(m => m.direction === 'received' && m.status === 'unread').length;
         const ebayTotal  = messages.filter(m => m.direction === 'received').length;
         if (ebayTotal > 0 || ebayUnread > 0) {
@@ -123,10 +120,7 @@ export function Dashboard() {
   const totalRevenue = orders.reduce((sum, o) => sum + o.soldFor, 0);
   const pendingCount = statusCounts['pending'] || 0;
   const shippedCount = statusCounts['shipped'] || 0;
-  const totalNotes = orders.reduce((sum, o) => sum + (o.notes?.length ?? 0), 0);
-  const recentNote = orders
-    .flatMap((o) => (o.notes ?? []).map((n) => ({ ...n, salesRecordNumber: o.salesRecordNumber })))
-    .sort((a, b) => b.createdAt.localeCompare(a.createdAt))[0] ?? null;
+  const totalUnread  = msgCounts.reduce((s, m) => s + m.unread, 0);
 
   return (
     <div className="space-y-6">
@@ -212,57 +206,17 @@ export function Dashboard() {
             <p className="text-xs text-slate-500 mt-1">From all orders</p>
           </CardContent>
         </Card>
-
-        <Card
-          className="cursor-pointer hover:shadow-md transition-shadow"
-          onClick={() => router.push('/notes')}
-        >
-          <CardHeader className="flex flex-row items-center justify-between pb-2">
-            <CardTitle className="text-sm font-medium text-slate-500">Team Notes</CardTitle>
-            <MessageSquare className="h-4 w-4 text-blue-400" />
-          </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold text-blue-600">{totalNotes}</div>
-            <p className="text-xs text-slate-500 mt-1 truncate">
-              {recentNote
-                ? `${recentNote.authorName}: ${recentNote.text.slice(0, 30)}${recentNote.text.length > 30 ? '…' : ''}`
-                : 'No notes yet'}
-            </p>
-          </CardContent>
-        </Card>
-
-        <Card
-          className="cursor-pointer hover:shadow-md transition-shadow"
-          onClick={() => router.push('/notes')}
-        >
-          <CardHeader className="flex flex-row items-center justify-between pb-2">
-            <CardTitle className="text-sm font-medium text-slate-500">Inbox</CardTitle>
-            <Inbox className="h-4 w-4 text-amber-500" />
-          </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold text-amber-600">
-              {msgCounts.reduce((s, m) => s + m.unread, 0) || msgCounts.reduce((s, m) => s + m.total, 0)}
-            </div>
-            <p className="text-xs text-slate-500 mt-1">
-              {msgCounts.reduce((s, m) => s + m.unread, 0) > 0
-                ? `${msgCounts.reduce((s, m) => s + m.unread, 0)} unread message${msgCounts.reduce((s, m) => s + m.unread, 0) !== 1 ? 's' : ''}`
-                : msgCounts.reduce((s, m) => s + m.total, 0) > 0
-                  ? 'All messages read'
-                  : 'No messages yet'}
-            </p>
-          </CardContent>
-        </Card>
       </div>
 
-      {/* Platform Messages */}
+      {/* Buyer Messages */}
       <Card className="cursor-pointer hover:shadow-md transition-shadow" onClick={() => router.push('/notes')}>
         <CardHeader className="flex flex-row items-center justify-between pb-2">
-          <CardTitle className="text-base flex items-center gap-2">
+          <CardTitle className="text-base flex items-center gap-2 text-slate-900">
             <Inbox className="h-4 w-4 text-amber-500" />
             Buyer Messages
-            {msgCounts.reduce((s, m) => s + m.unread, 0) > 0 && (
+            {totalUnread > 0 && (
               <span className="bg-red-500 text-white text-xs font-bold rounded-full px-2 py-0.5 leading-none">
-                {msgCounts.reduce((s, m) => s + m.unread, 0)} unread
+                {totalUnread} unread
               </span>
             )}
           </CardTitle>
@@ -273,25 +227,27 @@ export function Dashboard() {
             {Object.entries(PLATFORM_STYLES).map(([platform, style]) => {
               const counts = msgCounts.find(m => m.platform === platform);
               return (
-                <div key={platform} className={`relative rounded-xl border-2 p-4 flex flex-col items-center gap-2 transition-all ${counts ? style.bg : 'bg-slate-50 border-slate-200 opacity-60'}`}>
-                  {/* Unread badge */}
+                <div
+                  key={platform}
+                  className={`relative rounded-xl border-2 p-4 flex flex-col items-center gap-2 transition-all
+                    ${counts ? `${style.bg} ${style.border}` : 'bg-slate-50 border-slate-200 opacity-50'}`}
+                >
                   {counts && counts.unread > 0 && (
                     <span className={`absolute -top-2 -right-2 ${style.badge} text-white text-[11px] font-bold rounded-full min-w-[22px] h-[22px] flex items-center justify-center px-1.5 shadow`}>
                       {counts.unread}
                     </span>
                   )}
-                  {/* Platform logo */}
                   <img src={style.logo} alt={style.label} className="h-8 w-auto object-contain" />
-                  <span className={`text-xs font-bold ${counts ? style.text : 'text-slate-400'}`}>{style.label}</span>
+                  <span className="text-xs font-bold text-slate-900">{style.label}</span>
                   {counts ? (
                     <div className="text-center">
-                      <p className={`text-lg font-bold leading-none ${style.text}`}>{counts.total}</p>
-                      <p className="text-[10px] text-slate-400 mt-0.5">
+                      <p className="text-lg font-bold leading-none text-slate-900">{counts.total}</p>
+                      <p className="text-[11px] text-slate-700 mt-0.5 font-medium">
                         {counts.unread > 0 ? `${counts.unread} unread` : 'all read'}
                       </p>
                     </div>
                   ) : (
-                    <p className="text-[10px] text-slate-400">not connected</p>
+                    <p className="text-[11px] text-slate-500">not connected</p>
                   )}
                 </div>
               );

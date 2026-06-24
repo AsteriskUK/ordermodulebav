@@ -2,10 +2,8 @@ import { NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
 
 const TOKEN_URL = 'https://api.ebay.com/identity/v1/oauth2/token';
-// eBay Post-Order API for reading buyer messages
-const MSG_BASE = 'https://api.ebay.com/post-order/v2/inquiry';
-// eBay Messaging API for contact_buyer threads
-const MESSAGING_BASE = 'https://api.ebay.com/sell/messaging/v1';
+const MSG_BASE = 'https://api.ebay.com/commerce/message/v1';
+const MSG_SCOPE = 'https://api.ebay.com/oauth/api_scope/commerce.message';
 
 function getSupabase() {
   return createClient(
@@ -35,10 +33,14 @@ async function getAccessToken(): Promise<string | null> {
     body: new URLSearchParams({
       grant_type: 'refresh_token',
       refresh_token: refreshToken,
-      scope: 'https://api.ebay.com/oauth/api_scope/sell.messaging.write',
+      scope: MSG_SCOPE,
     }),
   });
-  if (!res.ok) return null;
+  if (!res.ok) {
+    const errText = await res.text();
+    console.error('[eBay inbox] token refresh failed:', res.status, errText);
+    return null;
+  }
   const data = await res.json() as { access_token: string; expires_in: number };
   await supabase.from('app_settings').upsert([
     { key: 'ebay_access_token', value: data.access_token, updated_at: new Date().toISOString() },
@@ -47,60 +49,111 @@ async function getAccessToken(): Promise<string | null> {
   return data.access_token;
 }
 
-// GET /api/ebay/messages/inbox — sync incoming messages from eBay and return all
+// GET /api/ebay/messages/inbox — sync FROM_MEMBERS conversations and return all messages
 export async function GET() {
   const token = await getAccessToken();
   if (!token) return NextResponse.json({ error: 'not_connected' }, { status: 401 });
 
   const supabase = getSupabase();
 
-  // Fetch buyer messages from eBay Messaging API
-  // eBay returns threads where buyers have contacted us
-  const res = await fetch(`${MESSAGING_BASE}/contact_buyer?limit=50`, {
-    headers: {
-      'Authorization': `Bearer ${token}`,
-      'X-EBAY-C-MARKETPLACE-ID': 'EBAY_GB',
-      'Content-Type': 'application/json',
-    },
-  });
+  // Step 1: fetch conversation list (buyer-initiated messages only)
+  const convRes = await fetch(
+    `${MSG_BASE}/conversation?conversation_type=FROM_MEMBERS&limit=50`,
+    {
+      headers: {
+        'Authorization': `Bearer ${token}`,
+        'X-EBAY-C-MARKETPLACE-ID': 'EBAY_GB',
+        'Content-Type': 'application/json',
+      },
+    }
+  );
+
+  const convRaw = await convRes.text();
+  console.log('[eBay inbox] conversations status:', convRes.status, 'body:', convRaw.slice(0, 500));
 
   let syncedCount = 0;
 
-  const rawText = await res.text();
-  console.log('[eBay inbox] status:', res.status, 'body:', rawText.slice(0, 500));
+  if (convRes.ok) {
+    let convData: {
+      conversations?: Array<{
+        conversationId?: string;
+        conversationStatus?: string;
+        conversationType?: string;
+        referenceId?: string;   // item ID when referenceType = LISTING
+        unreadCount?: number;
+        latestMessage?: {
+          messageId?: string;
+          senderUsername?: string;
+          recipientUsername?: string;
+          messageBody?: string;
+          createdDate?: string;
+          readStatus?: boolean;
+          subject?: string;
+        };
+      }>;
+      total?: number;
+    };
+    try { convData = JSON.parse(convRaw); } catch { convData = {}; }
 
-  if (res.ok) {
-    let raw: {
-      contactBuyerResponses?: Array<{
-        itemId?: string;
-        orderId?: string;
-        recipientUsername?: string;
+    const conversations = convData.conversations ?? [];
+
+    for (const conv of conversations) {
+      if (!conv.conversationId) continue;
+
+      // Step 2: fetch all messages within each conversation
+      const msgRes = await fetch(
+        `${MSG_BASE}/conversation/${conv.conversationId}?conversation_type=FROM_MEMBERS&limit=50`,
+        {
+          headers: {
+            'Authorization': `Bearer ${token}`,
+            'X-EBAY-C-MARKETPLACE-ID': 'EBAY_GB',
+            'Content-Type': 'application/json',
+          },
+        }
+      );
+
+      if (!msgRes.ok) {
+        console.warn('[eBay inbox] failed to fetch conversation', conv.conversationId, msgRes.status);
+        continue;
+      }
+
+      let msgData: {
         messages?: Array<{
           messageId?: string;
-          sender?: string;
-          receiveDate?: string;
-          text?: string;
+          senderUsername?: string;
+          recipientUsername?: string;
+          messageBody?: string;
+          createdDate?: string;
+          readStatus?: boolean;
           subject?: string;
         }>;
-      }>;
-    };
-    try { raw = JSON.parse(rawText); } catch { raw = {}; }
+        conversationType?: string;
+      };
+      try { msgData = await msgRes.json(); } catch { continue; }
 
-    const threads = raw.contactBuyerResponses ?? [];
-    for (const thread of threads) {
-      for (const msg of thread.messages ?? []) {
-        if (!msg.sender || msg.sender === 'SELLER') continue;
+      for (const msg of msgData.messages ?? []) {
         if (!msg.messageId) continue;
+
+        // Determine direction: if sender is buyer (not us), it's received
+        // We identify buyer messages as those where senderUsername ≠ recipientUsername of the latest sent msg
+        // Simplest heuristic: all messages in FROM_MEMBERS are buyer-initiated threads,
+        // but individual messages can be from either party. Skip if readStatus means we sent it.
+        const isBuyerMessage = msg.senderUsername && msg.senderUsername !== msg.recipientUsername;
+        const direction = isBuyerMessage ? 'received' : 'sent';
+        const buyerUsername = direction === 'received'
+          ? (msg.senderUsername ?? 'unknown')
+          : (msg.recipientUsername ?? 'unknown');
+
         const { error } = await supabase.from('ebay_messages').upsert({
           ebay_message_id: msg.messageId,
-          direction: 'received',
-          order_id: thread.orderId ?? thread.itemId ?? 'unknown',
-          item_id: thread.itemId,
-          buyer_username: thread.recipientUsername ?? msg.sender,
+          direction,
+          order_id: conv.referenceId ?? conv.conversationId ?? 'unknown',
+          item_id: conv.referenceId,
+          buyer_username: buyerUsername,
           contact_reason: msg.subject ?? 'BUYER_MESSAGE',
-          message_text: msg.text ?? '',
-          sent_at: msg.receiveDate ?? new Date().toISOString(),
-          status: 'unread',
+          message_text: msg.messageBody ?? '',
+          sent_at: msg.createdDate ?? new Date().toISOString(),
+          status: direction === 'received' && msg.readStatus === false ? 'unread' : 'read',
         }, { onConflict: 'ebay_message_id', ignoreDuplicates: true });
         if (!error) syncedCount++;
       }
@@ -117,15 +170,48 @@ export async function GET() {
   return NextResponse.json({
     messages: messages ?? [],
     synced: syncedCount,
-    ebayApiStatus: res.status,
-    ebayApiPreview: rawText.slice(0, 300),
+    ebayApiStatus: convRes.status,
+    ebayApiPreview: convRaw.slice(0, 300),
   });
 }
 
-// PATCH /api/ebay/messages/inbox — mark message(s) as read
+// PATCH /api/ebay/messages/inbox — mark conversation(s) as read (both eBay + Supabase)
 export async function PATCH(req: Request) {
-  const { ids } = await req.json() as { ids: string[] };
+  const { ids, conversationIds, conversationType } = await req.json() as {
+    ids: string[];                 // Supabase row IDs
+    conversationIds?: string[];    // eBay conversation IDs (optional)
+    conversationType?: string;     // FROM_MEMBERS or FROM_EBAY
+  };
+
   const supabase = getSupabase();
+
+  // Update Supabase
   await supabase.from('ebay_messages').update({ status: 'read' }).in('id', ids);
+
+  // Optionally mark as read on eBay too
+  if (conversationIds?.length) {
+    const token = await getAccessToken();
+    if (token) {
+      const convType = conversationType ?? 'FROM_MEMBERS';
+      await Promise.all(
+        conversationIds.map((cid) =>
+          fetch(`${MSG_BASE}/update_conversation`, {
+            method: 'POST',
+            headers: {
+              'Authorization': `Bearer ${token}`,
+              'X-EBAY-C-MARKETPLACE-ID': 'EBAY_GB',
+              'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+              conversationId: cid,
+              conversationType: convType,
+              read: true,
+            }),
+          })
+        )
+      );
+    }
+  }
+
   return NextResponse.json({ success: true });
 }

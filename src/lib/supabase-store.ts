@@ -259,6 +259,32 @@ export async function syncOrder(order: Order): Promise<void> {
   if (error) {
     console.error('Error syncing order:', JSON.stringify(error, null, 2));
     console.error('Order data:', { id: order.id, salesRecordNumber: order.salesRecordNumber, batchId: order.batchId });
+    return;
+  }
+
+  // Sync order notes
+  if (order.notes && order.notes.length > 0) {
+    const { error: deleteError } = await supabase
+      .from('order_notes')
+      .delete()
+      .eq('order_id', order.id);
+    if (deleteError) {
+      console.error('Error deleting order notes before sync:', JSON.stringify(deleteError, null, 2));
+    }
+
+    const { error: notesError } = await supabase
+      .from('order_notes')
+      .insert(order.notes.map((n) => ({
+        id: isValidUUID(n.id) ? n.id : undefined,
+        order_id: order.id,
+        author_id: n.authorId && isValidUUID(n.authorId) ? n.authorId : undefined,
+        author_name: n.authorName,
+        text: n.text,
+        created_at: n.createdAt,
+      })));
+    if (notesError) {
+      console.error('Error syncing order notes:', JSON.stringify(notesError, null, 2));
+    }
   }
 }
 
