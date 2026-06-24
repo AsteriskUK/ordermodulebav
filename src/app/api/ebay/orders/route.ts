@@ -51,12 +51,18 @@ async function refreshAccessToken(refreshToken: string): Promise<string | null> 
 }
 
 export async function GET(req: NextRequest) {
+  try {
   // Env var takes priority (manual override)
   const envRefreshToken = process.env.EBAY_REFRESH_TOKEN;
 
-  const dbRefreshToken = envRefreshToken ?? await getDbSetting('ebay_refresh_token');
-  const dbAccessToken = await getDbSetting('ebay_access_token');
-  const expiresAt = Number(await getDbSetting('ebay_token_expires_at') ?? '0');
+  const [dbRefreshTokenRow, dbAccessTokenRow, dbExpiresAtRow] = await Promise.all([
+    envRefreshToken ? Promise.resolve(null) : getDbSetting('ebay_refresh_token'),
+    getDbSetting('ebay_access_token'),
+    getDbSetting('ebay_token_expires_at'),
+  ]);
+  const dbRefreshToken = envRefreshToken ?? dbRefreshTokenRow;
+  const dbAccessToken = dbAccessTokenRow;
+  const expiresAt = Number(dbExpiresAtRow ?? '0');
 
   if (!dbRefreshToken) {
     return NextResponse.json({ error: 'not_connected', message: 'Not connected to eBay. Connect via /api/ebay/auth.' }, { status: 401 });
@@ -132,4 +138,8 @@ export async function GET(req: NextRequest) {
   batch.orderCount = allOrders.length;
 
   return NextResponse.json({ orders: allOrders, batch });
+  } catch (err) {
+    console.error('[eBay orders] Unhandled error:', err);
+    return NextResponse.json({ error: 'server_error', message: String(err) }, { status: 500 });
+  }
 }
