@@ -10,9 +10,9 @@ export function deriveShipping(postcode: string, totalPrice: number, postageAndP
   if (postageAndPackaging > 0) {
     return { deliveryCarrier: 'DPD', deliveryType: 'express' };
   }
-  // BT postcode (Northern Ireland) = DPD next day, no extra charge
+  // BT postcode (Northern Ireland) = DPD two-day service
   if (isBT) {
-    return { deliveryCarrier: 'DPD', deliveryType: 'next_day' };
+    return { deliveryCarrier: 'DPD', deliveryType: 'two_day' };
   }
   // Orders < £400 go FedEx standard
   if (totalPrice < 400) {

@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useRef, useEffect } from 'react';
-import { Order, ORDER_STATUS_CONFIG, OrderStatus, OrderNote } from '@/lib/types';
+import { Order, ORDER_STATUS_CONFIG, OrderStatus, OrderNote, DeliveryCarrier, DeliveryType, MissingPart, DEPARTMENT_CONFIG, Department } from '@/lib/types';
 import { useOrderStore } from '@/lib/store';
 import {
   Dialog,
@@ -20,7 +20,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
-import { MapPin, Package, User, Truck, MessageSquare, Send, Trash2, ShoppingBag } from 'lucide-react';
+import { MapPin, Package, User, Truck, MessageSquare, Send, Trash2, ShoppingBag, Star, PackageMinus, Plus } from 'lucide-react';
 import { DeliveryBadge } from './delivery-badge';
 import { toast } from 'sonner';
 
@@ -33,6 +33,10 @@ export function OrderDetailDialog({ order, onClose }: Props) {
   const updateOrderStatus = useOrderStore((s) => s.updateOrderStatus);
   const updateOrderTracking = useOrderStore((s) => s.updateOrderTracking);
   const updateOrderNumberOfBoxes = useOrderStore((s) => s.updateOrderNumberOfBoxes);
+  const updateOrderPriority = useOrderStore((s) => s.updateOrderPriority);
+  const updateOrderCarrier = useOrderStore((s) => s.updateOrderCarrier);
+  const addMissingItem = useOrderStore((s) => s.addMissingItem);
+  const updateOrderDeliveryService = useOrderStore((s) => s.updateOrderDeliveryService);
   const addOrderNote = useOrderStore((s) => s.addOrderNote);
   const deleteOrderNote = useOrderStore((s) => s.deleteOrderNote);
   const currentUser = useOrderStore((s) => s.users.find(u => u.id === s.currentUserId));
@@ -42,8 +46,17 @@ export function OrderDetailDialog({ order, onClose }: Props) {
 
   const [tracking, setTracking] = useState(order.trackingNumber);
   const [numberOfBoxes, setNumberOfBoxes] = useState((order.numberOfBoxes ?? 1).toString());
+  const [carrier, setCarrier] = useState<DeliveryCarrier>(order.deliveryCarrier);
+  const [deliveryType, setDeliveryType] = useState<DeliveryType>(order.deliveryType);
+  const [deliveryService, setDeliveryService] = useState(order.deliveryService ?? '');
   const [noteText, setNoteText] = useState('');
   const notesEndRef = useRef<HTMLDivElement>(null);
+
+  // Missing parts inline form
+  const [showMissingForm, setShowMissingForm] = useState(false);
+  const [missingParts, setMissingParts] = useState<MissingPart[]>([{ description: '', quantity: 1 }]);
+  const [missingNotes, setMissingNotes] = useState('');
+  const [missingDept, setMissingDept] = useState<Department | ''>('');
 
   // eBay messaging
   const [ebayMsgText, setEbayMsgText] = useState('');
@@ -99,9 +112,42 @@ export function OrderDetailDialog({ order, onClose }: Props) {
     notesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [liveOrder.notes?.length]);
 
+  function genMissingId(): string {
+    return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, (c) => {
+      const r = Math.random() * 16 | 0;
+      return (c === 'x' ? r : (r & 0x3 | 0x8)).toString(16);
+    });
+  }
+
+  const handleSubmitMissingParts = () => {
+    const validParts = missingParts.filter((p) => p.description.trim());
+    if (validParts.length === 0) { toast.error('Add at least one missing part'); return; }
+    addMissingItem({
+      id: genMissingId(),
+      orderId: order.id,
+      salesRecordNumber: order.salesRecordNumber,
+      buyerUsername: order.buyerUsername,
+      itemTitle: order.itemTitle,
+      missingParts: validParts,
+      notes: missingNotes.trim(),
+      reportedAt: new Date().toISOString(),
+      reportedByUserId: currentUser?.id,
+      reportedByUserName: currentUser?.name,
+      responsibleDepartment: missingDept || undefined,
+      status: 'pending',
+    });
+    toast.success(`Missing parts logged for #${order.salesRecordNumber}`);
+    setShowMissingForm(false);
+    setMissingParts([{ description: '', quantity: 1 }]);
+    setMissingNotes('');
+    setMissingDept('');
+  };
+
   const handleSave = () => {
     updateOrderTracking(order.id, tracking);
     updateOrderNumberOfBoxes(order.id, parseInt(numberOfBoxes) || 1);
+    updateOrderCarrier(order.id, carrier, deliveryType);
+    updateOrderDeliveryService(order.id, deliveryService);
     toast.success('Order updated');
     onClose();
   };
@@ -134,6 +180,26 @@ export function OrderDetailDialog({ order, onClose }: Props) {
         </DialogHeader>
 
         <div className="space-y-5 pt-2">
+          {/* Priority selector */}
+          <div className="flex items-center gap-3">
+            <span className="text-sm font-medium text-slate-600 flex items-center gap-1"><Star className="h-3.5 w-3.5" /> Priority:</span>
+            <Select
+              value={(liveOrder.priority ?? 5).toString()}
+              onValueChange={(v) => { if (v) { updateOrderPriority(order.id, parseInt(v)); toast.success('Priority updated'); } }}
+            >
+              <SelectTrigger className="w-[130px]">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {[1,2,3,4,5].map((p) => (
+                  <SelectItem key={p} value={p.toString()}>
+                    {p} {p === 1 ? '(Highest)' : p === 5 ? '(Lowest)' : ''}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+
           {/* Status selector */}
           <div className="flex items-center gap-3">
             <span className="text-sm font-medium text-slate-600">Status:</span>
@@ -306,6 +372,41 @@ export function OrderDetailDialog({ order, onClose }: Props) {
                   {order.deliveryService}
                 </p>
               )}
+              <div className="grid grid-cols-2 gap-2">
+                <div>
+                  <label className="text-xs text-slate-500 mb-1 block">Carrier</label>
+                  <Select value={carrier} onValueChange={(v) => v && setCarrier(v as DeliveryCarrier)}>
+                    <SelectTrigger className="h-9"><SelectValue /></SelectTrigger>
+                    <SelectContent>
+                      {(['DPD','FedEx','Parcelforce','Royal Mail','Other'] as DeliveryCarrier[]).map((c) => (
+                        <SelectItem key={c} value={c}>{c}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div>
+                  <label className="text-xs text-slate-500 mb-1 block">Service type</label>
+                  <Select value={deliveryType} onValueChange={(v) => v && setDeliveryType(v as DeliveryType)}>
+                    <SelectTrigger className="h-9"><SelectValue /></SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="standard">Standard</SelectItem>
+                      <SelectItem value="two_day">2-Day (BT)</SelectItem>
+                      <SelectItem value="next_day">Next Day</SelectItem>
+                      <SelectItem value="express">Express</SelectItem>
+                      <SelectItem value="collection">Collection</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+              </div>
+              <div>
+                <label className="text-xs text-slate-500 mb-1 block">Delivery service name</label>
+                <Input
+                  placeholder="e.g. DPD Next Day, FedEx Ground..."
+                  value={deliveryService}
+                  onChange={(e) => setDeliveryService(e.target.value)}
+                  className="h-9"
+                />
+              </div>
               <Input
                 placeholder="Enter tracking number..."
                 value={tracking}
@@ -490,6 +591,73 @@ export function OrderDetailDialog({ order, onClose }: Props) {
               </div>
             </div>
           )}
+
+          {/* Missing parts quick-report */}
+          <div className="border-t pt-4">
+            {!showMissingForm ? (
+              <Button
+                variant="outline"
+                size="sm"
+                className="gap-1.5 text-orange-600 border-orange-300 hover:bg-orange-50"
+                onClick={() => setShowMissingForm(true)}
+              >
+                <PackageMinus className="h-3.5 w-3.5" />
+                Report Missing Parts
+              </Button>
+            ) : (
+              <div className="space-y-3 bg-orange-50 border border-orange-200 rounded-lg p-4">
+                <h4 className="text-sm font-semibold text-orange-800 flex items-center gap-1.5">
+                  <PackageMinus className="h-4 w-4" /> Report Missing Parts
+                </h4>
+                <div className="space-y-2">
+                  {missingParts.map((part, idx) => (
+                    <div key={idx} className="flex items-center gap-2">
+                      <Input
+                        value={part.description}
+                        onChange={(e) => setMissingParts((prev) => prev.map((p, i) => i === idx ? { ...p, description: e.target.value } : p))}
+                        placeholder="e.g. Power cable, Remote, HDMI cable..."
+                        className="h-8 text-sm flex-1"
+                      />
+                      <input
+                        type="number" min={1}
+                        value={part.quantity}
+                        onChange={(e) => setMissingParts((prev) => prev.map((p, i) => i === idx ? { ...p, quantity: Math.max(1, parseInt(e.target.value) || 1) } : p))}
+                        className="w-12 h-8 border rounded px-2 text-sm text-center"
+                      />
+                      {missingParts.length > 1 && (
+                        <button type="button" onClick={() => setMissingParts((prev) => prev.filter((_, i) => i !== idx))} className="text-slate-400 hover:text-red-500">
+                          <Trash2 className="h-3.5 w-3.5" />
+                        </button>
+                      )}
+                    </div>
+                  ))}
+                  <Button size="sm" variant="outline" className="h-6 text-xs" onClick={() => setMissingParts((prev) => [...prev, { description: '', quantity: 1 }])}>
+                    <Plus className="h-3 w-3 mr-1" /> Add Part
+                  </Button>
+                </div>
+                <Input
+                  value={missingNotes}
+                  onChange={(e) => setMissingNotes(e.target.value)}
+                  placeholder="Internal notes (optional)"
+                  className="h-8 text-sm"
+                />
+                <Select value={missingDept} onValueChange={(v) => v && setMissingDept(v as Department)}>
+                  <SelectTrigger className="h-8 text-sm"><SelectValue placeholder="Responsible dept (optional)" /></SelectTrigger>
+                  <SelectContent>
+                    {(['assembler', 'packing'] as Department[]).map((k) => (
+                      <SelectItem key={k} value={k}>{DEPARTMENT_CONFIG[k].label}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                <div className="flex gap-2">
+                  <Button size="sm" className="bg-orange-600 hover:bg-orange-700 text-white" onClick={handleSubmitMissingParts}>
+                    Log Missing Parts
+                  </Button>
+                  <Button size="sm" variant="outline" onClick={() => setShowMissingForm(false)}>Cancel</Button>
+                </div>
+              </div>
+            )}
+          </div>
 
           <div className="flex gap-3 pt-2">
             <Button onClick={handleSave}>Save Changes</Button>

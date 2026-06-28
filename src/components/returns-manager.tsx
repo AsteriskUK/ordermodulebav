@@ -1,6 +1,7 @@
 'use client';
 
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useEffect } from 'react';
+import { useSearchParams } from 'next/navigation';
 import { useOrderStore } from '@/lib/store';
 import { ReturnRecord, ReplacementItem, Department, DEPARTMENT_CONFIG } from '@/lib/types';
 import { ImageUpload } from '@/components/image-upload';
@@ -61,7 +62,13 @@ export function ReturnsManager() {
 
   const currentUser = users.find((u) => u.id === currentUserId);
 
-  const [search, setSearch] = useState('');
+  const searchParams = useSearchParams();
+  const [search, setSearch] = useState(() => searchParams.get('search') || '');
+
+  useEffect(() => {
+    const q = searchParams.get('search');
+    if (q) setSearch(q);
+  }, [searchParams]);
   const [statusFilter, setStatusFilter] = useState<string>('all');
   const [tab, setTab] = useState<'open' | 'closed'>('open');
   const [showForm, setShowForm] = useState(false);
@@ -341,8 +348,8 @@ export function ReturnsManager() {
                 <Select value={responsibleDepartment} onValueChange={(v) => v && setResponsibleDepartment(v as Department)}>
                   <SelectTrigger className="h-8 text-sm w-40"><SelectValue placeholder="Select dept" /></SelectTrigger>
                   <SelectContent>
-                    {Object.entries(DEPARTMENT_CONFIG).map(([k, v]) => (
-                      <SelectItem key={k} value={k}>{v.label}</SelectItem>
+                    {(['assembler', 'packing'] as Department[]).map((k) => (
+                      <SelectItem key={k} value={k}>{DEPARTMENT_CONFIG[k].label}</SelectItem>
                     ))}
                   </SelectContent>
                 </Select>
@@ -692,7 +699,7 @@ export function ReturnsManager() {
       {/* Edit return dialog — editable in any status */}
       {editReturn && (
         <Dialog open onOpenChange={(open) => { if (!open) setEditReturn(null); }}>
-          <DialogContent className="sm:max-w-md">
+          <DialogContent className="sm:max-w-md max-h-[90vh] overflow-y-auto">
             <DialogHeader>
               <DialogTitle>Edit Return — #{editReturn.salesRecordNumber}</DialogTitle>
             </DialogHeader>
@@ -769,8 +776,8 @@ export function ReturnsManager() {
                   <Select value={editResponsibleDepartment} onValueChange={(v) => v && setEditResponsibleDepartment(v as Department)}>
                     <SelectTrigger className="h-8 text-sm w-40"><SelectValue placeholder="Select dept" /></SelectTrigger>
                     <SelectContent>
-                      {Object.entries(DEPARTMENT_CONFIG).map(([k, v]) => (
-                        <SelectItem key={k} value={k}>{v.label}</SelectItem>
+                      {(['assembler', 'packing'] as Department[]).map((k) => (
+                        <SelectItem key={k} value={k}>{DEPARTMENT_CONFIG[k].label}</SelectItem>
                       ))}
                     </SelectContent>
                   </Select>

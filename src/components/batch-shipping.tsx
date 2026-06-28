@@ -647,14 +647,6 @@ export function BatchShipping() {
             <p className="text-sm text-slate-500">Multi-order buyers</p>
           </CardContent>
         </Card>
-        <Card>
-          <CardContent className="pt-6">
-            <div className="text-2xl font-bold text-slate-600">
-              {bundleMode ? selectedBuyerKeys.size : selectedIds.size}
-            </div>
-            <p className="text-sm text-slate-500">{bundleMode ? 'Buyers selected' : 'Selected'}</p>
-          </CardContent>
-        </Card>
       </div>
 
       {filterCarrier !== 'all' && (
@@ -890,10 +882,11 @@ export function BatchShipping() {
                 <p>No orders pending shipment</p>
               </div>
             ) : (
+              <div className="overflow-x-auto" style={{ maxHeight: 'calc(100vh - 340px)', overflowY: 'auto' }}>
               <Table>
-                <TableHeader>
-                  <TableRow>
-                    <TableHead className="w-10">
+                <TableHeader className="sticky top-0 z-10 bg-white">
+                  <TableRow className="bg-slate-50">
+                    <TableHead className="w-10 bg-slate-50">
                       <button onClick={toggleAll} className="p-1">
                         {selectedIds.size === filteredShipmentGroups.length && filteredShipmentGroups.length > 0 ? (
                           <CheckSquare className="h-4 w-4 text-blue-600" />
@@ -904,19 +897,20 @@ export function BatchShipping() {
                         )}
                       </button>
                     </TableHead>
-                    <TableHead className="text-xs cursor-pointer hover:bg-slate-100" onClick={() => handleSort('salesRecordNumber')}>Amazon Order ID {sortField === 'salesRecordNumber' && (sortDir === 'asc' ? '▲' : '▼')}</TableHead>
-                    <TableHead className="text-xs cursor-pointer hover:bg-slate-100" onClick={() => handleSort('postToName')}>Recipient {sortField === 'postToName' && (sortDir === 'asc' ? '▲' : '▼')}</TableHead>
-                    <TableHead className="text-xs">Address</TableHead>
-                    <TableHead className="text-xs">Postcode</TableHead>
-                    <TableHead className="text-xs cursor-pointer hover:bg-slate-100" onClick={() => handleSort('postByDate')}>Post By {sortField === 'postByDate' && (sortDir === 'asc' ? '▲' : '▼')}</TableHead>
-                    <TableHead className="text-xs cursor-pointer hover:bg-slate-100" onClick={() => handleSort('itemTitle')}>Item {sortField === 'itemTitle' && (sortDir === 'asc' ? '▲' : '▼')}</TableHead>
-                    <TableHead className="text-xs">Price</TableHead>
-                    <TableHead className="text-xs">Boxes</TableHead>
-                    <TableHead className="text-xs">Carrier</TableHead>
-                    <TableHead className="text-xs">Service</TableHead>
-                    <TableHead className="text-xs">Tracking #</TableHead>
-                    <TableHead className="text-xs">Status</TableHead>
-                    <TableHead className="text-xs">Ext. Liability</TableHead>
+                    <TableHead className="text-xs cursor-pointer hover:bg-slate-100 bg-slate-50" onClick={() => handleSort('salesRecordNumber')}>Order # {sortField === 'salesRecordNumber' && (sortDir === 'asc' ? '▲' : '▼')}</TableHead>
+                    <TableHead className="text-xs cursor-pointer hover:bg-slate-100 bg-slate-50" onClick={() => handleSort('postToName')}>Recipient {sortField === 'postToName' && (sortDir === 'asc' ? '▲' : '▼')}</TableHead>
+                    <TableHead className="text-xs bg-slate-50">Address</TableHead>
+                    <TableHead className="text-xs bg-slate-50">Postcode</TableHead>
+                    <TableHead className="text-xs cursor-pointer hover:bg-slate-100 bg-slate-50" onClick={() => handleSort('postByDate')}>Post By {sortField === 'postByDate' && (sortDir === 'asc' ? '▲' : '▼')}</TableHead>
+                    <TableHead className="text-xs cursor-pointer hover:bg-slate-100 bg-slate-50" onClick={() => handleSort('itemTitle')}>Item {sortField === 'itemTitle' && (sortDir === 'asc' ? '▲' : '▼')}</TableHead>
+                    <TableHead className="text-xs bg-slate-50">Qty</TableHead>
+                    <TableHead className="text-xs bg-slate-50">Price</TableHead>
+                    <TableHead className="text-xs bg-slate-50">Boxes</TableHead>
+                    <TableHead className="text-xs bg-slate-50">Carrier</TableHead>
+                    <TableHead className="text-xs bg-slate-50">Service</TableHead>
+                    <TableHead className="text-xs bg-slate-50">Tracking #</TableHead>
+                    <TableHead className="text-xs bg-slate-50">Status</TableHead>
+                    <TableHead className="text-xs bg-slate-50">Ext. Liability</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
@@ -963,6 +957,9 @@ export function BatchShipping() {
                           ) : (
                             <span className="truncate block">{combinedTitle}</span>
                           )}
+                        </TableCell>
+                        <TableCell className="text-xs font-bold text-center">
+                          {group.totalQuantity}
                         </TableCell>
                         <TableCell className="text-xs font-medium whitespace-nowrap">
                           £{totalPrice.toFixed(2)}
@@ -1072,6 +1069,7 @@ export function BatchShipping() {
                   })}
                 </TableBody>
               </Table>
+              </div>
             )}
           </CardContent>
         </Card>

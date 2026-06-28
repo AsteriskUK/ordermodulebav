@@ -1,7 +1,7 @@
 import { create } from 'zustand';
 import { persist, createJSONStorage } from 'zustand/middleware';
 import { get, set as idbSet, del } from 'idb-keyval';
-import { Order, OrderNote, OrderStatus, Batch, DeliveryCarrier, DeliveryType, AppUser, EodEvent, ReturnRecord, ReplacementItem, Department, AttendanceRecord, LeaveRequest, LeaveBalance } from './types';
+import { Order, OrderNote, OrderStatus, Batch, DeliveryCarrier, DeliveryType, AppUser, EodEvent, ReturnRecord, ReplacementItem, MissingItemRecord, Department, AttendanceRecord, LeaveRequest, LeaveBalance } from './types';
 import { syncAttendance, syncLeaveRequest, syncLeaveBalance, syncOrder, syncBatch, syncUser, deleteUserFromSupabase, syncReturn } from './supabase-store';
 
 // Generate proper UUID v4 for PostgreSQL compatibility
@@ -80,6 +80,11 @@ interface OrderStore {
   processReturn: (returnId: string, resolution: 'refund' | 'replacement', processedByUserId: string, processedByUserName: string) => void;
   addReplacementItem: (returnId: string, item: ReplacementItem) => void;
   createReplacementOrder: (returnId: string) => Order;
+  // Missing Items
+  missingItems: MissingItemRecord[];
+  addMissingItem: (record: MissingItemRecord) => void;
+  updateMissingItem: (id: string, updates: Partial<MissingItemRecord>) => void;
+  createMissingItemOrder: (missingItemId: string) => Order;
   // HR Actions
   attendanceRecords: AttendanceRecord[];
   leaveRequests: LeaveRequest[];
@@ -101,6 +106,7 @@ export const useOrderStore = create<OrderStore>()(
       batches: [] as Batch[],
       eodEvents: [] as EodEvent[],
       returns: [] as ReturnRecord[],
+      missingItems: [] as MissingItemRecord[],
       attendanceRecords: [] as AttendanceRecord[],
       leaveRequests: [] as LeaveRequest[],
       leaveBalances: [] as LeaveBalance[],
@@ -446,6 +452,77 @@ export const useOrderStore = create<OrderStore>()(
           return { returns: updatedReturns };
         });
       },
+      addMissingItem: (record) =>
+        set((state) => ({ missingItems: [...state.missingItems, record] })),
+      updateMissingItem: (id, updates) =>
+        set((state) => ({
+          missingItems: state.missingItems.map((m) => m.id === id ? { ...m, ...updates } : m),
+        })),
+      createMissingItemOrder: (missingItemId) => {
+        const state = get();
+        const record = state.missingItems.find((m) => m.id === missingItemId);
+        if (!record) throw new Error('Missing item record not found');
+        if (record.dispatchOrderId) {
+          const existing = state.orders.find((o) => o.id === record.dispatchOrderId);
+          if (existing) return existing;
+        }
+        const originalOrder = state.orders.find((o) => o.id === record.orderId);
+        if (!originalOrder) throw new Error('Original order not found');
+        const now = new Date().toISOString();
+        const newOrderId = generateUUID();
+        const salesRecordNumber = `MISS-${originalOrder.salesRecordNumber}`;
+        let batch = state.batches.find((b) => b.name === 'Missing Parts');
+        if (!batch) {
+          batch = { id: generateUUID(), name: 'Missing Parts', importedAt: now, orderCount: 1, source: 'manual' };
+        } else {
+          batch = { ...batch, orderCount: batch.orderCount + 1 };
+        }
+        const partsSummary = record.missingParts.map((p) => `${p.description} (x${p.quantity})`).join(', ');
+        const newOrder: Order = {
+          ...originalOrder,
+          id: newOrderId,
+          salesRecordNumber,
+          orderNumber: `MISS-${originalOrder.orderNumber}`,
+          status: 'pending',
+          itemTitle: `MISSING PARTS: ${partsSummary}`,
+          quantity: 1,
+          soldFor: 0,
+          postageAndPackaging: 0,
+          totalPrice: 0,
+          isReplacement: true,
+          originalOrderId: originalOrder.id,
+          importedAt: now,
+          batchId: batch.id,
+          saleDate: now,
+          paidOnDate: now,
+          postByDate: now,
+          dispatchedOnDate: '',
+          trackingNumber: '',
+          deliveryService: '',
+          comments: `Missing parts dispatch for order ${originalOrder.salesRecordNumber}`,
+          notes: [
+            {
+              id: generateUUID(),
+              text: `Missing parts: ${partsSummary}${record.notes ? ' — ' + record.notes : ''}`,
+              authorId: 'system',
+              authorName: 'System',
+              createdAt: now,
+            },
+          ],
+        };
+        set((state) => ({
+          orders: [...state.orders, newOrder],
+          batches: state.batches.some((b) => b.id === batch!.id)
+            ? state.batches.map((b) => (b.id === batch!.id ? batch! : b))
+            : [...state.batches, batch!],
+          missingItems: state.missingItems.map((m) =>
+            m.id === missingItemId ? { ...m, dispatchOrderId: newOrderId, status: 'dispatched' } : m
+          ),
+        }));
+        syncBatch(batch, state.currentUserId || undefined).catch(console.error);
+        syncOrder(newOrder).catch(console.error);
+        return newOrder;
+      },
       createReplacementOrder: (returnId) => {
         const state = get();
         const ret = state.returns.find((r) => r.id === returnId);
@@ -649,6 +726,7 @@ export const useOrderStore = create<OrderStore>()(
           batches:     s.batches     ?? [],
           eodEvents:   s.eodEvents   ?? [],
           returns:     s.returns     ?? [],
+          missingItems: (s as OrderStore).missingItems ?? [],
           attendanceRecords: (s as OrderStore).attendanceRecords ?? [],
           leaveRequests: (s as OrderStore).leaveRequests ?? [],
           leaveBalances: (s as OrderStore).leaveBalances ?? [],

@@ -30,6 +30,16 @@ export function DeliveryBadge({ deliveryType, deliveryCarrier, size = 'xs' }: Pr
       </Badge>
     );
   }
+  if (deliveryType === 'two_day') {
+    return (
+      <Badge
+        variant="outline"
+        className={`${size === 'xs' ? 'text-[10px] px-1.5 py-0' : 'text-xs'} bg-blue-100 text-blue-700 border-blue-300`}
+      >
+        2-Day (BT)
+      </Badge>
+    );
+  }
   if (deliveryType === 'collection') {
     return (
       <Badge

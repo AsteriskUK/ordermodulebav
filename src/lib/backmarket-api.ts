@@ -6,15 +6,22 @@ const DEFAULT_BASE_URL = 'https://www.backmarket.fr';
 
 export interface BackmarketAddress {
   company?: string;
+  // API returns camelCase
+  firstName?: string;
+  lastName?: string;
+  // legacy snake_case fallbacks
   first_name?: string;
   last_name?: string;
   street?: string;
   street2?: string;
+  postalCode?: string;
   postal_code?: string;
   city?: string;
   country?: string;
+  phoneNumber?: string;
   phone?: string;
   email?: string;
+  state?: string;
   customer_id_number?: string;
 }
 
@@ -46,7 +53,18 @@ export interface BackmarketOrderline {
   backcare?: boolean;
   backcare_price?: number;
   snapshot?: BackmarketListingSnapshot;
-  listing?: number;
+  /** SKU string e.g. 'IPHONE416GONLIB0' */
+  listing?: string | number;
+  /** Numeric listing ID */
+  listing_id?: number;
+  /** Item title — the real field name in the API response */
+  product?: string;
+  product_id?: number;
+  brand?: string;
+  condition?: number;
+  imei?: string;
+  serial_number?: string;
+  /** Legacy / fallback title fields */
   title?: string;
   content?: string;
 }
@@ -143,7 +161,8 @@ export async function fetchBackmarketListingTitle(listingId: number): Promise<st
 }
 
 export function getBackmarketLineTitle(line: BackmarketOrderline): string {
-  return line.title ||
+  return line.product ||
+    line.title ||
     line.content ||
     line.snapshot?.title ||
     line.snapshot?.product?.title ||
@@ -250,13 +269,16 @@ export async function mapBackmarketOrderToOrder(
   }
 
   const addr = order.shipping_address;
-  const postToName = [addr?.first_name, addr?.last_name].filter(Boolean).join(' ').trim();
-  const postToPhone = addr?.phone || '';
+  const postToName = [
+    addr?.firstName || addr?.first_name,
+    addr?.lastName  || addr?.last_name,
+  ].filter(Boolean).join(' ').trim();
+  const postToPhone = addr?.phoneNumber || addr?.phone || '';
   const postToAddress1 = addr?.street || '';
   const postToAddress2 = addr?.street2 || '';
   const postToCity = addr?.city || '';
-  const postToCounty = '';
-  const postToPostcode = addr?.postal_code || '';
+  const postToCounty = addr?.state || '';
+  const postToPostcode = addr?.postalCode || addr?.postal_code || '';
   const postToCountry = addr?.country === 'GB' ? 'United Kingdom' : (addr?.country || '');
   const buyerEmail = addr?.email || order.billing_address?.email || '';
   const buyerName = postToName;
@@ -317,8 +339,9 @@ export async function mapBackmarketOrderToOrder(
 
   return Promise.all(orderlines.map(async (line, idx): Promise<Order> => {
     let itemTitle = getBackmarketLineTitle(line);
-    const sku = line.snapshot?.sku || '';
-    const listingId = line.snapshot?.listing || line.listing;
+    // listing is a SKU string; listing_id is the numeric ID
+    const sku = (typeof line.listing === 'string' ? line.listing : '') || line.snapshot?.sku || '';
+    const listingId = line.listing_id || line.snapshot?.listing || (typeof line.listing === 'number' ? line.listing : undefined);
     if (!itemTitle && listingId) {
       const fetchedTitle = await fetchBackmarketListingTitle(listingId);
       if (fetchedTitle) itemTitle = fetchedTitle;
@@ -347,7 +370,7 @@ export async function mapBackmarketOrderToOrder(
       postToCounty,
       postToPostcode,
       postToCountry,
-      itemNumber: String(line.listing || line.id || ''),
+      itemNumber: String(line.listing_id || line.id || ''),
       itemTitle,
       customLabel: sku,
       variation: '',

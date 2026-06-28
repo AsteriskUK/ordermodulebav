@@ -1,7 +1,7 @@
 export type OrderStatus = 'pending' | 'assembling' | 'checking' | 'packing' | 'packed' | 'shipped' | 'delivered' | 'held' | 'no-stock' | 'cancelled' | 'refunded' | 'returned' | 'archived';
 
 export type DeliveryCarrier = 'DPD' | 'FedEx' | 'Parcelforce' | 'Royal Mail' | 'Other';
-export type DeliveryType = 'standard' | 'next_day' | 'express' | 'collection';
+export type DeliveryType = 'standard' | 'next_day' | 'two_day' | 'express' | 'collection';
 
 export type DPDService = 
   | 'next_day'
@@ -17,6 +17,7 @@ export type UserRole = 'admin' | 'manager' | 'staff' | 'comms';
 
 export type Department =
   | 'management'
+  | 'assembler'
   | 'packing'
   | 'comms'
   | 'returns'
@@ -35,6 +36,7 @@ export const DEPARTMENT_CONFIG: Record<Department, {
   categories?: string[];
 }> = {
   management:  { label: 'Management',   color: 'bg-slate-100 text-slate-800 border-slate-300' },
+  assembler:   { label: 'Assembler',     color: 'bg-yellow-100 text-yellow-800 border-yellow-300' },
   packing:     { label: 'Packing Dept',  color: 'bg-indigo-100 text-indigo-800 border-indigo-300' },
   comms:       { label: 'Comms Dept',    color: 'bg-purple-100 text-purple-800 border-purple-300' },
   returns:     { label: 'Returns Dept',  color: 'bg-rose-100 text-rose-800 border-rose-300' },
@@ -113,6 +115,33 @@ export interface ReplacementItem {
   notes?: string;
   /** URLs of uploaded images for this replacement item */
   imageUrls?: string[];
+}
+
+export interface MissingItemRecord {
+  id: string;
+  orderId: string;
+  salesRecordNumber: string;
+  buyerUsername: string;
+  itemTitle: string;
+  /** Parts/accessories that were missed */
+  missingParts: MissingPart[];
+  notes: string;
+  reportedAt: string;
+  reportedByUserId?: string;
+  reportedByUserName?: string;
+  /** Department responsible for the error */
+  responsibleDepartment?: Department;
+  responsibleUserId?: string;
+  responsibleUserName?: string;
+  status: 'pending' | 'dispatched' | 'resolved';
+  /** ID of the follow-up dispatch order created */
+  dispatchOrderId?: string;
+}
+
+export interface MissingPart {
+  description: string;
+  quantity: number;
+  notes?: string;
 }
 
 export interface EodReport {

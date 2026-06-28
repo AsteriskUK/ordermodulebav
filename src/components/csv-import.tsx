@@ -1,10 +1,11 @@
 'use client';
 
 import { useState, useRef, useEffect } from 'react';
-import { Upload, FileText, CheckCircle, AlertCircle, Printer, Download, Tag, RefreshCw, ShoppingBag, Wifi, WifiOff, Sparkles } from 'lucide-react';
+import { Upload, FileText, CheckCircle, AlertCircle, Printer, Download, Tag, RefreshCw, ShoppingBag, Wifi, WifiOff, Sparkles, FileDown } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { parseCSV } from '@/lib/csv-parser';
+import { buildInvoicesHtml as buildInvoicesHtmlUtil, printHtml as printHtmlUtil } from '@/lib/order-utils';
 import { useOrderStore } from '@/lib/store';
 import { Batch, Order } from '@/lib/types';
 import { toast } from 'sonner';
@@ -400,8 +401,10 @@ export function CSVImport() {
       source: preview.format as Batch['source'],
     };
 
-    addOrders(preview.orders, batch);
-    toast.success(`Imported ${preview.orders.length} orders successfully!`);
+    const importedOrders = preview.orders;
+    addOrders(importedOrders, batch);
+    toast.success(`Imported ${importedOrders.length} orders successfully!`);
+    printHtmlUtil(buildInvoicesHtmlUtil(importedOrders));
     setPreview(null);
     setImporting(false);
 

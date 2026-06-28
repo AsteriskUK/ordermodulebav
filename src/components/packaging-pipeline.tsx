@@ -3,7 +3,7 @@
 import { useMemo, useState } from 'react';
 import { useOrderStore } from '@/lib/store';
 import { ORDER_STATUS_CONFIG, PACKAGING_STAGES, Order, OrderStatus, PackagingStage, DEPARTMENT_CONFIG, Department } from '@/lib/types';
-import { getOrderRowClass } from '@/lib/order-utils';
+import { getOrderRowClass, buildInvoicesHtml, printHtml } from '@/lib/order-utils';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -37,6 +37,8 @@ import {
   Globe,
   MessageSquare,
   Printer,
+  ShoppingBag,
+  RefreshCw,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { DeliveryBadge } from './delivery-badge';
@@ -74,9 +76,12 @@ export function PackagingPipeline() {
   const labelOrder = labelOrderId ? orders.find((o) => o.id === labelOrderId) : null;
   const [holdOrderId, setHoldOrderId] = useState<string | null>(null);
   const [holdReason, setHoldReason] = useState('');
+  const [cancelledAlert, setCancelledAlert] = useState<{ orderId: string; salesRecordNumber: string; itemTitle: string } | null>(null);
+  const [lastRefresh, setLastRefresh] = useState(new Date());
 
   const currentUser = users.find((u) => u.id === currentUserId);
   const isAdmin = currentUser?.role === 'admin' || currentUser?.role === 'manager';
+  const isStaff = !isAdmin;
   const userDepts: Department[] = currentUser
     ? (currentUser.departments?.length ? currentUser.departments : [currentUser.department ?? 'management'])
     : [];
@@ -94,13 +99,19 @@ export function PackagingPipeline() {
     if (!allowedCategories) {
       filtered = activeOrders;
     } else {
-      filtered = activeOrders.filter((o) => allowedCategories.includes(o.category));
+      // GSP (international) orders always visible so assemblers can see them
+      filtered = activeOrders.filter((o) => o.isGSP || allowedCategories.includes(o.category));
     }
     
     return filtered.sort((a, b) => {
+      // Primary sort: priority (lower = higher priority)
+      const pA = a.priority ?? 5;
+      const pB = b.priority ?? 5;
+      if (pA !== pB) return pA - pB;
+      // Secondary sort: post-by date
       const dateA = new Date(a.postByDate || a.saleDate).getTime();
       const dateB = new Date(b.postByDate || b.saleDate).getTime();
-      return dateB - dateA;
+      return dateA - dateB;
     });
   }, [orders, allowedCategories]);
 
@@ -170,8 +181,10 @@ export function PackagingPipeline() {
   }
 
   function cancelOrder(orderId: string) {
+    const o = orders.find((x) => x.id === orderId);
     updateOrderStatus(orderId, 'cancelled');
     toast.info('Order cancelled');
+    if (o) setCancelledAlert({ orderId, salesRecordNumber: o.salesRecordNumber, itemTitle: o.itemTitle });
   }
 
   function moveToPrev(orderId: string, prevStatus: OrderStatus) {
@@ -193,11 +206,20 @@ export function PackagingPipeline() {
 
   return (
     <div className="space-y-6">
-      <div>
-        <h2 className="text-2xl font-bold text-slate-900">Queue</h2>
-        <p className="text-slate-500 text-sm mt-1">
-          Track orders through assembling, checking, and packing stages
-        </p>
+      <div className="flex items-center justify-between">
+        <div>
+          <h2 className="text-2xl font-bold text-slate-900">Queue</h2>
+          <p className="text-slate-500 text-sm mt-1">
+            Track orders through assembling, checking, and packing stages
+          </p>
+        </div>
+        <button
+          onClick={() => setLastRefresh(new Date())}
+          className="flex items-center gap-1.5 text-xs text-slate-500 hover:text-slate-700 px-3 py-1.5 rounded border border-slate-200 hover:bg-slate-50"
+        >
+          <RefreshCw className="h-3.5 w-3.5" />
+          Refresh · {lastRefresh.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' })}
+        </button>
       </div>
 
       {/* Dept scope indicator */}
@@ -354,7 +376,7 @@ export function PackagingPipeline() {
                       {s.orders.length}
                     </Badge>
                   </CardTitle>
-                  {s.orders.length > 0 && (
+                  {s.orders.length > 0 && !isStaff && (
                     <div className="flex items-center gap-1">
                       {s.prevStage && (
                         <Button
@@ -411,9 +433,25 @@ export function PackagingPipeline() {
                       >
                         <div className="flex items-start justify-between gap-2">
                           <div className="min-w-0 flex-1">
-                            <p className="text-xs font-mono text-slate-500">
-                              #{order.salesRecordNumber}
-                            </p>
+                            <div className="flex items-center gap-1.5 flex-wrap">
+                              <p className="text-xs font-mono text-slate-500">
+                                #{order.salesRecordNumber}
+                              </p>
+                              {order.batchId && (
+                                <span className={`text-[10px] font-semibold px-1 py-0 rounded border ${
+                                  order.batchId.startsWith('ebay-') ? 'bg-amber-50 text-amber-700 border-amber-200' :
+                                  order.batchId.startsWith('backmarket-') ? 'bg-green-50 text-green-700 border-green-200' :
+                                  order.batchId.startsWith('amazon-') ? 'bg-orange-50 text-orange-700 border-orange-200' :
+                                  order.batchId.startsWith('temu-') ? 'bg-purple-50 text-purple-700 border-purple-200' :
+                                  'bg-slate-50 text-slate-500 border-slate-200'
+                                }`}>
+                                  {order.batchId.startsWith('ebay-') ? 'eBay' :
+                                   order.batchId.startsWith('backmarket-') ? 'BM' :
+                                   order.batchId.startsWith('amazon-') ? 'AMZ' :
+                                   order.batchId.startsWith('temu-') ? 'Temu' : 'Manual'}
+                                </span>
+                              )}
+                            </div>
                             <p className="text-sm font-medium truncate mt-0.5">
                               {order.itemTitle}
                             </p>
@@ -457,25 +495,41 @@ export function PackagingPipeline() {
                             {s.stage !== 'packed' && (
                               <>
                                 {s.stage === 'packing' ? (
-                                  <Button
-                                    size="sm"
-                                    className="h-6 text-xs px-2 bg-green-600 hover:bg-green-700"
-                                    onClick={() => setLabelOrderId(order.id)}
-                                  >
-                                    <Printer className="h-3 w-3 mr-1" />
-                                    Print Label
-                                  </Button>
+                                  (() => {
+                                    const hasTracking = !!order.trackingNumber;
+                                    const isCollection = order.deliveryType === 'collection';
+                                    const canPrint = hasTracking || isCollection;
+                                    return (
+                                      <>
+                                        <Button
+                                          size="sm"
+                                          className={`h-6 text-xs px-2 ${canPrint ? 'bg-green-600 hover:bg-green-700' : 'bg-slate-300 cursor-not-allowed'}`}
+                                          onClick={() => canPrint && setLabelOrderId(order.id)}
+                                          disabled={!canPrint}
+                                          title={!canPrint ? 'Tracking number required before printing label' : undefined}
+                                        >
+                                          <Printer className="h-3 w-3 mr-1" />
+                                          {isCollection ? 'Pack' : canPrint ? 'Print Label' : 'No Tracking'}
+                                        </Button>
+                                        {!canPrint && (
+                                          <p className="text-[10px] text-amber-600">Add tracking first</p>
+                                        )}
+                                      </>
+                                    );
+                                  })()
                                 ) : (
-                                  <Button
-                                    size="sm"
-                                    className="h-6 text-xs px-2"
-                                    onClick={() => moveToNext(order.id, s.nextStage)}
-                                  >
-                                    <CheckCircle className="h-3 w-3 mr-1" />
-                                    Done
-                                  </Button>
+                                  !isStaff && (
+                                    <Button
+                                      size="sm"
+                                      className="h-6 text-xs px-2"
+                                      onClick={() => moveToNext(order.id, s.nextStage)}
+                                    >
+                                      <CheckCircle className="h-3 w-3 mr-1" />
+                                      Done
+                                    </Button>
+                                  )
                                 )}
-                                {s.prevStage && (
+                                {s.prevStage && !isStaff && (
                                   <Button
                                     size="sm"
                                     variant="outline"
@@ -495,7 +549,18 @@ export function PackagingPipeline() {
                                   <MessageSquare className="h-3 w-3 mr-1" />
                                   Note
                                 </Button>
-                                {['pending','assembling','checking','packing'].includes(s.stage) && (
+                                {s.stage === 'assembling' && (
+                                  <Button
+                                    size="sm"
+                                    variant="outline"
+                                    className="h-6 text-xs px-2 text-slate-600 hover:bg-slate-50"
+                                    onClick={() => printHtml(buildInvoicesHtml([order]))}
+                                  >
+                                    <Printer className="h-3 w-3 mr-1" />
+                                    Invoice
+                                  </Button>
+                                )}
+                                {['pending','assembling','checking','packing'].includes(s.stage) && !isStaff && (
                                   <>
                                     <Button
                                       size="sm"
@@ -528,17 +593,19 @@ export function PackagingPipeline() {
                                 )}
                               </>
                             )}
-                            {/* Packed: note + manual ship to delivered */}
+                            {/* Packed: note + manual ship */}
                             {s.stage === 'packed' && (
                               <>
-                                <Button
-                                  size="sm"
-                                  className="h-6 text-xs px-2 bg-green-600 hover:bg-green-700 text-white"
-                                  onClick={() => moveToNext(order.id, 'shipped')}
-                                >
-                                  <Truck className="h-3 w-3 mr-1" />
-                                  Ship
-                                </Button>
+                                {!isStaff && (
+                                  <Button
+                                    size="sm"
+                                    className="h-6 text-xs px-2 bg-green-600 hover:bg-green-700 text-white"
+                                    onClick={() => moveToNext(order.id, 'shipped')}
+                                  >
+                                    <Truck className="h-3 w-3 mr-1" />
+                                    Ship
+                                  </Button>
+                                )}
                                 <Button
                                   size="sm"
                                   variant="outline"
@@ -841,6 +908,25 @@ export function PackagingPipeline() {
           order={labelOrder}
           onClose={() => setLabelOrderId(null)}
         />
+      )}
+
+      {/* Big-screen cancellation alert */}
+      {cancelledAlert && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-70">
+          <div className="bg-white rounded-2xl shadow-2xl border-4 border-red-500 p-10 max-w-xl w-full mx-4 text-center animate-pulse">
+            <div className="text-6xl mb-4">🚫</div>
+            <h2 className="text-3xl font-black text-red-600 mb-2">ORDER CANCELLED</h2>
+            <p className="text-xl font-bold text-slate-800 mb-1">#{cancelledAlert.salesRecordNumber}</p>
+            <p className="text-base text-slate-600 mb-6 truncate">{cancelledAlert.itemTitle}</p>
+            <p className="text-sm text-slate-500 mb-6">Stop work on this order immediately. Return any items to stock.</p>
+            <Button
+              className="bg-red-600 hover:bg-red-700 text-white text-lg px-10 py-3 h-auto"
+              onClick={() => setCancelledAlert(null)}
+            >
+              Acknowledged
+            </Button>
+          </div>
+        </div>
       )}
     </div>
   );
