@@ -21,6 +21,8 @@ import {
   UsersRound,
   Trash,
   RefreshCw,
+  MapPin,
+  Tag,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useOrderStore } from '@/lib/store';
@@ -30,8 +32,10 @@ import { GlobalSearch } from './global-search';
 const ALL_NAV = [
   { name: 'Dashboard', href: '/', icon: LayoutDashboard, staffVisible: true },
   { name: 'Import Orders', href: '/import', icon: Upload, staffVisible: false },
+  { name: 'Listings', href: '/listings', icon: Tag, staffVisible: false },
   { name: 'Create Order', href: '/orders/new', icon: FilePlus, staffVisible: false },
   { name: 'Batch Shipping', href: '/shipping', icon: Truck, staffVisible: false },
+  { name: 'Tracking', href: '/tracking', icon: MapPin, staffVisible: true },
   { name: 'Order Sheet', href: '/orders', icon: ClipboardList, staffVisible: false },
   { name: 'Queue', href: '/packaging', icon: Workflow, staffVisible: true },
   { name: 'Messages', href: '/notes', icon: MessageSquare, staffVisible: true },
@@ -45,7 +49,7 @@ const ALL_NAV = [
   { name: 'Users & Roles', href: '/users', icon: Users, staffVisible: false },
 ];
 
-export function Sidebar({ collapsed, onToggle }: { collapsed: boolean; onToggle: () => void }) {
+export function Sidebar({ collapsed, onToggle, onNavigate }: { collapsed: boolean; onToggle: () => void; onNavigate?: () => void }) {
   const pathname = usePathname();
   const users = useOrderStore((s) => s.users);
   const currentUserId = useOrderStore((s) => s.currentUserId);
@@ -99,6 +103,7 @@ export function Sidebar({ collapsed, onToggle }: { collapsed: boolean; onToggle:
             <Link
               key={item.name}
               href={item.href}
+              onClick={onNavigate}
               className={cn(
                 'flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-colors',
                 isActive

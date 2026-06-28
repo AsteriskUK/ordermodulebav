@@ -2,7 +2,7 @@
 
 import { useState, useMemo } from 'react';
 import { useOrderStore } from '@/lib/store';
-import { ORDER_STATUS_CONFIG, OrderStatus } from '@/lib/types';
+import { ORDER_STATUS_CONFIG, OrderStatus, Department, DEPARTMENT_CONFIG } from '@/lib/types';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -115,12 +115,25 @@ export function Reports() {
     const filtered = returns.filter((r) => inRange(r.returnedAt));
     const byReason: Record<string, number> = {};
     const byUser: Record<string, { name: string; count: number; refunded: number }> = {};
+    const byResponsibleDept: Record<string, number> = {};
+    const byResponsibleUser: Record<string, { name: string; count: number; refunded: number }> = {};
     for (const r of filtered) {
       byReason[r.reason] = (byReason[r.reason] || 0) + 1;
       const uid = r.processedByUserId || 'unknown';
       if (!byUser[uid]) byUser[uid] = { name: r.processedByUserName || 'Unknown', count: 0, refunded: 0 };
       byUser[uid].count += 1;
       if (r.status === 'refunded') byUser[uid].refunded += r.refundAmount || 0;
+
+      if (r.responsibleDepartment) {
+        const deptLabel = r.responsibleDepartment;
+        byResponsibleDept[deptLabel] = (byResponsibleDept[deptLabel] || 0) + 1;
+      }
+      const respUid = r.responsibleUserId || 'unknown';
+      if (respUid !== 'unknown') {
+        if (!byResponsibleUser[respUid]) byResponsibleUser[respUid] = { name: r.responsibleUserName || 'Unknown', count: 0, refunded: 0 };
+        byResponsibleUser[respUid].count += 1;
+        if (r.status === 'refunded') byResponsibleUser[respUid].refunded += r.refundAmount || 0;
+      }
     }
     return {
       total: filtered.length,
@@ -128,6 +141,8 @@ export function Reports() {
       totalRefunded: filtered.filter((r) => r.status === 'refunded').reduce((s, r) => s + (r.refundAmount || 0), 0),
       byReason: Object.entries(byReason).sort(([, a], [, b]) => b - a),
       byUser: Object.values(byUser).sort((a, b) => b.count - a.count),
+      byResponsibleDept: Object.entries(byResponsibleDept).sort(([, a], [, b]) => b - a),
+      byResponsibleUser: Object.values(byResponsibleUser).sort((a, b) => b.count - a.count),
     };
   }, [returns, inRange]);
 
@@ -417,6 +432,46 @@ export function Reports() {
                     ))}
                     {returnData.byUser.length === 0 && (
                       <TableRow><TableCell colSpan={3} className="text-center text-slate-400 text-xs py-4">No data</TableCell></TableRow>
+                    )}
+                  </TableBody>
+                </Table>
+              </CardContent>
+            </Card>
+          </div>
+          <div className="grid md:grid-cols-2 gap-4">
+            <Card>
+              <CardHeader><CardTitle className="text-sm">Returns by Responsible Department</CardTitle></CardHeader>
+              <CardContent>
+                <div className="space-y-2">
+                  {returnData.byResponsibleDept.map(([dept, count]) => (
+                    <div key={dept} className="flex justify-between items-center text-xs p-2 bg-slate-50 rounded">
+                      <span>{DEPARTMENT_CONFIG[dept as Department]?.label || dept}</span>
+                      <Badge variant="outline">{count}</Badge>
+                    </div>
+                  ))}
+                  {returnData.byResponsibleDept.length === 0 && <p className="text-xs text-slate-400 text-center py-4">No responsible department assigned</p>}
+                </div>
+              </CardContent>
+            </Card>
+            <Card>
+              <CardHeader><CardTitle className="text-sm">Returns by Responsible User</CardTitle></CardHeader>
+              <CardContent>
+                <Table>
+                  <TableHeader><TableRow>
+                    <TableHead className="text-xs">User</TableHead>
+                    <TableHead className="text-xs">Returns</TableHead>
+                    <TableHead className="text-xs">Refunded</TableHead>
+                  </TableRow></TableHeader>
+                  <TableBody>
+                    {returnData.byResponsibleUser.map((u) => (
+                      <TableRow key={u.name}>
+                        <TableCell className="text-xs">{u.name}</TableCell>
+                        <TableCell className="text-xs">{u.count}</TableCell>
+                        <TableCell className="text-xs">{formatCurrency(u.refunded)}</TableCell>
+                      </TableRow>
+                    ))}
+                    {returnData.byResponsibleUser.length === 0 && (
+                      <TableRow><TableCell colSpan={3} className="text-center text-slate-400 text-xs py-4">No responsible user assigned</TableCell></TableRow>
                     )}
                   </TableBody>
                 </Table>

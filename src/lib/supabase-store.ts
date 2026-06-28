@@ -450,6 +450,7 @@ export async function syncReturn(ret: ReturnRecord): Promise<void> {
       replacement_order_id: ret.replacementOrderId,
       return_tracking_number: ret.returnTrackingNumber,
       received_notes: ret.receivedNotes,
+      image_urls: ret.imageUrls,
     }).filter(([, v]) => v !== undefined)
   );
 
@@ -468,6 +469,9 @@ export async function syncReturn(ret: ReturnRecord): Promise<void> {
       processed_by_user_name: ret.processedByUserName,
       refund_amount: ret.refundAmount,
       metadata,
+      responsible_department: ret.responsibleDepartment,
+      responsible_user_id: ret.responsibleUserId,
+      responsible_user_name: ret.responsibleUserName,
     });
 
   if (error) {
@@ -506,6 +510,10 @@ export async function fetchReturns(): Promise<ReturnRecord[]> {
     replacementOrderId: r.metadata?.replacement_order_id,
     returnTrackingNumber: r.metadata?.return_tracking_number,
     receivedNotes: r.metadata?.received_notes,
+    imageUrls: r.metadata?.image_urls,
+    responsibleDepartment: r.responsible_department,
+    responsibleUserId: r.responsible_user_id,
+    responsibleUserName: r.responsible_user_name,
   })) || [];
 }
 

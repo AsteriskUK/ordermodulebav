@@ -2,7 +2,9 @@
 
 import { useState, useMemo } from 'react';
 import { useOrderStore } from '@/lib/store';
-import { ReturnRecord, ReplacementItem } from '@/lib/types';
+import { ReturnRecord, ReplacementItem, Department, DEPARTMENT_CONFIG } from '@/lib/types';
+import { ImageUpload } from '@/components/image-upload';
+import { RETURN_IMAGE_BUCKET, REPLACEMENT_IMAGE_BUCKET } from '@/lib/image-upload';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -16,7 +18,7 @@ import {
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter,
 } from '@/components/ui/dialog';
-import { PackageOpen, Plus, Search, CheckCircle, XCircle, Truck, Replace } from 'lucide-react';
+import { PackageOpen, Plus, Search, CheckCircle, Truck, Replace, Pencil } from 'lucide-react';
 import { toast } from 'sonner';
 
 const RETURN_REASONS = [
@@ -61,6 +63,7 @@ export function ReturnsManager() {
 
   const [search, setSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState<string>('all');
+  const [tab, setTab] = useState<'open' | 'closed'>('open');
   const [showForm, setShowForm] = useState(false);
 
   // Replacement dialog
@@ -68,13 +71,39 @@ export function ReturnsManager() {
   const [replacementItemTitle, setReplacementItemTitle] = useState('');
   const [replacementQty, setReplacementQty] = useState('1');
   const [replacementNotes, setReplacementNotes] = useState('');
+  const [replacementImageUrls, setReplacementImageUrls] = useState<string[]>([]);
+
+  // Receive dialog
+  const [receiveReturn, setReceiveReturn] = useState<ReturnRecord | null>(null);
+  const [receiveNotes, setReceiveNotes] = useState('');
+
+  // Refund confirm dialog
+  const [refundReturn, setRefundReturn] = useState<ReturnRecord | null>(null);
+  const [refundAmountConfirm, setRefundAmountConfirm] = useState('');
+
+  // Edit dialog
+  const [editReturn, setEditReturn] = useState<ReturnRecord | null>(null);
+  const [editReason, setEditReason] = useState('');
+  const [editNotes, setEditNotes] = useState('');
+  const [editRefundAmount, setEditRefundAmount] = useState('');
+  const [editResponsibleDepartment, setEditResponsibleDepartment] = useState<Department | ''>('');
+  const [editResponsibleUserId, setEditResponsibleUserId] = useState('');
+  const [editReturnTrackingNumber, setEditReturnTrackingNumber] = useState('');
+  const [editReceivedNotes, setEditReceivedNotes] = useState('');
+  const [editStatus, setEditStatus] = useState<ReturnRecord['status']>('pending');
+  const [editImageUrls, setEditImageUrls] = useState<string[]>([]);
 
   // New return form
+  const [newReturnId, setNewReturnId] = useState('');
   const [orderSearch, setOrderSearch] = useState('');
   const [selectedOrderId, setSelectedOrderId] = useState('');
   const [reason, setReason] = useState(RETURN_REASONS[0]);
   const [notes, setNotes] = useState('');
   const [refundAmount, setRefundAmount] = useState('');
+  const [responsibleDepartment, setResponsibleDepartment] = useState<Department | ''>('');
+  const [responsibleUserId, setResponsibleUserId] = useState('');
+  const [returnTrackingNumber, setReturnTrackingNumber] = useState('');
+  const [returnImageUrls, setReturnImageUrls] = useState<string[]>([]);
 
   const orderSuggestions = useMemo(() => {
     if (!orderSearch.trim()) return [];
@@ -89,8 +118,12 @@ export function ReturnsManager() {
       .slice(0, 6);
   }, [orders, orderSearch]);
 
+  const openStatuses: ReturnRecord['status'][] = ['pending', 'received'];
+  const closedStatuses: ReturnRecord['status'][] = ['refunded', 'rejected', 'replacement'];
+
   const filteredReturns = useMemo(() => {
     let r = [...returns].sort((a, b) => b.returnedAt.localeCompare(a.returnedAt));
+    r = r.filter((x) => (tab === 'open' ? openStatuses : closedStatuses).includes(x.status));
     if (statusFilter !== 'all') r = r.filter((x) => x.status === statusFilter);
     if (search.trim()) {
       const q = search.toLowerCase();
@@ -101,11 +134,13 @@ export function ReturnsManager() {
           x.buyerUsername.toLowerCase().includes(q) ||
           x.itemTitle.toLowerCase().includes(q) ||
           x.reason.toLowerCase().includes(q) ||
-          (x.processedByUserName || '').toLowerCase().includes(q)
+          (x.processedByUserName || '').toLowerCase().includes(q) ||
+          (x.responsibleUserName || '').toLowerCase().includes(q) ||
+          (x.responsibleDepartment || '').toLowerCase().includes(q)
       );
     }
     return r;
-  }, [returns, statusFilter, search]);
+  }, [returns, statusFilter, search, tab]);
 
   const selectedOrder = orders.find((o) => o.id === selectedOrderId);
 
@@ -114,7 +149,7 @@ export function ReturnsManager() {
     const order = orders.find((o) => o.id === selectedOrderId);
     if (!order) return;
     const ret: ReturnRecord = {
-      id: genId(),
+      id: newReturnId || genId(),
       orderId: selectedOrderId,
       salesRecordNumber: order.salesRecordNumber,
       orderNumber: order.orderNumber,
@@ -123,10 +158,15 @@ export function ReturnsManager() {
       reason,
       notes,
       returnedAt: new Date().toISOString(),
-      processedByUserId: currentUser?.id,
-      processedByUserName: currentUser?.name,
+      createdByUserId: currentUser?.id,
+      createdByUserName: currentUser?.name,
       refundAmount: refundAmount ? parseFloat(refundAmount) : undefined,
+      returnTrackingNumber: returnTrackingNumber.trim() || undefined,
+      responsibleDepartment: responsibleDepartment || undefined,
+      responsibleUserId: responsibleUserId || undefined,
+      responsibleUserName: responsibleUserId ? users.find((u) => u.id === responsibleUserId)?.name : undefined,
       status: 'pending',
+      imageUrls: returnImageUrls.length > 0 ? returnImageUrls : undefined,
     };
     addReturn(ret);
     toast.success(`Return logged for order #${order.salesRecordNumber}`);
@@ -136,6 +176,10 @@ export function ReturnsManager() {
     setNotes('');
     setRefundAmount('');
     setReason(RETURN_REASONS[0]);
+    setResponsibleDepartment('');
+    setResponsibleUserId('');
+    setReturnTrackingNumber('');
+    setReturnImageUrls([]);
   };
 
   const handleCreateReplacement = () => {
@@ -145,7 +189,12 @@ export function ReturnsManager() {
     const qty = parseInt(replacementQty, 10);
     if (isNaN(qty) || qty < 1) { toast.error('Enter a valid quantity'); return; }
 
-    const item: ReplacementItem = { itemTitle: title, quantity: qty, notes: replacementNotes.trim() || undefined };
+    const item: ReplacementItem = {
+      itemTitle: title,
+      quantity: qty,
+      notes: replacementNotes.trim() || undefined,
+      imageUrls: replacementImageUrls.length > 0 ? replacementImageUrls : undefined,
+    };
     addReplacementItem(replaceReturn.id, item);
     processReturn(replaceReturn.id, 'replacement', currentUser?.id || '', currentUser?.name || '');
     const newOrder = createReplacementOrder(replaceReturn.id);
@@ -155,6 +204,7 @@ export function ReturnsManager() {
     setReplacementItemTitle('');
     setReplacementQty('1');
     setReplacementNotes('');
+    setReplacementImageUrls([]);
   };
 
   const totalRefunded = returns
@@ -168,19 +218,19 @@ export function ReturnsManager() {
           <h2 className="text-2xl font-bold text-slate-900">Returns &amp; Refunds</h2>
           <p className="text-slate-500 text-sm mt-1">Track and process customer returns</p>
         </div>
-        <Button size="sm" onClick={() => setShowForm((v) => !v)}>
+        <Button size="sm" onClick={() => { setNewReturnId(genId()); setShowForm((v) => !v); }}>
           <Plus className="h-3 w-3 mr-1" />
           Log Return
         </Button>
       </div>
 
       {/* Summary */}
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-        {(['pending', 'received', 'refunded', 'rejected'] as ReturnRecord['status'][]).map((s) => {
+      <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
+        {(['pending', 'received', 'refunded', 'rejected', 'replacement'] as ReturnRecord['status'][]).map((s) => {
           const cfg = STATUS_CONFIG[s];
           const count = returns.filter((r) => r.status === s).length;
           return (
-            <Card key={s} className="cursor-pointer" onClick={() => setStatusFilter(s)}>
+            <Card key={s} className="cursor-pointer" onClick={() => { setStatusFilter(s); setTab(openStatuses.includes(s) ? 'open' : 'closed'); }}>
               <CardContent className="pt-5 pb-4">
                 <div className={`text-2xl font-bold`}>{count}</div>
                 <Badge variant="outline" className={`text-xs mt-1 ${cfg.color}`}>{cfg.label}</Badge>
@@ -188,6 +238,26 @@ export function ReturnsManager() {
             </Card>
           );
         })}
+      </div>
+
+      {/* Open / Closed tabs */}
+      <div className="flex items-center gap-1 bg-slate-100 rounded-lg p-1 w-fit">
+        <button
+          onClick={() => setTab('open')}
+          className={`px-4 py-1.5 rounded-md text-sm font-medium transition-colors ${
+            tab === 'open' ? 'bg-white shadow text-slate-900' : 'text-slate-500 hover:text-slate-700'
+          }`}
+        >
+          Open ({returns.filter((r) => openStatuses.includes(r.status)).length})
+        </button>
+        <button
+          onClick={() => setTab('closed')}
+          className={`px-4 py-1.5 rounded-md text-sm font-medium transition-colors ${
+            tab === 'closed' ? 'bg-white shadow text-slate-900' : 'text-slate-500 hover:text-slate-700'
+          }`}
+        >
+          Closed ({returns.filter((r) => closedStatuses.includes(r.status)).length})
+        </button>
       </div>
 
       {/* New return form */}
@@ -256,6 +326,48 @@ export function ReturnsManager() {
                 className="h-8 text-sm"
               />
             </div>
+            <div className="flex flex-wrap gap-3">
+              <div>
+                <label className="text-xs text-slate-500 block mb-1">Return tracking #</label>
+                <Input
+                  value={returnTrackingNumber}
+                  onChange={(e) => setReturnTrackingNumber(e.target.value)}
+                  placeholder="e.g. 1234567890"
+                  className="h-8 text-sm w-40 font-mono"
+                />
+              </div>
+              <div>
+                <label className="text-xs text-slate-500 block mb-1">Responsible department</label>
+                <Select value={responsibleDepartment} onValueChange={(v) => v && setResponsibleDepartment(v as Department)}>
+                  <SelectTrigger className="h-8 text-sm w-40"><SelectValue placeholder="Select dept" /></SelectTrigger>
+                  <SelectContent>
+                    {Object.entries(DEPARTMENT_CONFIG).map(([k, v]) => (
+                      <SelectItem key={k} value={k}>{v.label}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+              <div>
+                <label className="text-xs text-slate-500 block mb-1">Responsible user</label>
+                <Select value={responsibleUserId} onValueChange={(v) => v && setResponsibleUserId(v)}>
+                  <SelectTrigger className="h-8 text-sm w-40"><SelectValue placeholder="Select user" /></SelectTrigger>
+                  <SelectContent>
+                    {users.filter((u) => !responsibleDepartment || u.departments?.includes(responsibleDepartment) || u.department === responsibleDepartment).map((u) => (
+                      <SelectItem key={u.id} value={u.id}>{u.name}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+            </div>
+            <div>
+              <label className="text-xs text-slate-500 block mb-1">Images</label>
+              <ImageUpload
+                bucket={RETURN_IMAGE_BUCKET}
+                recordId={newReturnId || genId()}
+                images={returnImageUrls}
+                onChange={setReturnImageUrls}
+              />
+            </div>
             <div className="flex gap-2">
               <Button size="sm" onClick={handleSubmit}>Log Return</Button>
               <Button size="sm" variant="outline" onClick={() => setShowForm(false)}>Cancel</Button>
@@ -300,8 +412,10 @@ export function ReturnsManager() {
                   <TableHead className="text-xs">eBay User</TableHead>
                   <TableHead className="text-xs">Item</TableHead>
                   <TableHead className="text-xs">Reason</TableHead>
+                  <TableHead className="text-xs">Return Tracking</TableHead>
                   <TableHead className="text-xs">Refund</TableHead>
-                  <TableHead className="text-xs">Processed By</TableHead>
+                  <TableHead className="text-xs">Responsible</TableHead>
+                  <TableHead className="text-xs">Images</TableHead>
                   <TableHead className="text-xs">Status</TableHead>
                   <TableHead className="text-xs">Actions</TableHead>
                 </TableRow>
@@ -317,39 +431,92 @@ export function ReturnsManager() {
                     <TableCell className="text-xs text-slate-600">{ret.buyerUsername || '—'}</TableCell>
                     <TableCell className="text-xs max-w-[160px] truncate">{ret.itemTitle}</TableCell>
                     <TableCell className="text-xs">{ret.reason}</TableCell>
+                    <TableCell className="text-xs font-mono">{ret.returnTrackingNumber || '—'}</TableCell>
                     <TableCell className="text-xs font-medium">
                       {ret.refundAmount ? `£${ret.refundAmount.toFixed(2)}` : '—'}
                     </TableCell>
-                    <TableCell className="text-xs">{ret.processedByUserName || '—'}</TableCell>
+                    <TableCell className="text-xs">
+                      {ret.responsibleDepartment ? (
+                        <div className="flex flex-col gap-0.5">
+                          <Badge variant="outline" className={`text-xs w-fit ${DEPARTMENT_CONFIG[ret.responsibleDepartment]?.color || 'bg-slate-100 text-slate-600'}`}>
+                            {DEPARTMENT_CONFIG[ret.responsibleDepartment]?.label || ret.responsibleDepartment}
+                          </Badge>
+                          {ret.responsibleUserName && (
+                            <span className="text-xs text-slate-500">{ret.responsibleUserName}</span>
+                          )}
+                        </div>
+                      ) : (
+                        '—'
+                      )}
+                    </TableCell>
+                    <TableCell>
+                      {ret.imageUrls && ret.imageUrls.length > 0 ? (
+                        <div className="flex -space-x-1.5">
+                          {ret.imageUrls.slice(0, 3).map((url, idx) => (
+                            <img
+                              key={idx}
+                              src={url}
+                              alt=""
+                              className="h-7 w-7 rounded-full border border-white object-cover bg-slate-100"
+                            />
+                          ))}
+                          {ret.imageUrls.length > 3 && (
+                            <span className="h-7 w-7 rounded-full border border-white bg-slate-200 text-[10px] flex items-center justify-center text-slate-600">
+                              +{ret.imageUrls.length - 3}
+                            </span>
+                          )}
+                        </div>
+                      ) : '—'}
+                    </TableCell>
                     <TableCell>
                       <Badge variant="outline" className={`text-xs ${STATUS_CONFIG[ret.status].color}`}>
                         {STATUS_CONFIG[ret.status].label}
                       </Badge>
                     </TableCell>
                     <TableCell>
-                      <div className="flex gap-1">
+                      <div className="flex gap-1 flex-wrap">
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          className="h-6 text-xs px-2 text-slate-600 border-slate-300"
+                          onClick={() => {
+                            setEditReturn(ret);
+                            setEditReason(ret.reason);
+                            setEditNotes(ret.notes);
+                            setEditRefundAmount(ret.refundAmount?.toFixed(2) ?? '');
+                            setEditResponsibleDepartment(ret.responsibleDepartment || '');
+                            setEditResponsibleUserId(ret.responsibleUserId || '');
+                            setEditReturnTrackingNumber(ret.returnTrackingNumber || '');
+                            setEditReceivedNotes(ret.receivedNotes || '');
+                            setEditStatus(ret.status);
+                            setEditImageUrls(ret.imageUrls || []);
+                          }}
+                        >
+                          <Pencil className="h-3 w-3 mr-1" />Edit
+                        </Button>
                         {ret.status === 'pending' && (
                           <Button size="sm" variant="outline" className="h-6 text-xs px-2"
-                            onClick={() => { updateReturn(ret.id, { status: 'received' }); toast.success('Marked as received'); }}>
+                            onClick={() => { setReceiveReturn(ret); setReceiveNotes(ret.receivedNotes || ''); }}>
                             <Truck className="h-3 w-3 mr-1" />Received
                           </Button>
                         )}
                         {(ret.status === 'pending' || ret.status === 'received') && (
                           <Button size="sm" variant="outline" className="h-6 text-xs px-2 text-purple-700 border-purple-300"
-                            onClick={() => { setReplaceReturn(ret); setReplacementItemTitle(ret.itemTitle); }}>
+                            onClick={() => {
+                              const orig = orders.find(o => o.id === ret.orderId);
+                              setReplaceReturn(ret);
+                              setReplacementItemTitle(orig?.itemTitle || ret.itemTitle);
+                            }}>
                             <Replace className="h-3 w-3 mr-1" />Replace
                           </Button>
                         )}
                         {(ret.status === 'pending' || ret.status === 'received') && (
                           <Button size="sm" variant="outline" className="h-6 text-xs px-2 text-green-700 border-green-300"
-                            onClick={() => { updateReturn(ret.id, { status: 'refunded' }); toast.success('Return refunded'); }}>
+                            onClick={() => {
+                              setRefundReturn(ret);
+                              setRefundAmountConfirm(ret.refundAmount?.toFixed(2) ?? '');
+                            }}>
                             <CheckCircle className="h-3 w-3 mr-1" />Refund
-                          </Button>
-                        )}
-                        {ret.status !== 'rejected' && ret.status !== 'refunded' && ret.status !== 'replacement' && (
-                          <Button size="sm" variant="outline" className="h-6 text-xs px-2 text-red-600 border-red-200"
-                            onClick={() => { updateReturn(ret.id, { status: 'rejected' }); toast.error('Return rejected'); }}>
-                            <XCircle className="h-3 w-3 mr-1" />Reject
                           </Button>
                         )}
                       </div>
@@ -363,48 +530,292 @@ export function ReturnsManager() {
       </Card>
 
       {/* Replacement dialog */}
-      <Dialog open={!!replaceReturn} onOpenChange={(open) => { if (!open) setReplaceReturn(null); }}>
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>Create Replacement</DialogTitle>
-          </DialogHeader>
-          <div className="space-y-3 py-2">
-            <p className="text-sm text-slate-500">
-              Return #{replaceReturn?.salesRecordNumber} — {replaceReturn?.itemTitle}
-            </p>
-            <div>
-              <label className="text-xs text-slate-500 block mb-1">Replacement item title</label>
-              <Input
-                value={replacementItemTitle}
-                onChange={(e) => setReplacementItemTitle(e.target.value)}
-                placeholder="Item to send as replacement"
-              />
+      {replaceReturn && (() => {
+        const origOrder = orders.find(o => o.id === replaceReturn.orderId);
+        return (
+          <Dialog open onOpenChange={(open) => { if (!open) setReplaceReturn(null); }}>
+            <DialogContent className="sm:max-w-lg">
+              <DialogHeader>
+                <DialogTitle>Create Replacement — #{replaceReturn.salesRecordNumber}</DialogTitle>
+              </DialogHeader>
+              <div className="space-y-3 py-2">
+                {/* Original order details */}
+                {origOrder && (
+                  <div className="bg-slate-50 border border-slate-200 rounded-lg p-3 text-xs space-y-1">
+                    <p className="font-semibold text-slate-700">Original Order</p>
+                    <p className="font-medium">{origOrder.itemTitle}</p>
+                    {origOrder.variation && (
+                      <p className="text-amber-700 font-medium">Variation: {origOrder.variation}</p>
+                    )}
+                    <p className="text-slate-500">{origOrder.postToName} · {origOrder.postToPostcode}</p>
+                    <p className="text-slate-500">SKU: {origOrder.customLabel || '—'} · Qty: {origOrder.quantity}</p>
+                    <p className="text-slate-500">Paid: £{origOrder.totalPrice.toFixed(2)} · Carrier: {origOrder.deliveryCarrier || '—'}</p>
+                  </div>
+                )}
+                <div>
+                  <label className="text-xs text-slate-500 block mb-1">Replacement item title</label>
+                  <Input
+                    value={replacementItemTitle}
+                    onChange={(e) => setReplacementItemTitle(e.target.value)}
+                    placeholder="Item to send as replacement"
+                  />
+                </div>
+                <div className="flex gap-3">
+                  <div>
+                    <label className="text-xs text-slate-500 block mb-1">Quantity</label>
+                    <Input
+                      type="number"
+                      min={1}
+                      value={replacementQty}
+                      onChange={(e) => setReplacementQty(e.target.value)}
+                      className="w-24"
+                    />
+                  </div>
+                </div>
+                <div>
+                  <label className="text-xs text-slate-500 block mb-1">Notes</label>
+                  <Input
+                    value={replacementNotes}
+                    onChange={(e) => setReplacementNotes(e.target.value)}
+                    placeholder="Optional notes..."
+                  />
+                </div>
+                <div>
+                  <label className="text-xs text-slate-500 block mb-1">Replacement Images</label>
+                  <ImageUpload
+                    bucket={REPLACEMENT_IMAGE_BUCKET}
+                    recordId={replaceReturn.id}
+                    images={replacementImageUrls}
+                    onChange={setReplacementImageUrls}
+                  />
+                </div>
+              </div>
+              <DialogFooter>
+                <Button variant="outline" onClick={() => setReplaceReturn(null)}>Cancel</Button>
+                <Button onClick={handleCreateReplacement}>Create Replacement Order</Button>
+              </DialogFooter>
+            </DialogContent>
+          </Dialog>
+        );
+      })()}
+
+      {/* Receive dialog — with comments */}
+      {receiveReturn && (
+        <Dialog open onOpenChange={(open) => { if (!open) setReceiveReturn(null); }}>
+          <DialogContent className="sm:max-w-sm">
+            <DialogHeader>
+              <DialogTitle>Mark as Received — #{receiveReturn.salesRecordNumber}</DialogTitle>
+            </DialogHeader>
+            <div className="space-y-3 py-2">
+              <div className="bg-slate-50 border border-slate-200 rounded-lg p-3 text-xs">
+                <p className="font-medium">{receiveReturn.itemTitle}</p>
+                <p className="text-slate-500 mt-0.5">Reason: {receiveReturn.reason}</p>
+              </div>
+              <div>
+                <label className="text-xs text-slate-500 block mb-1">Receipt comments (condition, notes…)</label>
+                <textarea
+                  value={receiveNotes}
+                  onChange={(e) => setReceiveNotes(e.target.value)}
+                  placeholder="e.g. Item received, box damaged but unit OK"
+                  rows={3}
+                  className="w-full text-sm border border-slate-200 rounded-md px-3 py-2 focus:outline-none focus:ring-2 focus:ring-slate-400 resize-none"
+                />
+              </div>
             </div>
-            <div>
-              <label className="text-xs text-slate-500 block mb-1">Quantity</label>
-              <Input
-                type="number"
-                min={1}
-                value={replacementQty}
-                onChange={(e) => setReplacementQty(e.target.value)}
-                className="w-32"
-              />
+            <DialogFooter>
+              <Button variant="outline" onClick={() => setReceiveReturn(null)}>Cancel</Button>
+              <Button onClick={() => {
+                updateReturn(receiveReturn.id, { status: 'received', receivedNotes: receiveNotes.trim() || undefined });
+                toast.success('Return marked as received');
+                setReceiveReturn(null);
+              }}>
+                Confirm Received
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+      )}
+
+      {/* Refund confirm dialog — shows refund amount */}
+      {refundReturn && (
+        <Dialog open onOpenChange={(open) => { if (!open) setRefundReturn(null); }}>
+          <DialogContent className="sm:max-w-sm">
+            <DialogHeader>
+              <DialogTitle>Confirm Refund — #{refundReturn.salesRecordNumber}</DialogTitle>
+            </DialogHeader>
+            <div className="space-y-3 py-2">
+              <div className="bg-slate-50 border border-slate-200 rounded-lg p-3 text-xs">
+                <p className="font-medium">{refundReturn.itemTitle}</p>
+                <p className="text-slate-500 mt-0.5">Buyer: {refundReturn.buyerUsername}</p>
+              </div>
+              <div>
+                <label className="text-xs text-slate-500 block mb-1">Refund amount (£)</label>
+                <Input
+                  type="number"
+                  step="0.01"
+                  value={refundAmountConfirm}
+                  onChange={(e) => setRefundAmountConfirm(e.target.value)}
+                  placeholder="0.00"
+                  className="font-mono w-36"
+                />
+                {refundReturn.refundAmount && (
+                  <p className="text-xs text-slate-400 mt-1">Originally logged: £{refundReturn.refundAmount.toFixed(2)}</p>
+                )}
+              </div>
+              {refundAmountConfirm && (
+                <p className="text-sm font-semibold text-green-700">
+                  Issuing refund of £{parseFloat(refundAmountConfirm || '0').toFixed(2)}
+                </p>
+              )}
             </div>
-            <div>
-              <label className="text-xs text-slate-500 block mb-1">Notes</label>
-              <Input
-                value={replacementNotes}
-                onChange={(e) => setReplacementNotes(e.target.value)}
-                placeholder="Optional notes..."
-              />
+            <DialogFooter>
+              <Button variant="outline" onClick={() => setRefundReturn(null)}>Cancel</Button>
+              <Button className="bg-green-600 hover:bg-green-700" onClick={() => {
+                const amount = parseFloat(refundAmountConfirm);
+                updateReturn(refundReturn.id, {
+                  status: 'refunded',
+                  refundAmount: isNaN(amount) ? refundReturn.refundAmount : amount,
+                  processedByUserId: currentUser?.id,
+                  processedByUserName: currentUser?.name,
+                });
+                processReturn(refundReturn.id, 'refund', currentUser?.id || '', currentUser?.name || '');
+                toast.success(`Refund of £${(isNaN(amount) ? refundReturn.refundAmount ?? 0 : amount).toFixed(2)} issued`);
+                setRefundReturn(null);
+              }}>
+                Issue Refund
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+      )}
+
+      {/* Edit return dialog — editable in any status */}
+      {editReturn && (
+        <Dialog open onOpenChange={(open) => { if (!open) setEditReturn(null); }}>
+          <DialogContent className="sm:max-w-md">
+            <DialogHeader>
+              <DialogTitle>Edit Return — #{editReturn.salesRecordNumber}</DialogTitle>
+            </DialogHeader>
+            <div className="space-y-3 py-2">
+              <div className="bg-slate-50 border border-slate-200 rounded-lg p-3 text-xs">
+                <p className="font-medium">{editReturn.itemTitle}</p>
+                <p className="text-slate-500 mt-0.5">Buyer: {editReturn.buyerUsername}</p>
+              </div>
+              <div>
+                <label className="text-xs text-slate-500 block mb-1">Status</label>
+                <Select value={editStatus} onValueChange={(v) => v && setEditStatus(v as ReturnRecord['status'])}>
+                  <SelectTrigger className="h-8 text-sm"><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    {Object.entries(STATUS_CONFIG).map(([k, v]) => (
+                      <SelectItem key={k} value={k}>{v.label}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+              <div>
+                <label className="text-xs text-slate-500 block mb-1">Reason</label>
+                <Select value={editReason} onValueChange={(v) => v && setEditReason(v)}>
+                  <SelectTrigger className="h-8 text-sm"><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    {RETURN_REASONS.map((r) => <SelectItem key={r} value={r}>{r}</SelectItem>)}
+                  </SelectContent>
+                </Select>
+              </div>
+              <div>
+                <label className="text-xs text-slate-500 block mb-1">Notes</label>
+                <Input value={editNotes} onChange={(e) => setEditNotes(e.target.value)} placeholder="Notes" className="h-8 text-sm" />
+              </div>
+              <div>
+                <label className="text-xs text-slate-500 block mb-1">Refund amount (£)</label>
+                <Input
+                  type="number" step="0.01"
+                  value={editRefundAmount}
+                  onChange={(e) => setEditRefundAmount(e.target.value)}
+                  placeholder="0.00"
+                  className="h-8 text-sm w-32 font-mono"
+                />
+              </div>
+              <div>
+                <label className="text-xs text-slate-500 block mb-1">Return tracking #</label>
+                <Input
+                  value={editReturnTrackingNumber}
+                  onChange={(e) => setEditReturnTrackingNumber(e.target.value)}
+                  placeholder="e.g. 1234567890"
+                  className="h-8 text-sm w-40 font-mono"
+                />
+              </div>
+              <div>
+                <label className="text-xs text-slate-500 block mb-1">Receipt comments</label>
+                <textarea
+                  value={editReceivedNotes}
+                  onChange={(e) => setEditReceivedNotes(e.target.value)}
+                  placeholder="Condition / received notes"
+                  rows={2}
+                  className="w-full text-sm border border-slate-200 rounded-md px-3 py-2 focus:outline-none focus:ring-2 focus:ring-slate-400 resize-none"
+                />
+              </div>
+              <div>
+                <label className="text-xs text-slate-500 block mb-1">Images</label>
+                <ImageUpload
+                  bucket={RETURN_IMAGE_BUCKET}
+                  recordId={editReturn.id}
+                  images={editImageUrls}
+                  onChange={setEditImageUrls}
+                />
+              </div>
+              <div className="flex flex-wrap gap-3">
+                <div>
+                  <label className="text-xs text-slate-500 block mb-1">Responsible department</label>
+                  <Select value={editResponsibleDepartment} onValueChange={(v) => v && setEditResponsibleDepartment(v as Department)}>
+                    <SelectTrigger className="h-8 text-sm w-40"><SelectValue placeholder="Select dept" /></SelectTrigger>
+                    <SelectContent>
+                      {Object.entries(DEPARTMENT_CONFIG).map(([k, v]) => (
+                        <SelectItem key={k} value={k}>{v.label}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div>
+                  <label className="text-xs text-slate-500 block mb-1">Responsible user</label>
+                  <Select value={editResponsibleUserId} onValueChange={(v) => v && setEditResponsibleUserId(v)}>
+                    <SelectTrigger className="h-8 text-sm w-40"><SelectValue placeholder="Select user" /></SelectTrigger>
+                    <SelectContent>
+                      {users.filter((u) => !editResponsibleDepartment || u.departments?.includes(editResponsibleDepartment) || u.department === editResponsibleDepartment).map((u) => (
+                        <SelectItem key={u.id} value={u.id}>{u.name}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+              </div>
             </div>
-          </div>
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setReplaceReturn(null)}>Cancel</Button>
-            <Button onClick={handleCreateReplacement}>Create Replacement Order</Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+            <DialogFooter>
+              <Button variant="outline" onClick={() => setEditReturn(null)}>Cancel</Button>
+              <Button onClick={() => {
+                const refundAmount = editRefundAmount ? parseFloat(editRefundAmount) : undefined;
+                updateReturn(editReturn.id, {
+                  status: editStatus,
+                  reason: editReason,
+                  notes: editNotes,
+                  refundAmount: refundAmount ? refundAmount : undefined,
+                  returnTrackingNumber: editReturnTrackingNumber.trim() || undefined,
+                  receivedNotes: editReceivedNotes.trim() || undefined,
+                  responsibleDepartment: editResponsibleDepartment || undefined,
+                  responsibleUserId: editResponsibleUserId || undefined,
+                  responsibleUserName: editResponsibleUserId ? users.find((u) => u.id === editResponsibleUserId)?.name : undefined,
+                  imageUrls: editImageUrls.length > 0 ? editImageUrls : undefined,
+                });
+                if (editStatus === 'refunded' || editStatus === 'replacement') {
+                  processReturn(editReturn.id, editStatus === 'refunded' ? 'refund' : 'replacement', currentUser?.id || '', currentUser?.name || '');
+                }
+                toast.success('Return updated');
+                setEditReturn(null);
+              }}>
+                Save Changes
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+      )}
     </div>
   );
 }

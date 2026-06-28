@@ -3,6 +3,7 @@
 import { useMemo, useState } from 'react';
 import { useOrderStore } from '@/lib/store';
 import { ORDER_STATUS_CONFIG, PACKAGING_STAGES, Order, OrderStatus, PackagingStage, DEPARTMENT_CONFIG, Department } from '@/lib/types';
+import { getOrderRowClass } from '@/lib/order-utils';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -35,10 +36,14 @@ import {
   Truck,
   Globe,
   MessageSquare,
+  Printer,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { DeliveryBadge } from './delivery-badge';
 import { OrderDetailDialog } from './order-detail-dialog';
+import { LabelPrintDialog } from './label-print-dialog';
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
+import { Input } from '@/components/ui/input';
 
 function getAllowedCategories(depts: Department[]): string[] | null {
   const cats: string[] = [];
@@ -57,6 +62,7 @@ export function PackagingPipeline() {
   const users = useOrderStore((s) => s.users);
   const currentUserId = useOrderStore((s) => s.currentUserId);
   const updateOrderStatus = useOrderStore((s) => s.updateOrderStatus);
+  const updateOrderComment = useOrderStore((s) => s.updateOrderComment);
   const bulkUpdateStatus = useOrderStore((s) => s.bulkUpdateStatus);
   const [activeOrderId, setActiveOrderId] = useState<string | null>(null);
   const activeOrder = orders.find((o) => o.id === activeOrderId) ?? null;
@@ -64,6 +70,10 @@ export function PackagingPipeline() {
   const dialogOrder = dialogOrderId ? orders.find((o) => o.id === dialogOrderId) : null;
   const [showVariationDetails, setShowVariationDetails] = useState(false);
   const [variationOnly, setVariationOnly] = useState(false);
+  const [labelOrderId, setLabelOrderId] = useState<string | null>(null);
+  const labelOrder = labelOrderId ? orders.find((o) => o.id === labelOrderId) : null;
+  const [holdOrderId, setHoldOrderId] = useState<string | null>(null);
+  const [holdReason, setHoldReason] = useState('');
 
   const currentUser = users.find((u) => u.id === currentUserId);
   const isAdmin = currentUser?.role === 'admin' || currentUser?.role === 'manager';
@@ -145,14 +155,23 @@ export function PackagingPipeline() {
     toast.success(`Moved to ${ORDER_STATUS_CONFIG[nextStatus].label}`);
   }
 
-  function moveToHeld(orderId: string) {
-    updateOrderStatus(orderId, 'held');
+  function confirmHold() {
+    if (!holdOrderId) return;
+    updateOrderStatus(holdOrderId, 'held');
+    if (holdReason.trim()) updateOrderComment(holdOrderId, holdReason.trim());
     toast.warning('Order placed on hold');
+    setHoldOrderId(null);
+    setHoldReason('');
   }
 
   function moveToNoStock(orderId: string) {
     updateOrderStatus(orderId, 'no-stock');
     toast.warning('Marked as No Stock');
+  }
+
+  function cancelOrder(orderId: string) {
+    updateOrderStatus(orderId, 'cancelled');
+    toast.info('Order cancelled');
   }
 
   function moveToPrev(orderId: string, prevStatus: OrderStatus) {
@@ -387,9 +406,7 @@ export function PackagingPipeline() {
                         className={`p-3 border rounded-lg bg-white hover:shadow-sm transition-all cursor-pointer ${
                           order.id === activeOrderId
                             ? 'border-blue-400 ring-2 ring-blue-200 bg-blue-50'
-                            : order.deliveryType === 'express'
-                            ? 'border-red-400 ring-1 ring-red-200 bg-red-50'
-                            : 'hover:border-slate-300'
+                            : `${getOrderRowClass(order)} hover:border-slate-300`
                         }`}
                       >
                         <div className="flex items-start justify-between gap-2">
@@ -436,52 +453,103 @@ export function PackagingPipeline() {
                             )}
                           </div>
                           <div className="flex flex-col gap-1 shrink-0" onClick={(e) => e.stopPropagation()}>
-                            <Button
-                              size="sm"
-                              className="h-6 text-xs px-2"
-                              onClick={() => moveToNext(order.id, s.nextStage)}
-                            >
-                              <CheckCircle className="h-3 w-3 mr-1" />
-                              Done
-                            </Button>
-                            {s.prevStage && (
-                              <Button
-                                size="sm"
-                                variant="outline"
-                                className="h-6 text-xs px-2 text-slate-600"
-                                onClick={() => moveToPrev(order.id, s.prevStage!)}
-                              >
-                                <Undo2 className="h-3 w-3 mr-1" />
-                                Back
-                              </Button>
+                            {/* Packed stage: no action buttons — moves via carrier scan */}
+                            {s.stage !== 'packed' && (
+                              <>
+                                {s.stage === 'packing' ? (
+                                  <Button
+                                    size="sm"
+                                    className="h-6 text-xs px-2 bg-green-600 hover:bg-green-700"
+                                    onClick={() => setLabelOrderId(order.id)}
+                                  >
+                                    <Printer className="h-3 w-3 mr-1" />
+                                    Print Label
+                                  </Button>
+                                ) : (
+                                  <Button
+                                    size="sm"
+                                    className="h-6 text-xs px-2"
+                                    onClick={() => moveToNext(order.id, s.nextStage)}
+                                  >
+                                    <CheckCircle className="h-3 w-3 mr-1" />
+                                    Done
+                                  </Button>
+                                )}
+                                {s.prevStage && (
+                                  <Button
+                                    size="sm"
+                                    variant="outline"
+                                    className="h-6 text-xs px-2 text-slate-600"
+                                    onClick={() => moveToPrev(order.id, s.prevStage!)}
+                                  >
+                                    <Undo2 className="h-3 w-3 mr-1" />
+                                    Back
+                                  </Button>
+                                )}
+                                <Button
+                                  size="sm"
+                                  variant="outline"
+                                  className="h-6 text-xs px-2 text-blue-600 hover:text-blue-700 hover:bg-blue-50"
+                                  onClick={() => setDialogOrderId(order.id)}
+                                >
+                                  <MessageSquare className="h-3 w-3 mr-1" />
+                                  Note
+                                </Button>
+                                {['pending','assembling','checking','packing'].includes(s.stage) && (
+                                  <>
+                                    <Button
+                                      size="sm"
+                                      variant="ghost"
+                                      className="h-6 text-xs px-2 text-red-600 hover:text-red-700 hover:bg-red-50"
+                                      onClick={() => { setHoldOrderId(order.id); setHoldReason(''); }}
+                                    >
+                                      <AlertTriangle className="h-3 w-3 mr-1" />
+                                      Hold
+                                    </Button>
+                                    <Button
+                                      size="sm"
+                                      variant="ghost"
+                                      className="h-6 text-xs px-2 text-orange-600 hover:text-orange-700 hover:bg-orange-50"
+                                      onClick={() => moveToNoStock(order.id)}
+                                    >
+                                      <PackageX className="h-3 w-3 mr-1" />
+                                      No Stock
+                                    </Button>
+                                    <Button
+                                      size="sm"
+                                      variant="ghost"
+                                      className="h-6 text-xs px-2 text-slate-500 hover:text-slate-700 hover:bg-slate-50"
+                                      onClick={() => cancelOrder(order.id)}
+                                    >
+                                      <X className="h-3 w-3 mr-1" />
+                                      Cancel
+                                    </Button>
+                                  </>
+                                )}
+                              </>
                             )}
-                            <Button
-                              size="sm"
-                              variant="outline"
-                              className="h-6 text-xs px-2 text-blue-600 hover:text-blue-700 hover:bg-blue-50"
-                              onClick={() => setDialogOrderId(order.id)}
-                            >
-                              <MessageSquare className="h-3 w-3 mr-1" />
-                              Note
-                            </Button>
-                            <Button
-                              size="sm"
-                              variant="ghost"
-                              className="h-6 text-xs px-2 text-red-600 hover:text-red-700 hover:bg-red-50"
-                              onClick={() => moveToHeld(order.id)}
-                            >
-                              <AlertTriangle className="h-3 w-3 mr-1" />
-                              Hold
-                            </Button>
-                            <Button
-                              size="sm"
-                              variant="ghost"
-                              className="h-6 text-xs px-2 text-orange-600 hover:text-orange-700 hover:bg-orange-50"
-                              onClick={() => moveToNoStock(order.id)}
-                            >
-                              <PackageX className="h-3 w-3 mr-1" />
-                              No Stock
-                            </Button>
+                            {/* Packed: note + manual ship to delivered */}
+                            {s.stage === 'packed' && (
+                              <>
+                                <Button
+                                  size="sm"
+                                  className="h-6 text-xs px-2 bg-green-600 hover:bg-green-700 text-white"
+                                  onClick={() => moveToNext(order.id, 'shipped')}
+                                >
+                                  <Truck className="h-3 w-3 mr-1" />
+                                  Ship
+                                </Button>
+                                <Button
+                                  size="sm"
+                                  variant="outline"
+                                  className="h-6 text-xs px-2 text-blue-600 hover:text-blue-700 hover:bg-blue-50"
+                                  onClick={() => setDialogOrderId(order.id)}
+                                >
+                                  <MessageSquare className="h-3 w-3 mr-1" />
+                                  Note
+                                </Button>
+                              </>
+                            )}
                           </div>
                         </div>
                       </div>
@@ -732,6 +800,47 @@ export function PackagingPipeline() {
       {/* Order Detail Dialog for Notes */}
       {dialogOrder && (
         <OrderDetailDialog order={dialogOrder} onClose={() => setDialogOrderId(null)} />
+      )}
+
+      {/* Hold with reason dialog */}
+      {holdOrderId && (
+        <Dialog open onOpenChange={(open) => { if (!open) setHoldOrderId(null); }}>
+          <DialogContent className="sm:max-w-sm">
+            <DialogHeader>
+              <DialogTitle>Place on Hold</DialogTitle>
+            </DialogHeader>
+            <div className="space-y-3 py-2">
+              <p className="text-sm text-slate-500">
+                Order #{orders.find(o => o.id === holdOrderId)?.salesRecordNumber}
+              </p>
+              <div>
+                <label className="text-xs text-slate-500 block mb-1">Reason (optional)</label>
+                <Input
+                  value={holdReason}
+                  onChange={(e) => setHoldReason(e.target.value)}
+                  placeholder="e.g. Waiting for stock confirmation"
+                  onKeyDown={(e) => e.key === 'Enter' && confirmHold()}
+                  autoFocus
+                />
+              </div>
+            </div>
+            <DialogFooter>
+              <Button variant="outline" onClick={() => setHoldOrderId(null)}>Cancel</Button>
+              <Button className="bg-red-600 hover:bg-red-700" onClick={confirmHold}>
+                <AlertTriangle className="h-4 w-4 mr-1" />
+                Place on Hold
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+      )}
+
+      {/* Label Print Dialog */}
+      {labelOrder && (
+        <LabelPrintDialog
+          order={labelOrder}
+          onClose={() => setLabelOrderId(null)}
+        />
       )}
     </div>
   );

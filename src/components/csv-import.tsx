@@ -178,6 +178,11 @@ export function CSVImport() {
   const [backmarketFetching, setBackmarketFetching] = useState(false);
   const [backmarketDays, setBackmarketDays] = useState(7);
 
+  // Temu direct import state
+  const [temuConnected, setTemuConnected] = useState<boolean | null>(null);
+  const [temuFetching, setTemuFetching] = useState(false);
+  const [temuDays, setTemuDays] = useState(7);
+
   const addOrders = useOrderStore((s) => s.addOrders);
   const updateOrderCategory = useOrderStore((s) => s.updateOrderCategory);
   const [aiCategorising, setAiCategorising] = useState(false);
@@ -196,6 +201,7 @@ export function CSVImport() {
       checkEbayStatus();
     }
     checkBackmarketStatus();
+    checkTemuStatus();
   }, []);
 
   async function checkBackmarketStatus() {
@@ -237,6 +243,48 @@ export function CSVImport() {
       toast.error(`Failed to fetch Backmarket orders: ${e instanceof Error ? e.message : 'Unknown error'}`);
     } finally {
       setBackmarketFetching(false);
+    }
+  }
+
+  async function checkTemuStatus() {
+    try {
+      const res = await fetch('/api/temu/status');
+      if (res.ok) {
+        const data = await res.json() as { connected: boolean };
+        setTemuConnected(data.connected);
+      } else {
+        setTemuConnected(false);
+      }
+    } catch {
+      setTemuConnected(false);
+    }
+  }
+
+  async function handleTemuImport() {
+    setTemuFetching(true);
+    try {
+      const res = await fetch(`/api/temu/orders?days=${temuDays}`);
+      if (res.status === 401) {
+        setTemuConnected(false);
+        toast.error('Temu credentials not configured. Set TEMU_APP_KEY, TEMU_APP_SECRET, and TEMU_ACCESS_TOKEN.');
+        return;
+      }
+      if (!res.ok) {
+        const err = await res.json() as { message?: string };
+        toast.error(`Temu API error: ${err.message || res.statusText}`);
+        return;
+      }
+      const data = await res.json() as { orders: Order[]; batch: Batch };
+      if (data.orders.length === 0) {
+        toast.info('No orders found in Temu for this period.');
+        return;
+      }
+      setPreview({ orders: data.orders, format: 'temu', fileName: data.batch.name });
+      toast.success(`Fetched ${data.orders.length} orders from Temu`);
+    } catch (e) {
+      toast.error(`Failed to fetch Temu orders: ${e instanceof Error ? e.message : 'Unknown error'}`);
+    } finally {
+      setTemuFetching(false);
     }
   }
 
@@ -512,6 +560,52 @@ export function CSVImport() {
               >
                 <RefreshCw className={`h-3.5 w-3.5 mr-1.5 ${backmarketFetching ? 'animate-spin' : ''}`} />
                 {backmarketFetching ? 'Fetching...' : 'Fetch Orders'}
+              </Button>
+            </div>
+          </div>
+        </CardContent>
+      </Card>
+
+      {/* Temu Direct Import */}
+      <Card className="border-orange-200 bg-orange-50">
+        <CardContent className="pt-5">
+          <div className="flex items-center justify-between flex-wrap gap-3">
+            <div className="flex items-center gap-3">
+              <ShoppingBag className="h-6 w-6 text-orange-600" />
+              <div>
+                <p className="font-semibold text-slate-800">Import from Temu</p>
+                <p className="text-xs text-slate-500">Fetch orders directly via Temu Open Platform API</p>
+              </div>
+              {temuConnected === true && (
+                <span className="flex items-center gap-1 text-xs text-green-700 bg-green-100 border border-green-300 rounded-full px-2 py-0.5">
+                  <Wifi className="h-3 w-3" /> Connected
+                </span>
+              )}
+              {temuConnected === false && (
+                <span className="flex items-center gap-1 text-xs text-red-700 bg-red-100 border border-red-300 rounded-full px-2 py-0.5">
+                  <WifiOff className="h-3 w-3" /> Not configured
+                </span>
+              )}
+            </div>
+            <div className="flex items-center gap-2">
+              <label className="text-xs text-slate-600">Last</label>
+              <select
+                value={temuDays}
+                onChange={(e) => setTemuDays(Number(e.target.value))}
+                className="h-8 border rounded px-2 text-xs bg-white"
+              >
+                {[1, 3, 7, 14, 30].map((d) => (
+                  <option key={d} value={d}>{d} days</option>
+                ))}
+              </select>
+              <Button
+                size="sm"
+                className="bg-orange-600 hover:bg-orange-700 text-white"
+                onClick={handleTemuImport}
+                disabled={temuFetching || !temuConnected}
+              >
+                <RefreshCw className={`h-3.5 w-3.5 mr-1.5 ${temuFetching ? 'animate-spin' : ''}`} />
+                {temuFetching ? 'Fetching...' : 'Fetch Orders'}
               </Button>
             </div>
           </div>

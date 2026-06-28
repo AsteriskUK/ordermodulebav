@@ -19,10 +19,15 @@ export interface BackmarketAddress {
 }
 
 export interface BackmarketListingSnapshot {
+  id?: number;
   sku?: string;
   image?: string;
+  listing?: number;
+  title?: string;
   product?: {
     product_id?: number;
+    title?: string;
+    content?: string;
     category_3?: {
       category_name?: string;
     };
@@ -42,6 +47,8 @@ export interface BackmarketOrderline {
   backcare_price?: number;
   snapshot?: BackmarketListingSnapshot;
   listing?: number;
+  title?: string;
+  content?: string;
 }
 
 export interface BackmarketOrder {
@@ -117,6 +124,35 @@ export function getBackmarketHeaders(): Record<string, string> {
   };
 }
 
+export async function fetchBackmarketListingTitle(listingId: number): Promise<string | null> {
+  const baseUrl = getBackmarketBaseUrl();
+  const url = `${baseUrl}/ws/listings/${listingId}`;
+  try {
+    const res = await fetch(url, { headers: getBackmarketHeaders() });
+    const rawBody = await res.text();
+    if (!res.ok) {
+      console.error(`[Backmarket listing] failed ${res.status}: ${rawBody.slice(0, 200)}`);
+      return null;
+    }
+    const data = JSON.parse(rawBody) as { title?: string };
+    return data.title || null;
+  } catch (e) {
+    console.error('[Backmarket listing] error:', e);
+    return null;
+  }
+}
+
+export function getBackmarketLineTitle(line: BackmarketOrderline): string {
+  return line.title ||
+    line.content ||
+    line.snapshot?.title ||
+    line.snapshot?.product?.title ||
+    line.snapshot?.product?.content ||
+    line.snapshot?.product?.category_3?.category_name ||
+    line.snapshot?.sku ||
+    '';
+}
+
 function formatBackmarketDate(isoDate: string): string {
   // Backmarket expects YYYY-MM-DD HH:MM:SS, not ISO 8601
   const d = new Date(isoDate);
@@ -157,10 +193,53 @@ export async function fetchBackmarketOrders(
   }
 }
 
-export function mapBackmarketOrderToOrder(
+export interface BackmarketListingPayload {
+  sku: string;
+  listing: number;
+  price: number;
+  quantity: number;
+  condition: number;
+  description: string;
+  currency?: string;
+  new_battery?: boolean;
+  min_price?: number;
+}
+
+export interface BackmarketListingResult {
+  id?: number;
+  sku?: string;
+  listing?: number;
+  price?: string;
+  quantity?: number;
+  condition?: number;
+  description?: string;
+}
+
+export async function createBackmarketListing(
+  payload: BackmarketListingPayload
+): Promise<{ success: true; result: BackmarketListingResult } | { success: false; status: number; message: string }> {
+  const baseUrl = getBackmarketBaseUrl();
+  const url = `${baseUrl}/ws/listings`;
+  const res = await fetch(url, {
+    method: 'POST',
+    headers: getBackmarketHeaders(),
+    body: JSON.stringify(payload),
+  });
+  const rawBody = await res.text();
+  if (!res.ok) {
+    return { success: false, status: res.status, message: rawBody.slice(0, 500) };
+  }
+  try {
+    return { success: true, result: JSON.parse(rawBody) as BackmarketListingResult };
+  } catch {
+    return { success: true, result: {} };
+  }
+}
+
+export async function mapBackmarketOrderToOrder(
   input: BackmarketOrder,
   batchId: string
-): Order[] {
+): Promise<Order[]> {
   // Handle flat orderline responses where the orderline contains the order
   const order: BackmarketOrder = input.order ?? input;
   const orderline: BackmarketOrderline | undefined = input.order ? input : undefined;
@@ -236,10 +315,17 @@ export function mapBackmarketOrderToOrder(
     }];
   }
 
-  return orderlines.map((line, idx): Order => {
-    const snapshot = line.snapshot;
-    const itemTitle = snapshot?.product?.category_3?.category_name || '';
-    const sku = snapshot?.sku || '';
+  return Promise.all(orderlines.map(async (line, idx): Promise<Order> => {
+    let itemTitle = getBackmarketLineTitle(line);
+    const sku = line.snapshot?.sku || '';
+    const listingId = line.snapshot?.listing || line.listing;
+    if (!itemTitle && listingId) {
+      const fetchedTitle = await fetchBackmarketListingTitle(listingId);
+      if (fetchedTitle) itemTitle = fetchedTitle;
+    }
+    if (!itemTitle) {
+      itemTitle = sku || 'Back Market item';
+    }
     const quantity = line.quantity || 1;
     const itemPrice = parseFloat(line.price || '0');
     const itemTotal = itemPrice * quantity;
@@ -288,5 +374,5 @@ export function mapBackmarketOrderToOrder(
       importedAt: new Date().toISOString(),
       batchId,
     };
-  });
+  }));
 }

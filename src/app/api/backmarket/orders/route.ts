@@ -42,7 +42,7 @@ export async function GET(req: NextRequest) {
 
       const results = data.results || [];
       for (const bmOrder of results) {
-        const mapped = mapBackmarketOrderToOrder(bmOrder, batchId);
+        const mapped = await mapBackmarketOrderToOrder(bmOrder, batchId);
         allOrders.push(...mapped);
       }
 

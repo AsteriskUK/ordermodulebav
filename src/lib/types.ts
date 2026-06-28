@@ -92,6 +92,10 @@ export interface ReturnRecord {
   createdByUserName?: string;
   processedByUserId?: string;
   processedByUserName?: string;
+  /** Department/user responsible for the return (for productivity tracking) */
+  responsibleDepartment?: Department;
+  responsibleUserId?: string;
+  responsibleUserName?: string;
   refundAmount?: number;
   status: 'pending' | 'received' | 'refunded' | 'rejected' | 'replacement';
   resolution?: 'refund' | 'replacement';
@@ -99,12 +103,16 @@ export interface ReturnRecord {
   receivedNotes?: string;
   replacementItems?: ReplacementItem[];
   replacementOrderId?: string;
+  /** URLs of uploaded images attached to the return */
+  imageUrls?: string[];
 }
 
 export interface ReplacementItem {
   itemTitle: string;
   quantity: number;
   notes?: string;
+  /** URLs of uploaded images for this replacement item */
+  imageUrls?: string[];
 }
 
 export interface EodReport {
@@ -247,6 +255,65 @@ export interface LeaveBalance {
     other: number;
   };
 }
+
+// --- eBay Listings ---
+
+export type EbayListingCondition =
+  | 'NEW'
+  | 'LIKE_NEW'
+  | 'VERY_GOOD'
+  | 'GOOD'
+  | 'ACCEPTABLE';
+
+export type EbayListingFormat = 'FIXED_PRICE' | 'AUCTION';
+
+export interface EbayBusinessPolicy {
+  policyId: string;
+  name: string;
+  policyType: 'PAYMENT' | 'RETURN_POLICY' | 'FULFILLMENT';
+}
+
+export interface EbayInventoryLocation {
+  merchantLocationKey: string;
+  name: string;
+  merchantLocationStatus: 'ENABLED' | 'DISABLED';
+}
+
+export interface VariationPayload {
+  sku: string;
+  aspectValues: Record<string, string>;
+  price: number;
+  quantity: number;
+  imageUrl?: string;
+}
+
+export interface CreateListingPayload {
+  sku: string;
+  title: string;
+  description: string;
+  condition: EbayListingCondition;
+  quantity: number;
+  imageUrls: string[];
+  aspects: Record<string, string[]>;
+  categoryId: string;
+  format: EbayListingFormat;
+  price: number;
+  merchantLocationKey: string;
+  paymentPolicyId: string;
+  returnPolicyId: string;
+  fulfillmentPolicyId: string;
+  // Variation mode only
+  variations?: VariationPayload[];
+  varyingAspects?: string[];
+}
+
+export const LISTING_CONDITION_LABELS: Record<EbayListingCondition, string> = {
+  NEW: 'New',
+  LIKE_NEW: 'Like New',
+  VERY_GOOD: 'Very Good',
+  GOOD: 'Good',
+  ACCEPTABLE: 'Acceptable',
+};
 
 export const ORDER_STATUS_CONFIG: Record<OrderStatus, { label: string; color: string }> = {
   pending: { label: 'Pending', color: 'bg-yellow-100 text-yellow-800 border-yellow-300' },

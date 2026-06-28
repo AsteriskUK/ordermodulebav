@@ -142,7 +142,11 @@ CREATE TABLE IF NOT EXISTS returns (
   processed_by_user_name TEXT,
   refund_amount NUMERIC(10,2),
   status TEXT DEFAULT 'pending' CHECK (status IN ('pending', 'received', 'refunded', 'rejected', 'replacement')),
-  metadata JSONB DEFAULT '{}'
+  metadata JSONB DEFAULT '{}',
+  -- Responsible department/user for productivity tracking (root cause / attribution)
+  responsible_department TEXT,
+  responsible_user_id UUID REFERENCES users(id),
+  responsible_user_name TEXT
 );
 
 -- ==================== HR TABLES ====================
@@ -218,6 +222,8 @@ CREATE INDEX IF NOT EXISTS idx_leave_dates ON leave_requests(start_date, end_dat
 CREATE INDEX IF NOT EXISTS idx_returns_order ON returns(order_id);
 CREATE INDEX IF NOT EXISTS idx_returns_status ON returns(status);
 CREATE INDEX IF NOT EXISTS idx_returns_returned_at ON returns(returned_at);
+CREATE INDEX IF NOT EXISTS idx_returns_responsible_user ON returns(responsible_user_id);
+CREATE INDEX IF NOT EXISTS idx_returns_responsible_department ON returns(responsible_department);
 
 -- App settings (key-value store for tokens etc.)
 CREATE TABLE IF NOT EXISTS app_settings (
@@ -252,6 +258,20 @@ CREATE INDEX IF NOT EXISTS idx_ebay_messages_sent_at ON ebay_messages(sent_at DE
 -- Allow replacement status for existing returns tables
 ALTER TABLE returns DROP CONSTRAINT IF EXISTS returns_status_check;
 ALTER TABLE returns ADD CONSTRAINT returns_status_check CHECK (status IN ('pending', 'received', 'refunded', 'rejected', 'replacement'));
+
+-- Add responsible department/user columns for returns productivity tracking
+ALTER TABLE returns ADD COLUMN IF NOT EXISTS responsible_department TEXT;
+ALTER TABLE returns ADD COLUMN IF NOT EXISTS responsible_user_id UUID REFERENCES users(id);
+ALTER TABLE returns ADD COLUMN IF NOT EXISTS responsible_user_name TEXT;
+
+-- Backfill any responsible fields stored in old metadata JSONB
+UPDATE returns SET
+  responsible_department = COALESCE(responsible_department, metadata->>'responsible_department'),
+  responsible_user_id = COALESCE(responsible_user_id, (metadata->>'responsible_user_id')::UUID),
+  responsible_user_name = COALESCE(responsible_user_name, metadata->>'responsible_user_name')
+WHERE metadata ? 'responsible_department'
+   OR metadata ? 'responsible_user_id'
+   OR metadata ? 'responsible_user_name';
 
 -- ==================== TRIGGERS ====================
 
@@ -324,6 +344,60 @@ BEGIN
   END IF;
 END
 $$;
+
+-- ==================== STORAGE BUCKETS ====================
+-- Create public buckets for return and replacement images.
+-- Run this as a superuser or in the Supabase SQL Editor.
+
+INSERT INTO storage.buckets (id, name, public, avif_autodetection, file_size_limit, allowed_mime_types)
+VALUES
+  ('return-images', 'return-images', true, false, 5242880, ARRAY['image/jpeg', 'image/png', 'image/webp', 'image/gif']),
+  ('replacement-images', 'replacement-images', true, false, 5242880, ARRAY['image/jpeg', 'image/png', 'image/webp', 'image/gif'])
+ON CONFLICT (id) DO UPDATE SET
+  public = EXCLUDED.public,
+  file_size_limit = EXCLUDED.file_size_limit,
+  allowed_mime_types = EXCLUDED.allowed_mime_types;
+
+-- Allow public read access to image buckets (files are public URLs anyway)
+DO $$
+BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_policies WHERE schemaname = 'storage' AND tablename = 'objects' AND policyname = 'Allow public read return images') THEN
+    CREATE POLICY "Allow public read return images"
+      ON storage.objects FOR SELECT
+      USING (bucket_id = 'return-images');
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_policies WHERE schemaname = 'storage' AND tablename = 'objects' AND policyname = 'Allow public read replacement images') THEN
+    CREATE POLICY "Allow public read replacement images"
+      ON storage.objects FOR SELECT
+      USING (bucket_id = 'replacement-images');
+  END IF;
+END
+$$;
+
+-- For write/delete, the app currently uses the anon key without auth.
+-- In a locked-down setup, replace these with authenticated-user checks.
+DO $$
+BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_policies WHERE schemaname = 'storage' AND tablename = 'objects' AND policyname = 'Allow all return image uploads') THEN
+    CREATE POLICY "Allow all return image uploads"
+      ON storage.objects FOR ALL
+      USING (bucket_id = 'return-images')
+      WITH CHECK (bucket_id = 'return-images');
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_policies WHERE schemaname = 'storage' AND tablename = 'objects' AND policyname = 'Allow all replacement image uploads') THEN
+    CREATE POLICY "Allow all replacement image uploads"
+      ON storage.objects FOR ALL
+      USING (bucket_id = 'replacement-images')
+      WITH CHECK (bucket_id = 'replacement-images');
+  END IF;
+END
+$$;
+
+-- ==================== MIGRATION NOTES ====================
+-- Return/replacement images are stored as public URLs in the `returns.metadata` JSONB column:
+--   - returns.metadata->'image_urls'        : string[] for return images
+--   - returns.metadata->'replacement_items' : array of objects, each with optional 'imageUrls' string[]
+-- The app code syncs these automatically (see src/lib/supabase-store.ts syncReturn/fetchReturns).
 
 -- ==================== INITIAL DATA ====================
 

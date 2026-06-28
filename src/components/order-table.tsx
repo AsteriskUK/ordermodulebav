@@ -4,6 +4,7 @@ import { useState, useMemo, useEffect } from 'react';
 import { useSearchParams } from 'next/navigation';
 import { useOrderStore } from '@/lib/store';
 import { ORDER_STATUS_CONFIG, OrderStatus, Order } from '@/lib/types';
+import { getOrderRowClass, getOrderUrgencyLabel } from '@/lib/order-utils';
 import { CATEGORIES } from '@/lib/categoriser';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -80,6 +81,10 @@ export function OrderTable() {
   const [showNewMessage, setShowNewMessage] = useState(false);
   const [sortDir, setSortDir] = useState<'desc' | 'asc'>('desc');
   const [sortField, setSortField] = useState<string>('postByDate');
+  const [carrierFilter, setCarrierFilter] = useState<string>('all');
+  const [deliveryTypeFilter, setDeliveryTypeFilter] = useState<string>('all');
+  const [postByDateFrom, setPostByDateFrom] = useState<string>('');
+  const [postByDateTo, setPostByDateTo] = useState<string>('');
 
   const handleSort = (field: string) => {
     if (sortField === field) {
@@ -105,6 +110,23 @@ export function OrderTable() {
     if (categoryFilter !== 'all') {
       result = result.filter((o) => o.category === categoryFilter);
     }
+    if (carrierFilter !== 'all') {
+      result = result.filter((o) => o.deliveryCarrier === carrierFilter);
+    }
+    if (deliveryTypeFilter !== 'all') {
+      result = result.filter((o) => o.deliveryType === deliveryTypeFilter);
+    }
+    if (postByDateFrom || postByDateTo) {
+      const from = postByDateFrom ? new Date(postByDateFrom).setHours(0, 0, 0, 0) : null;
+      const to = postByDateTo ? new Date(postByDateTo).setHours(23, 59, 59, 999) : null;
+      result = result.filter((o) => {
+        const t = o.postByDate ? new Date(o.postByDate).getTime() : null;
+        if (!t) return false;
+        if (from && t < from) return false;
+        if (to && t > to) return false;
+        return true;
+      });
+    }
     if (search.trim()) {
       const q = search.toLowerCase();
       result = result.filter(
@@ -117,7 +139,9 @@ export function OrderTable() {
           o.buyerEmail.toLowerCase().includes(q) ||
           o.customLabel.toLowerCase().includes(q) ||
           o.buyerNote.toLowerCase().includes(q) ||
-          o.category.toLowerCase().includes(q)
+          o.category.toLowerCase().includes(q) ||
+          (o.deliveryCarrier && o.deliveryCarrier.toLowerCase().includes(q)) ||
+          (o.deliveryType && o.deliveryType.toLowerCase().includes(q))
       );
     }
     // Sort by selected field
@@ -180,6 +204,14 @@ export function OrderTable() {
           aValue = a.buyerNote;
           bValue = b.buyerNote;
           break;
+        case 'deliveryCarrier':
+          aValue = a.deliveryCarrier || '';
+          bValue = b.deliveryCarrier || '';
+          break;
+        case 'deliveryType':
+          aValue = a.deliveryType || '';
+          bValue = b.deliveryType || '';
+          break;
         default:
           aValue = a.salesRecordNumber;
           bValue = b.salesRecordNumber;
@@ -189,7 +221,7 @@ export function OrderTable() {
       return sortDir === 'desc' ? -comparison : comparison;
     });
     return result;
-  }, [orders, statusFilter, categoryFilter, search, sortDir, sortField]);
+  }, [orders, statusFilter, categoryFilter, carrierFilter, deliveryTypeFilter, postByDateFrom, postByDateTo, search, sortDir, sortField]);
 
   const totalPages = Math.ceil(filtered.length / PAGE_SIZE);
   const pageOrders = filtered.slice(page * PAGE_SIZE, (page + 1) * PAGE_SIZE);
@@ -255,13 +287,35 @@ export function OrderTable() {
             className="pl-9"
           />
         </div>
+        <Select
+          value={sortField}
+          onValueChange={(v) => {
+            setSortField(v ?? 'postByDate');
+            setPage(0);
+          }}
+        >
+          <SelectTrigger className="w-[150px]">
+            <SelectValue placeholder="Sort by" />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="postByDate">Post By Date</SelectItem>
+            <SelectItem value="saleDate">Sale Date</SelectItem>
+            <SelectItem value="salesRecordNumber">Order #</SelectItem>
+            <SelectItem value="postToName">Customer</SelectItem>
+            <SelectItem value="itemTitle">Item</SelectItem>
+            <SelectItem value="status">Status</SelectItem>
+            <SelectItem value="category">Category</SelectItem>
+            <SelectItem value="priority">Priority</SelectItem>
+            <SelectItem value="deliveryCarrier">Carrier</SelectItem>
+            <SelectItem value="deliveryType">Delivery Type</SelectItem>
+          </SelectContent>
+        </Select>
         <button
           onClick={() => setSortDir((d) => (d === 'desc' ? 'asc' : 'desc'))}
           className="flex items-center gap-1.5 px-3 h-10 rounded-md border border-slate-200 bg-white text-sm text-slate-600 hover:bg-slate-50 transition-colors shrink-0"
-          title="Toggle date sort"
+          title="Toggle sort direction"
         >
           {sortDir === 'desc' ? <ArrowDown className="h-3.5 w-3.5" /> : <ArrowUp className="h-3.5 w-3.5" />}
-          Date
         </button>
         <Select
           value={statusFilter}
@@ -299,6 +353,60 @@ export function OrderTable() {
             ))}
           </SelectContent>
         </Select>
+        <Select
+          value={carrierFilter}
+          onValueChange={(v) => {
+            setCarrierFilter(v ?? 'all');
+            setPage(0);
+          }}
+        >
+          <SelectTrigger className="w-[130px]">
+            <SelectValue placeholder="All Carriers" />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="all">All Carriers</SelectItem>
+            <SelectItem value="DPD">DPD</SelectItem>
+            <SelectItem value="FedEx">FedEx</SelectItem>
+            <SelectItem value="Parcelforce">Parcelforce</SelectItem>
+            <SelectItem value="Royal Mail">Royal Mail</SelectItem>
+            <SelectItem value="Other">Other</SelectItem>
+          </SelectContent>
+        </Select>
+        <Select
+          value={deliveryTypeFilter}
+          onValueChange={(v) => {
+            setDeliveryTypeFilter(v ?? 'all');
+            setPage(0);
+          }}
+        >
+          <SelectTrigger className="w-[140px]">
+            <SelectValue placeholder="All Delivery Types" />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="all">All Types</SelectItem>
+            <SelectItem value="standard">Standard</SelectItem>
+            <SelectItem value="next_day">Next Day</SelectItem>
+            <SelectItem value="express">Express</SelectItem>
+            <SelectItem value="collection">Collection</SelectItem>
+          </SelectContent>
+        </Select>
+        <div className="flex items-center gap-2">
+          <Input
+            type="date"
+            value={postByDateFrom}
+            onChange={(e) => { setPostByDateFrom(e.target.value); setPage(0); }}
+            className="w-[140px] h-10 text-xs"
+            placeholder="Post by from"
+          />
+          <span className="text-slate-400">-</span>
+          <Input
+            type="date"
+            value={postByDateTo}
+            onChange={(e) => { setPostByDateTo(e.target.value); setPage(0); }}
+            className="w-[140px] h-10 text-xs"
+            placeholder="Post by to"
+          />
+        </div>
 
         {selectedIds.size > 0 && (
           <div className="flex items-center gap-2">
@@ -460,9 +568,7 @@ export function OrderTable() {
               pageOrders.map((order) => (
                 <TableRow
                   key={order.id}
-                  className={`cursor-pointer hover:bg-slate-50 ${
-                    order.priority === 1 ? 'bg-red-50 border-l-4 border-red-500' : ''
-                  }`}
+                  className={`cursor-pointer hover:bg-slate-50 ${getOrderRowClass(order)}`}
                   onClick={() => setSelectedOrder(order)}
                 >
                   <TableCell onClick={(e) => e.stopPropagation()}>

@@ -4,6 +4,7 @@ import { useState, useMemo } from 'react';
 import { useOrderStore } from '@/lib/store';
 import { ORDER_STATUS_CONFIG, DeliveryCarrier, DeliveryType, DPDService } from '@/lib/types';
 import { generateBatchShipCSV, generateBundledShipCSV, generateCarrierCSV, generateCarrierBundleCSV, groupOrdersByBuyer, BundleGroup, deriveShipping } from '@/lib/csv-parser';
+import { getOrderRowClass } from '@/lib/order-utils';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -22,7 +23,7 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table';
-import { Download, Truck, CheckSquare, MinusSquare, Square, PackageOpen, ChevronDown, ChevronRight, Layers, Printer, Sparkles, AlertTriangle, X, Loader2, CheckCircle2, RotateCcw, Check, Lock as LockIcon } from 'lucide-react';
+import { Download, Truck, CheckSquare, MinusSquare, Square, PackageOpen, ChevronDown, ChevronRight, Layers, Sparkles, AlertTriangle, X, Loader2, CheckCircle2, Check, Lock as LockIcon } from 'lucide-react';
 import { DeliveryBadge } from './delivery-badge';
 import { Input } from '@/components/ui/input';
 import { toast } from 'sonner';
@@ -216,9 +217,53 @@ export function BatchShipping() {
   const [expandedBuyers, setExpandedBuyers] = useState<Set<string>>(new Set());
   const [selectedBuyerKeys, setSelectedBuyerKeys] = useState<Set<string>>(new Set());
   const [selectedCarrier, setSelectedCarrier] = useState<string>('standard');
+  const [sortField, setSortField] = useState<'postByDate' | 'saleDate' | 'salesRecordNumber' | 'postToName' | 'itemTitle'>('postByDate');
+  const [sortDir, setSortDir] = useState<'asc' | 'desc'>('desc');
+  const [filterCarrier, setFilterCarrier] = useState<'all' | 'DPD' | 'FedEx' | 'express' | 'collection' | 'multi-buyer'>('all');
   const [selectedDPDService, setSelectedDPDService] = useState<DPDService>('next_day');
   const [aiChecking, setAiChecking] = useState(false);
   const [aiIssues, setAiIssues] = useState<{ id: string; issue: string }[] | null>(null);
+
+  const handleSort = (field: typeof sortField) => {
+    if (sortField === field) {
+      setSortDir((d) => (d === 'asc' ? 'desc' : 'asc'));
+    } else {
+      setSortField(field);
+      setSortDir('asc');
+    }
+  };
+
+  const sortOrders = (ordersToSort: typeof shippableOrders) => {
+    const sorted = [...ordersToSort];
+    sorted.sort((a, b) => {
+      let comparison = 0;
+      switch (sortField) {
+        case 'postByDate': {
+          const aDate = new Date(a.postByDate || a.saleDate).getTime();
+          const bDate = new Date(b.postByDate || b.saleDate).getTime();
+          comparison = aDate - bDate;
+          break;
+        }
+        case 'saleDate': {
+          const aDate = new Date(a.saleDate).getTime();
+          const bDate = new Date(b.saleDate).getTime();
+          comparison = aDate - bDate;
+          break;
+        }
+        case 'salesRecordNumber':
+          comparison = a.salesRecordNumber.localeCompare(b.salesRecordNumber);
+          break;
+        case 'postToName':
+          comparison = a.postToName.localeCompare(b.postToName);
+          break;
+        case 'itemTitle':
+          comparison = a.itemTitle.localeCompare(b.itemTitle);
+          break;
+      }
+      return sortDir === 'asc' ? comparison : -comparison;
+    });
+    return sorted;
+  };
 
   const handleAiCheck = async () => {
     const toCheck = exportableOrders.filter((o) =>
@@ -266,8 +311,7 @@ export function BatchShipping() {
   // Group shippable orders by salesRecordNumber for the shipping table (one label per group)
   // Includes collection orders so they can be changed back to a delivery service
   const shipmentGroups = useMemo(() => {
-    const sorted = [...shippableOrders]
-      .sort((a, b) => new Date(b.postByDate || b.saleDate).getTime() - new Date(a.postByDate || a.saleDate).getTime());
+    const sorted = sortOrders([...shippableOrders]);
 
     const map = new Map<string, typeof sorted>();
     for (const o of sorted) {
@@ -295,7 +339,7 @@ export function BatchShipping() {
         isMultiItem: group.length > 1,
       };
     });
-  }, [shippableOrders]);
+  }, [shippableOrders, sortField, sortDir]);
 
   // Collection orders (no labels, exclude from exports)
   const collectionOrders = useMemo(
@@ -305,14 +349,8 @@ export function BatchShipping() {
 
   // Orders available for export (exclude collection orders)
   const exportableOrders = useMemo(
-    () => shippableOrders
-      .filter((o) => o.deliveryType !== 'collection')
-      .sort((a, b) => {
-        const dateA = new Date(a.postByDate || a.saleDate).getTime();
-        const dateB = new Date(b.postByDate || b.saleDate).getTime();
-        return dateB - dateA;
-      }),
-    [shippableOrders]
+    () => sortOrders(shippableOrders.filter((o) => o.deliveryType !== 'collection')),
+    [shippableOrders, sortField, sortDir]
   );
 
   const dpdOrders = useMemo(() => exportableOrders.filter((o) => o.deliveryCarrier === 'DPD'), [exportableOrders]);
@@ -329,6 +367,27 @@ export function BatchShipping() {
     [bundleGroups]
   );
 
+  const multiOrderBuyerKeys = useMemo(
+    () => new Set(multiOrderBuyers.map((g) => g.buyerUsername)),
+    [multiOrderBuyers]
+  );
+
+  const filteredShipmentGroups = useMemo(() => {
+    if (filterCarrier === 'all') return shipmentGroups;
+    if (filterCarrier === 'collection') return shipmentGroups.filter((g) => g.primary.deliveryType === 'collection');
+    if (filterCarrier === 'express') return shipmentGroups.filter((g) => g.primary.deliveryType === 'express');
+    if (filterCarrier === 'multi-buyer') return shipmentGroups.filter((g) => multiOrderBuyerKeys.has(g.primary.buyerUsername || g.primary.postToName));
+    return shipmentGroups.filter((g) => g.primary.deliveryCarrier === filterCarrier);
+  }, [shipmentGroups, filterCarrier, multiOrderBuyerKeys]);
+
+  const filteredBundleGroups = useMemo(() => {
+    if (filterCarrier === 'all') return bundleGroups;
+    if (filterCarrier === 'collection') return bundleGroups.filter((g) => g.orders.every((o) => o.deliveryType === 'collection'));
+    if (filterCarrier === 'express') return bundleGroups.filter((g) => g.orders.some((o) => o.deliveryType === 'express'));
+    if (filterCarrier === 'multi-buyer') return bundleGroups.filter((g) => g.orders.length > 1);
+    return bundleGroups.filter((g) => g.orders.some((o) => o.deliveryCarrier === filterCarrier));
+  }, [bundleGroups, filterCarrier]);
+
   const toggleSelect = (id: string) => {
     const next = new Set(selectedIds);
     if (next.has(id)) next.delete(id);
@@ -337,8 +396,8 @@ export function BatchShipping() {
   };
 
   const toggleAll = () => {
-    const allIds = shipmentGroups.flatMap((g) => g.ids);
-    if (selectedIds.size === allIds.length) {
+    const allIds = filteredShipmentGroups.flatMap((g) => g.ids);
+    if (selectedIds.size === allIds.length && allIds.length > 0) {
       setSelectedIds(new Set());
     } else {
       setSelectedIds(new Set(allIds));
@@ -358,10 +417,10 @@ export function BatchShipping() {
   };
 
   const toggleAllBuyers = () => {
-    if (selectedBuyerKeys.size === bundleGroups.length) {
+    if (selectedBuyerKeys.size === filteredBundleGroups.length && filteredBundleGroups.length > 0) {
       setSelectedBuyerKeys(new Set());
     } else {
-      setSelectedBuyerKeys(new Set(bundleGroups.map((g) => g.buyerUsername)));
+      setSelectedBuyerKeys(new Set(filteredBundleGroups.map((g) => g.buyerUsername)));
     }
   };
 
@@ -450,34 +509,12 @@ export function BatchShipping() {
           : s.allLabels?.length ? s.allLabels
           : s.labelBase64 ? [s.labelBase64] : [];
         console.log('[Book Labels] storageLabels count:', storageLabels.length, 'carrier:', carrier);
-        if (storageLabels.length > 0) saveOrderLabels(s.orderId, carrier, storageLabels);
-        // DPD HTML labels — write directly into a new tab
-        if (s.labelHtmls?.length) {
-          for (const html of s.labelHtmls) {
-            const win = window.open('', '_blank');
-            if (win) { win.document.open(); win.document.write(html); win.document.close(); }
-            totalLabels++;
-          }
-        }
-        // PDF labels (FedEx or future DPD PDF)
-        const pdfLabels = s.labelPdfs?.length ? s.labelPdfs
-          : !s.labelHtmls?.length && s.labelBase64 ? [s.labelBase64] : [];
-        console.log('[Book Labels] pdfLabels count:', pdfLabels.length);
-        for (const b64 of pdfLabels) {
-          const binary = atob(b64);
-          const bytes = new Uint8Array(binary.length);
-          for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
-          const blob = new Blob([bytes], { type: 'application/pdf' });
-          const url = URL.createObjectURL(blob);
-          const a = document.createElement('a');
-          a.href = url;
-          a.download = `label-${s.salesRecordNumber}.pdf`;
-          a.click();
-          URL.revokeObjectURL(url);
-          totalLabels++;
+        if (storageLabels.length > 0) {
+          saveOrderLabels(s.orderId, carrier, storageLabels);
+          totalLabels += storageLabels.length;
         }
       }
-      if (succeeded.length > 0) toast.success(`${succeeded.length} shipment${succeeded.length !== 1 ? 's' : ''} booked — ${totalLabels} label${totalLabels !== 1 ? 's' : ''} downloaded`);
+      if (succeeded.length > 0) toast.success(`${succeeded.length} shipment${succeeded.length !== 1 ? 's' : ''} booked — ${totalLabels} label${totalLabels !== 1 ? 's' : ''} saved for printing at packing`);
       if (failed.length > 0) {
         failed.forEach((f) => {
           console.error('[Book Labels] failure:', JSON.stringify(f));
@@ -490,31 +527,6 @@ export function BatchShipping() {
     } finally {
       setBookingLabels(false);
     }
-  };
-
-  const reprintLabels = (order: typeof exportableOrders[number]) => {
-    const labels = order.labelData;
-    if (!labels?.length) { toast.error('No stored label for this order'); return; }
-    for (const labelData of labels) {
-      // DPD HTML labels start with '<' or contain typical HTML tags
-      const isDpdHtml = labelData.trimStart().startsWith('<') || order.labelCarrier === 'DPD';
-      if (isDpdHtml) {
-        const win = window.open('', '_blank');
-        if (win) { win.document.open(); win.document.write(labelData); win.document.close(); }
-      } else {
-        const binary = atob(labelData);
-        const bytes = new Uint8Array(binary.length);
-        for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
-        const blob = new Blob([bytes], { type: 'application/pdf' });
-        const url = URL.createObjectURL(blob);
-        const a = document.createElement('a');
-        a.href = url;
-        a.download = `label-${order.salesRecordNumber}.pdf`;
-        a.click();
-        URL.revokeObjectURL(url);
-      }
-    }
-    toast.success(`Reprinted ${labels.length} label${labels.length !== 1 ? 's' : ''} for #${order.salesRecordNumber}`);
   };
 
   const handleMarkShipped = () => {
@@ -590,31 +602,46 @@ export function BatchShipping() {
 
       {/* Summary */}
       <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
-        <Card>
+        <Card
+          className={`cursor-pointer transition-all hover:shadow-md ${filterCarrier === 'DPD' ? 'ring-2 ring-purple-400 bg-purple-50' : ''}`}
+          onClick={() => setFilterCarrier((f) => (f === 'DPD' ? 'all' : 'DPD'))}
+        >
           <CardContent className="pt-6">
             <div className="text-2xl font-bold text-purple-600">{dpdOrders.length}</div>
             <p className="text-sm text-slate-500">DPD</p>
           </CardContent>
         </Card>
-        <Card>
+        <Card
+          className={`cursor-pointer transition-all hover:shadow-md ${filterCarrier === 'FedEx' ? 'ring-2 ring-orange-400 bg-orange-50' : ''}`}
+          onClick={() => setFilterCarrier((f) => (f === 'FedEx' ? 'all' : 'FedEx'))}
+        >
           <CardContent className="pt-6">
             <div className="text-2xl font-bold text-orange-500">{fedexOrders.length}</div>
             <p className="text-sm text-slate-500">FedEx</p>
           </CardContent>
         </Card>
-        <Card>
+        <Card
+          className={`cursor-pointer transition-all hover:shadow-md ${filterCarrier === 'express' ? 'ring-2 ring-red-400 bg-red-50' : ''}`}
+          onClick={() => setFilterCarrier((f) => (f === 'express' ? 'all' : 'express'))}
+        >
           <CardContent className="pt-6">
             <div className="text-2xl font-bold text-red-600">{expressOrders.length}</div>
             <p className="text-sm text-slate-500">Express</p>
           </CardContent>
         </Card>
-        <Card>
+        <Card
+          className={`cursor-pointer transition-all hover:shadow-md ${filterCarrier === 'collection' ? 'ring-2 ring-slate-400 bg-slate-50' : ''}`}
+          onClick={() => setFilterCarrier((f) => (f === 'collection' ? 'all' : 'collection'))}
+        >
           <CardContent className="pt-6">
             <div className="text-2xl font-bold text-slate-400">{collectionOrders.length}</div>
             <p className="text-sm text-slate-500">Collection (no label)</p>
           </CardContent>
         </Card>
-        <Card>
+        <Card
+          className={`cursor-pointer transition-all hover:shadow-md ${filterCarrier === 'multi-buyer' ? 'ring-2 ring-amber-400 bg-amber-50' : ''}`}
+          onClick={() => setFilterCarrier((f) => (f === 'multi-buyer' ? 'all' : 'multi-buyer'))}
+        >
           <CardContent className="pt-6">
             <div className="text-2xl font-bold text-amber-600">{multiOrderBuyers.length}</div>
             <p className="text-sm text-slate-500">Multi-order buyers</p>
@@ -629,6 +656,18 @@ export function BatchShipping() {
           </CardContent>
         </Card>
       </div>
+
+      {filterCarrier !== 'all' && (
+        <div className="flex items-center gap-2">
+          <span className="text-sm text-slate-600">Filtered by:</span>
+          <Badge variant="outline" className="capitalize">
+            {filterCarrier === 'multi-buyer' ? 'Multi-order buyers' : filterCarrier}
+          </Badge>
+          <Button variant="ghost" size="sm" className="h-7 text-xs" onClick={() => setFilterCarrier('all')}>
+            Clear
+          </Button>
+        </div>
+      )}
 
       {/* AI anomaly warnings */}
       {aiIssues && aiIssues.length > 0 && (
@@ -684,8 +723,8 @@ export function BatchShipping() {
                 disabled={bookingLabels}
                 onClick={() => handleBookLabels(dpdOrders)}
               >
-                <Printer className="h-3 w-3 mr-1" />
-                {bookingLabels ? 'Printing...' : `Print Labels DPD (${dpdOrders.length})`}
+                <Truck className="h-3 w-3 mr-1" />
+                {bookingLabels ? 'Booking...' : `Book Labels DPD (${dpdOrders.length})`}
               </Button>
             </>
           )}
@@ -716,8 +755,8 @@ export function BatchShipping() {
                 disabled={bookingLabels}
                 onClick={() => handleBookLabels(fedexOrders)}
               >
-                <Printer className="h-3 w-3 mr-1" />
-                {bookingLabels ? 'Printing...' : `Print Labels FedEx (${fedexOrders.length})`}
+                <Truck className="h-3 w-3 mr-1" />
+                {bookingLabels ? 'Booking...' : `Book Labels FedEx (${fedexOrders.length})`}
               </Button>
             </>
           )}
@@ -766,7 +805,7 @@ export function BatchShipping() {
             disabled={bookingLabels}
             onClick={() => handleBookLabels(exportableOrders.filter((o) => selectedIds.has(o.id)))}
           >
-            <Printer className="h-3 w-3 mr-1" />
+            <Truck className="h-3 w-3 mr-1" />
             {bookingLabels ? 'Booking...' : 'Book Labels'}
           </Button>
           <Button size="sm" variant="outline" onClick={handleMarkShipped}>
@@ -825,7 +864,7 @@ export function BatchShipping() {
               handleBookLabels(selectedOrders);
             }}
           >
-            <Printer className="h-3 w-3 mr-1" />
+            <Truck className="h-3 w-3 mr-1" />
             {bookingLabels ? 'Booking...' : 'Book Labels'}
           </Button>
           <Button size="sm" variant="outline" onClick={handleMarkBundlesShipped}>
@@ -840,11 +879,12 @@ export function BatchShipping() {
         <Card>
           <CardHeader>
             <CardTitle className="text-base">
-              Orders Ready for Shipping ({shippableOrders.length})
+              Orders Ready for Shipping ({filteredShipmentGroups.length})
+              {filterCarrier !== 'all' && <span className="text-sm font-normal text-slate-500 ml-2">filtered</span>}
             </CardTitle>
           </CardHeader>
           <CardContent>
-            {shipmentGroups.length === 0 ? (
+            {filteredShipmentGroups.length === 0 ? (
               <div className="text-center py-8 text-slate-500">
                 <Truck className="h-12 w-12 mx-auto mb-3 text-slate-300" />
                 <p>No orders pending shipment</p>
@@ -855,7 +895,7 @@ export function BatchShipping() {
                   <TableRow>
                     <TableHead className="w-10">
                       <button onClick={toggleAll} className="p-1">
-                        {selectedIds.size === shipmentGroups.length && shipmentGroups.length > 0 ? (
+                        {selectedIds.size === filteredShipmentGroups.length && filteredShipmentGroups.length > 0 ? (
                           <CheckSquare className="h-4 w-4 text-blue-600" />
                         ) : selectedIds.size > 0 ? (
                           <MinusSquare className="h-4 w-4 text-blue-400" />
@@ -864,11 +904,12 @@ export function BatchShipping() {
                         )}
                       </button>
                     </TableHead>
-                    <TableHead className="text-xs">Amazon Order ID</TableHead>
-                    <TableHead className="text-xs">Recipient</TableHead>
+                    <TableHead className="text-xs cursor-pointer hover:bg-slate-100" onClick={() => handleSort('salesRecordNumber')}>Amazon Order ID {sortField === 'salesRecordNumber' && (sortDir === 'asc' ? '▲' : '▼')}</TableHead>
+                    <TableHead className="text-xs cursor-pointer hover:bg-slate-100" onClick={() => handleSort('postToName')}>Recipient {sortField === 'postToName' && (sortDir === 'asc' ? '▲' : '▼')}</TableHead>
                     <TableHead className="text-xs">Address</TableHead>
                     <TableHead className="text-xs">Postcode</TableHead>
-                    <TableHead className="text-xs">Item</TableHead>
+                    <TableHead className="text-xs cursor-pointer hover:bg-slate-100" onClick={() => handleSort('postByDate')}>Post By {sortField === 'postByDate' && (sortDir === 'asc' ? '▲' : '▼')}</TableHead>
+                    <TableHead className="text-xs cursor-pointer hover:bg-slate-100" onClick={() => handleSort('itemTitle')}>Item {sortField === 'itemTitle' && (sortDir === 'asc' ? '▲' : '▼')}</TableHead>
                     <TableHead className="text-xs">Price</TableHead>
                     <TableHead className="text-xs">Boxes</TableHead>
                     <TableHead className="text-xs">Carrier</TableHead>
@@ -879,12 +920,12 @@ export function BatchShipping() {
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {shipmentGroups.map((group) => {
+                  {filteredShipmentGroups.map((group) => {
                     const { primary, combinedTitle, totalPrice, deliveryCarrier, deliveryType, isMultiItem, ids } = group;
                     const groupKey = primary.salesRecordNumber || primary.id;
                     const isSelected = ids.some((id) => selectedIds.has(id));
                     return (
-                      <TableRow key={groupKey} className={deliveryType === 'express' ? 'bg-red-50 border-l-4 border-red-400' : isMultiItem ? 'bg-amber-50' : ''}>
+                      <TableRow key={groupKey} className={`${getOrderRowClass(primary)} ${isMultiItem && getOrderRowClass(primary) === '' ? 'bg-amber-50' : ''}`.trim()}>
                         <TableCell>
                           <button onClick={() => ids.forEach((id) => toggleSelect(id))} className="p-1">
                             {isSelected ? (
@@ -906,6 +947,9 @@ export function BatchShipping() {
                           {primary.postToAddress1}, {primary.postToCity}
                         </TableCell>
                         <TableCell className="text-xs font-mono">{primary.postToPostcode}</TableCell>
+                        <TableCell className="text-xs text-slate-600 whitespace-nowrap">
+                          {primary.postByDate ? new Date(primary.postByDate).toLocaleDateString('en-GB') : '—'}
+                        </TableCell>
                         <TableCell className="text-xs max-w-[220px]">
                           {isMultiItem ? (
                             <ul className="space-y-0.5">
@@ -1004,15 +1048,13 @@ export function BatchShipping() {
                               {ORDER_STATUS_CONFIG[primary.status].label}
                             </Badge>
                             {primary.labelPrintedAt ? (
-                              <button
-                                onClick={(e) => { e.stopPropagation(); reprintLabels(primary); }}
-                                className="flex items-center gap-1 text-xs text-green-700 bg-green-50 border border-green-300 rounded px-1.5 py-0.5 hover:bg-green-100 transition-colors whitespace-nowrap"
-                                title={`Label printed ${new Date(primary.labelPrintedAt).toLocaleString('en-GB')}`}
+                              <span
+                                className="flex items-center gap-1 text-xs text-green-700 bg-green-50 border border-green-300 rounded px-1.5 py-0.5 whitespace-nowrap"
+                                title={`Label booked ${new Date(primary.labelPrintedAt).toLocaleString('en-GB')}`}
                               >
                                 <CheckCircle2 className="h-3 w-3" />
-                                <span>Label</span>
-                                <RotateCcw className="h-2.5 w-2.5 ml-0.5 opacity-60" />
-                              </button>
+                                <span>Label booked</span>
+                              </span>
                             ) : null}
                           </div>
                         </TableCell>
@@ -1041,10 +1083,10 @@ export function BatchShipping() {
           <CardHeader>
             <div className="flex items-center justify-between">
               <CardTitle className="text-base">
-                Buyers ({bundleGroups.length}) &mdash; {shippableOrders.length} orders total
+                Buyers ({filteredBundleGroups.length}) &mdash; {filteredBundleGroups.reduce((s, g) => s + g.orders.length, 0)} orders total
               </CardTitle>
               <button onClick={toggleAllBuyers} className="p-1">
-                {selectedBuyerKeys.size === bundleGroups.length && bundleGroups.length > 0 ? (
+                {selectedBuyerKeys.size === filteredBundleGroups.length && filteredBundleGroups.length > 0 ? (
                   <CheckSquare className="h-4 w-4 text-blue-600" />
                 ) : selectedBuyerKeys.size > 0 ? (
                   <MinusSquare className="h-4 w-4 text-blue-400" />
@@ -1055,14 +1097,14 @@ export function BatchShipping() {
             </div>
           </CardHeader>
           <CardContent>
-            {bundleGroups.length === 0 ? (
+            {filteredBundleGroups.length === 0 ? (
               <div className="text-center py-8 text-slate-500">
                 <Truck className="h-12 w-12 mx-auto mb-3 text-slate-300" />
                 <p>No orders pending shipment</p>
               </div>
             ) : (
               <div className="space-y-2">
-                {bundleGroups.map((group) => {
+                {filteredBundleGroups.map((group) => {
                   const isMulti = group.orders.length > 1;
                   const isExpanded = expandedBuyers.has(group.buyerUsername);
                   const isSelected = selectedBuyerKeys.has(group.buyerUsername);

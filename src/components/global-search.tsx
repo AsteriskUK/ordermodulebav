@@ -21,12 +21,14 @@ import {
   ArrowRight,
   Sparkles,
   Loader2,
+  MapPin,
 } from 'lucide-react';
 
 const PAGES = [
   { label: 'Dashboard', href: '/', icon: LayoutDashboard, keywords: 'home overview' },
   { label: 'Import Orders', href: '/import', icon: Upload, keywords: 'csv upload import ebay backmarket' },
   { label: 'Order Sheet', href: '/orders', icon: ClipboardList, keywords: 'orders list table' },
+  { label: 'Tracking', href: '/tracking', icon: MapPin, keywords: 'tracking delivery dpd fedex delivered' },
   { label: 'Queue', href: '/packaging', icon: Workflow, keywords: 'queue packaging pipeline assemble check pack' },
   { label: 'Batch Shipping', href: '/shipping', icon: Truck, keywords: 'shipping ship labels dpd fedex' },
   { label: 'Batches', href: '/batches', icon: Package, keywords: 'batches imports history' },
@@ -61,6 +63,13 @@ export function GlobalSearch() {
   const [aiResultIds, setAiResultIds] = useState<string[] | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
   const listRef = useRef<HTMLDivElement>(null);
+
+  const safeLower = (value: string | null | undefined) => (value ?? '').toLowerCase();
+  const safeIncludes = (value: string | null | undefined, q: string) => safeLower(value).includes(q);
+  const safeTruncate = (value: string | null | undefined, len: number) => {
+    const s = value ?? '';
+    return s.length > len ? s.slice(0, len) + '…' : s;
+  };
 
   const looksLikeNaturalLanguage = query.trim().split(/\s+/).length >= 3;
 
@@ -146,24 +155,24 @@ export function GlobalSearch() {
 
     // Orders
     const matchedOrders = orders.filter((o) =>
-      o.salesRecordNumber.toLowerCase().includes(q) ||
-      o.orderNumber.toLowerCase().includes(q) ||
-      o.postToName.toLowerCase().includes(q) ||
-      o.buyerUsername.toLowerCase().includes(q) ||
-      o.buyerEmail.toLowerCase().includes(q) ||
-      o.itemTitle.toLowerCase().includes(q) ||
-      o.postToPostcode.toLowerCase().includes(q) ||
-      o.trackingNumber.toLowerCase().includes(q) ||
-      o.customLabel.toLowerCase().includes(q)
+      safeIncludes(o.salesRecordNumber, q) ||
+      safeIncludes(o.orderNumber, q) ||
+      safeIncludes(o.postToName, q) ||
+      safeIncludes(o.buyerUsername, q) ||
+      safeIncludes(o.buyerEmail, q) ||
+      safeIncludes(o.itemTitle, q) ||
+      safeIncludes(o.postToPostcode, q) ||
+      safeIncludes(o.trackingNumber, q) ||
+      safeIncludes(o.customLabel, q)
     ).slice(0, 8);
 
     for (const o of matchedOrders) {
-      const cfg = ORDER_STATUS_CONFIG[o.status];
+      const cfg = ORDER_STATUS_CONFIG[o.status] ?? { label: o.status, color: 'bg-slate-100 text-slate-800 border-slate-200' };
       out.push({
         kind: 'order',
         id: o.id,
-        label: `#${o.salesRecordNumber} — ${o.postToName}`,
-        sub: o.itemTitle.length > 60 ? o.itemTitle.slice(0, 60) + '…' : o.itemTitle,
+        label: `#${o.salesRecordNumber ?? '—'} — ${o.postToName ?? '—'}`,
+        sub: safeTruncate(o.itemTitle, 60),
         href: `/orders`,
         badge: cfg.label,
         badgeColor: cfg.color,
@@ -173,9 +182,9 @@ export function GlobalSearch() {
 
     // Returns
     const matchedReturns = returns.filter((r) =>
-      r.salesRecordNumber.toLowerCase().includes(q) ||
-      r.itemTitle.toLowerCase().includes(q) ||
-      r.reason.toLowerCase().includes(q)
+      safeIncludes(r.salesRecordNumber, q) ||
+      safeIncludes(r.itemTitle, q) ||
+      safeIncludes(r.reason, q)
     ).slice(0, 4);
 
     for (const r of matchedReturns) {
@@ -195,12 +204,12 @@ export function GlobalSearch() {
     if (aiResultIds !== null) {
       const aiOrders = orders.filter((o) => aiResultIds.includes(o.id));
       const aiResults: Result[] = aiOrders.map((o) => {
-        const cfg = ORDER_STATUS_CONFIG[o.status];
+        const cfg = ORDER_STATUS_CONFIG[o.status] ?? { label: o.status, color: 'bg-slate-100 text-slate-800 border-slate-200' };
         return {
           kind: 'order' as ResultKind,
           id: `ai-${o.id}`,
-          label: `#${o.salesRecordNumber} — ${o.postToName}`,
-          sub: o.itemTitle.length > 60 ? o.itemTitle.slice(0, 60) + '…' : o.itemTitle,
+          label: `#${o.salesRecordNumber ?? '—'} — ${o.postToName ?? '—'}`,
+          sub: safeTruncate(o.itemTitle, 60),
           href: `/orders`,
           badge: cfg.label,
           badgeColor: cfg.color,

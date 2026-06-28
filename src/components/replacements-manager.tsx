@@ -117,6 +117,18 @@ export function ReplacementsManager() {
                               <li key={idx}>
                                 {item.itemTitle} (x{item.quantity})
                                 {item.notes && <span className="text-slate-400 ml-1">— {item.notes}</span>}
+                                {item.imageUrls && item.imageUrls.length > 0 && (
+                                  <div className="flex -space-x-1 mt-1">
+                                    {item.imageUrls.slice(0, 3).map((url, i) => (
+                                      <img key={i} src={url} alt="" className="h-6 w-6 rounded-full border border-white object-cover bg-slate-100" />
+                                    ))}
+                                    {item.imageUrls.length > 3 && (
+                                      <span className="h-6 w-6 rounded-full border border-white bg-slate-200 text-[9px] flex items-center justify-center text-slate-600">
+                                        +{item.imageUrls.length - 3}
+                                      </span>
+                                    )}
+                                  </div>
+                                )}
                               </li>
                             ))}
                           </ul>
