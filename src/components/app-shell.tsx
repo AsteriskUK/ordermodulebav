@@ -8,6 +8,8 @@ import { Button } from './ui/button';
 import { useSupabaseSync } from '@/hooks/use-supabase-sync';
 import { CancellationAlert } from './cancellation-alert';
 import { TrackingScheduler } from './tracking-scheduler';
+import { useOrderStore } from '@/lib/store';
+import { SignIn } from './sign-in';
 
 const SIDEBAR_AUTO_HIDE_MS = 3000;
 
@@ -46,6 +48,28 @@ export function AppShell({ children }: { children: React.ReactNode }) {
 
   // Initialize Supabase sync (auto-syncs on load and periodically)
   const { isSyncing, isOnline } = useSupabaseSync();
+
+  const users = useOrderStore((s) => s.users);
+  const currentUserId = useOrderStore((s) => s.currentUserId);
+  const currentUser = users.find((u) => u.id === currentUserId);
+
+  // Wait for the persisted store to rehydrate so an already-signed-in user
+  // doesn't briefly flash the sign-in screen on reload.
+  const [hydrated, setHydrated] = useState(useOrderStore.persist.hasHydrated());
+  useEffect(() => {
+    const unsub = useOrderStore.persist.onFinishHydration(() => setHydrated(true));
+    setHydrated(useOrderStore.persist.hasHydrated());
+    return unsub;
+  }, []);
+
+  if (!hydrated) {
+    return <div className="h-screen w-screen bg-slate-900" />;
+  }
+
+  // Not signed in → lock everything down to the sign-in screen (no sidebar, no content).
+  if (!currentUser) {
+    return <SignIn />;
+  }
 
   return (
     <div className="flex h-screen overflow-hidden">

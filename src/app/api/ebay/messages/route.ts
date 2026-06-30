@@ -15,10 +15,12 @@ function getSupabase() {
 async function getAccessToken(): Promise<string | null> {
   const supabase = getSupabase();
 
+  // Message-scoped token cache, kept separate from the sell.fulfillment token
+  // cached under `ebay_access_token` (eBay access tokens are scope-bound).
   const [{ data: atRow }, { data: rtRow }, { data: expRow }] = await Promise.all([
-    supabase.from('app_settings').select('value').eq('key', 'ebay_access_token').single(),
+    supabase.from('app_settings').select('value').eq('key', 'ebay_msg_access_token').single(),
     supabase.from('app_settings').select('value').eq('key', 'ebay_refresh_token').single(),
-    supabase.from('app_settings').select('value').eq('key', 'ebay_token_expires_at').single(),
+    supabase.from('app_settings').select('value').eq('key', 'ebay_msg_token_expires_at').single(),
   ]);
 
   const accessToken = atRow?.value;
@@ -46,8 +48,8 @@ async function getAccessToken(): Promise<string | null> {
   const data = await res.json() as { access_token: string; expires_in: number };
   const newExpiry = Date.now() + data.expires_in * 1000;
   await getSupabase().from('app_settings').upsert([
-    { key: 'ebay_access_token', value: data.access_token, updated_at: new Date().toISOString() },
-    { key: 'ebay_token_expires_at', value: String(newExpiry), updated_at: new Date().toISOString() },
+    { key: 'ebay_msg_access_token', value: data.access_token, updated_at: new Date().toISOString() },
+    { key: 'ebay_msg_token_expires_at', value: String(newExpiry), updated_at: new Date().toISOString() },
   ]);
   return data.access_token;
 }
