@@ -273,6 +273,84 @@ WHERE metadata ? 'responsible_department'
    OR metadata ? 'responsible_user_id'
    OR metadata ? 'responsible_user_name';
 
+-- eBay messages: track conversation for on-demand thread loading + incremental sync
+ALTER TABLE ebay_messages ADD COLUMN IF NOT EXISTS conversation_id TEXT;
+CREATE INDEX IF NOT EXISTS idx_ebay_messages_conversation_id ON ebay_messages(conversation_id);
+
+-- Customer support tickets (raised from buyer messages or created manually)
+CREATE TABLE IF NOT EXISTS tickets (
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  subject TEXT NOT NULL,
+  body TEXT,
+  category TEXT,                              -- reason e.g. wrong-item | damaged | not-received | other
+  status TEXT NOT NULL DEFAULT 'open',        -- open | in_progress | waiting | resolved | closed
+  priority TEXT NOT NULL DEFAULT 'normal',    -- low | normal | high | urgent
+  department TEXT,                            -- responsible department (laptop, gaming-pc, comms, returns...)
+  assignee_user_id TEXT,                      -- optional specific person within the department
+  assignee_name TEXT,
+  contact_method TEXT,                        -- phone | email | ebay_message
+  contact_value TEXT,                         -- number / email / eBay username to use
+  -- linkage to order + conversation
+  order_id TEXT,
+  sales_record_number TEXT,
+  order_number TEXT,
+  ebay_conversation_id TEXT,
+  buyer_username TEXT,
+  buyer_name TEXT,
+  item_title TEXT,
+  -- audit
+  created_by_id TEXT,
+  created_by_name TEXT,
+  activity JSONB DEFAULT '[]'::jsonb,         -- [{ at, byId, byName, type, text }]
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  updated_at TIMESTAMPTZ DEFAULT NOW(),
+  resolved_at TIMESTAMPTZ
+);
+CREATE INDEX IF NOT EXISTS idx_tickets_status ON tickets(status);
+CREATE INDEX IF NOT EXISTS idx_tickets_department ON tickets(department);
+CREATE INDEX IF NOT EXISTS idx_tickets_assignee ON tickets(assignee_user_id);
+CREATE INDEX IF NOT EXISTS idx_tickets_created_at ON tickets(created_at DESC);
+
+ALTER TABLE tickets ENABLE ROW LEVEL SECURITY;
+DO $$
+BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_policies WHERE schemaname = 'public' AND tablename = 'tickets' AND policyname = 'Allow all') THEN
+    CREATE POLICY "Allow all" ON tickets FOR ALL USING (true);
+  END IF;
+END
+$$;
+CREATE OR REPLACE TRIGGER update_tickets_updated_at BEFORE UPDATE ON tickets
+  FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
+
+-- Missing items / missed parts (previously local-only — now persisted)
+CREATE TABLE IF NOT EXISTS missing_items (
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  order_id TEXT,
+  sales_record_number TEXT,
+  buyer_username TEXT,
+  item_title TEXT,
+  missing_parts JSONB DEFAULT '[]'::jsonb,   -- [{ description, quantity, notes }]
+  notes TEXT,
+  status TEXT DEFAULT 'pending',             -- pending | dispatched | resolved
+  reported_at TIMESTAMPTZ DEFAULT NOW(),
+  reported_by_user_id TEXT,
+  reported_by_user_name TEXT,
+  responsible_department TEXT,
+  responsible_user_id TEXT,
+  responsible_user_name TEXT,
+  dispatch_order_id TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_missing_items_status ON missing_items(status);
+CREATE INDEX IF NOT EXISTS idx_missing_items_reported_at ON missing_items(reported_at DESC);
+ALTER TABLE missing_items ENABLE ROW LEVEL SECURITY;
+DO $$
+BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_policies WHERE schemaname = 'public' AND tablename = 'missing_items' AND policyname = 'Allow all') THEN
+    CREATE POLICY "Allow all" ON missing_items FOR ALL USING (true);
+  END IF;
+END
+$$;
+
 -- ==================== TRIGGERS ====================
 
 -- Auto-update updated_at timestamp

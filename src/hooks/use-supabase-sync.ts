@@ -35,12 +35,14 @@ export function useSupabaseSync() {
       const existingOrderIds = new Set(currentState.orders.map(o => o.id));
       const existingBatchIds = new Set(currentState.batches.map(b => b.id));
       const existingReturnIds = new Set(currentState.returns.map(r => r.id));
-      
+      const existingMissingIds = new Set(currentState.missingItems.map(m => m.id));
+
       // Add any orders/batches/returns from Supabase that don't exist locally
       const newOrders = data.orders.filter(o => !existingOrderIds.has(o.id));
       const newBatches = data.batches.filter(b => !existingBatchIds.has(b.id));
       const newReturns = data.returns.filter(r => !existingReturnIds.has(r.id));
-      
+      const newMissing = data.missingItems.filter(m => !existingMissingIds.has(m.id));
+
       useOrderStore.setState({
         // Users: Supabase has more users, use it if available
         users: data.users.length > 0 ? data.users : currentState.users,
@@ -57,13 +59,17 @@ export function useSupabaseSync() {
         leaveRequests: data.leaveRequests.length > 0 
           ? data.leaveRequests 
           : currentState.leaveRequests,
-        leaveBalances: data.leaveBalances.length > 0 
-          ? data.leaveBalances 
+        leaveBalances: data.leaveBalances.length > 0
+          ? data.leaveBalances
           : currentState.leaveBalances,
+        // Tickets: Supabase is source of truth for multi-device sync
+        tickets: data.tickets.length > 0 ? data.tickets : currentState.tickets,
+        // Missing items: merge local + any from Supabase
+        missingItems: [...currentState.missingItems, ...newMissing],
       });
-      
+
       setLastSync(new Date());
-      console.log('Synced from Supabase:', { newOrders: newOrders.length, newBatches: newBatches.length, newReturns: newReturns.length });
+      console.log('Synced from Supabase:', { newOrders: newOrders.length, newBatches: newBatches.length, newReturns: newReturns.length, tickets: data.tickets.length });
     } catch (err) {
       console.error('Error syncing from Supabase:', err);
       toast.error('Failed to sync from cloud');

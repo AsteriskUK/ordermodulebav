@@ -1,8 +1,8 @@
 import { create } from 'zustand';
 import { persist, createJSONStorage } from 'zustand/middleware';
 import { get, set as idbSet, del } from 'idb-keyval';
-import { Order, OrderNote, OrderStatus, Batch, DeliveryCarrier, DeliveryType, AppUser, EodEvent, ReturnRecord, ReplacementItem, MissingItemRecord, Department, AttendanceRecord, LeaveRequest, LeaveBalance } from './types';
-import { syncAttendance, syncLeaveRequest, syncLeaveBalance, syncOrder, syncBatch, syncUser, deleteUserFromSupabase, syncReturn } from './supabase-store';
+import { Order, OrderNote, OrderStatus, Batch, DeliveryCarrier, DeliveryType, AppUser, EodEvent, ReturnRecord, ReplacementItem, MissingItemRecord, Department, AttendanceRecord, LeaveRequest, LeaveBalance, TicketRecord, TicketActivity } from './types';
+import { syncAttendance, syncLeaveRequest, syncLeaveBalance, syncOrder, syncBatch, syncUser, deleteUserFromSupabase, syncReturn, syncTicket, deleteTicketFromSupabase, syncMissingItem } from './supabase-store';
 
 // Generate proper UUID v4 for PostgreSQL compatibility
 function generateUUID(): string {
@@ -85,6 +85,11 @@ interface OrderStore {
   addMissingItem: (record: MissingItemRecord) => void;
   updateMissingItem: (id: string, updates: Partial<MissingItemRecord>) => void;
   createMissingItemOrder: (missingItemId: string) => Order;
+  // Support Tickets
+  tickets: TicketRecord[];
+  addTicket: (ticket: TicketRecord) => void;
+  updateTicket: (id: string, updates: Partial<TicketRecord>, activity?: Omit<TicketActivity, 'at'>) => void;
+  deleteTicket: (id: string) => void;
   // HR Actions
   attendanceRecords: AttendanceRecord[];
   leaveRequests: LeaveRequest[];
@@ -107,6 +112,7 @@ export const useOrderStore = create<OrderStore>()(
       eodEvents: [] as EodEvent[],
       returns: [] as ReturnRecord[],
       missingItems: [] as MissingItemRecord[],
+      tickets: [] as TicketRecord[],
       attendanceRecords: [] as AttendanceRecord[],
       leaveRequests: [] as LeaveRequest[],
       leaveBalances: [] as LeaveBalance[],
@@ -452,12 +458,17 @@ export const useOrderStore = create<OrderStore>()(
           return { returns: updatedReturns };
         });
       },
-      addMissingItem: (record) =>
-        set((state) => ({ missingItems: [...state.missingItems, record] })),
+      addMissingItem: (record) => {
+        set((state) => ({ missingItems: [...state.missingItems, record] }));
+        syncMissingItem(record).catch(console.error);
+      },
       updateMissingItem: (id, updates) =>
-        set((state) => ({
-          missingItems: state.missingItems.map((m) => m.id === id ? { ...m, ...updates } : m),
-        })),
+        set((state) => {
+          const missingItems = state.missingItems.map((m) => m.id === id ? { ...m, ...updates } : m);
+          const updated = missingItems.find((m) => m.id === id);
+          if (updated) syncMissingItem(updated).catch(console.error);
+          return { missingItems };
+        }),
       createMissingItemOrder: (missingItemId) => {
         const state = get();
         const record = state.missingItems.find((m) => m.id === missingItemId);
@@ -519,9 +530,41 @@ export const useOrderStore = create<OrderStore>()(
             m.id === missingItemId ? { ...m, dispatchOrderId: newOrderId, status: 'dispatched' } : m
           ),
         }));
+        const dispatched = get().missingItems.find((m) => m.id === missingItemId);
+        if (dispatched) syncMissingItem(dispatched).catch(console.error);
         syncBatch(batch, state.currentUserId || undefined).catch(console.error);
         syncOrder(newOrder).catch(console.error);
         return newOrder;
+      },
+      // ── Support Tickets ──
+      addTicket: (ticket) => {
+        set((state) => ({ tickets: [ticket, ...state.tickets] }));
+        syncTicket(ticket).catch(console.error);
+      },
+      updateTicket: (id, updates, activity) => {
+        set((state) => {
+          const tickets = state.tickets.map((t) => {
+            if (t.id !== id) return t;
+            const now = new Date().toISOString();
+            const merged: TicketRecord = {
+              ...t,
+              ...updates,
+              updatedAt: now,
+              activity: activity ? [...(t.activity ?? []), { ...activity, at: now }] : (t.activity ?? []),
+            };
+            // Stamp resolved time when moving into a terminal state
+            if (updates.status && (updates.status === 'resolved' || updates.status === 'closed') && !t.resolvedAt) {
+              merged.resolvedAt = now;
+            }
+            syncTicket(merged).catch(console.error);
+            return merged;
+          });
+          return { tickets };
+        });
+      },
+      deleteTicket: (id) => {
+        set((state) => ({ tickets: state.tickets.filter((t) => t.id !== id) }));
+        deleteTicketFromSupabase(id).catch(console.error);
       },
       createReplacementOrder: (returnId) => {
         const state = get();
@@ -727,6 +770,7 @@ export const useOrderStore = create<OrderStore>()(
           eodEvents:   s.eodEvents   ?? [],
           returns:     s.returns     ?? [],
           missingItems: (s as OrderStore).missingItems ?? [],
+          tickets: (s as OrderStore).tickets ?? [],
           attendanceRecords: (s as OrderStore).attendanceRecords ?? [],
           leaveRequests: (s as OrderStore).leaveRequests ?? [],
           leaveBalances: (s as OrderStore).leaveBalances ?? [],

@@ -144,6 +144,69 @@ export interface MissingPart {
   notes?: string;
 }
 
+// ==================== SUPPORT TICKETS ====================
+
+export type TicketStatus = 'open' | 'in_progress' | 'waiting' | 'resolved' | 'closed';
+export type TicketPriority = 'low' | 'normal' | 'high' | 'urgent';
+export type TicketContactMethod = 'phone' | 'email' | 'ebay_message';
+
+export const TICKET_STATUS_CONFIG: Record<TicketStatus, { label: string; color: string }> = {
+  open:        { label: 'Open',        color: 'bg-blue-100 text-blue-800 border-blue-300' },
+  in_progress: { label: 'In Progress', color: 'bg-amber-100 text-amber-800 border-amber-300' },
+  waiting:     { label: 'Waiting',     color: 'bg-purple-100 text-purple-800 border-purple-300' },
+  resolved:    { label: 'Resolved',    color: 'bg-green-100 text-green-800 border-green-300' },
+  closed:      { label: 'Closed',      color: 'bg-slate-100 text-slate-600 border-slate-300' },
+};
+
+export const TICKET_PRIORITY_CONFIG: Record<TicketPriority, { label: string; color: string }> = {
+  low:    { label: 'Low',    color: 'bg-slate-100 text-slate-600 border-slate-300' },
+  normal: { label: 'Normal', color: 'bg-sky-100 text-sky-700 border-sky-300' },
+  high:   { label: 'High',   color: 'bg-orange-100 text-orange-800 border-orange-300' },
+  urgent: { label: 'Urgent', color: 'bg-red-100 text-red-800 border-red-300' },
+};
+
+export interface TicketActivity {
+  at: string;
+  byId?: string;
+  byName?: string;
+  /** note = free comment; status = status change; assign = (re)assignment; create = ticket created */
+  type: 'note' | 'status' | 'assign' | 'create';
+  text: string;
+}
+
+export interface TicketRecord {
+  id: string;
+  subject: string;
+  body?: string;
+  /** Reason category, e.g. wrong-item | damaged | not-received | other */
+  category?: string;
+  status: TicketStatus;
+  priority: TicketPriority;
+  /** Responsible department; anyone in it sees the ticket */
+  department?: Department;
+  /** Optional specific person within the department */
+  assigneeUserId?: string;
+  assigneeName?: string;
+  /** How the customer prefers to be contacted */
+  contactMethod?: TicketContactMethod;
+  contactValue?: string;
+  // linkage
+  orderId?: string;
+  salesRecordNumber?: string;
+  orderNumber?: string;
+  ebayConversationId?: string;
+  buyerUsername?: string;
+  buyerName?: string;
+  itemTitle?: string;
+  // audit
+  createdById?: string;
+  createdByName?: string;
+  activity: TicketActivity[];
+  createdAt: string;
+  updatedAt: string;
+  resolvedAt?: string;
+}
+
 export interface EodReport {
   date: string;
   events: EodEvent[];

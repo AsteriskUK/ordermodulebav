@@ -22,6 +22,8 @@ import {
 } from '@/components/ui/select';
 import { MapPin, Package, User, Truck, MessageSquare, Send, Trash2, ShoppingBag, Star, PackageMinus, Plus } from 'lucide-react';
 import { DeliveryBadge } from './delivery-badge';
+import { ReturnLabelDialog } from './return-label-dialog';
+import { RotateCcw } from 'lucide-react';
 import { toast } from 'sonner';
 
 interface Props {
@@ -59,6 +61,7 @@ export function OrderDetailDialog({ order, onClose }: Props) {
   const [missingDept, setMissingDept] = useState<Department | ''>('');
 
   // eBay messaging
+  const [showReturnLabel, setShowReturnLabel] = useState(false);
   const [ebayMsgText, setEbayMsgText] = useState('');
   const [ebayMsgReason, setEbayMsgReason] = useState('SHIPPING');
   const [ebayMsgSending, setEbayMsgSending] = useState(false);
@@ -224,6 +227,16 @@ export function OrderDetailDialog({ order, onClose }: Props) {
               </SelectContent>
             </Select>
           </div>
+
+          {/* Return label — available once the order is packed */}
+          {order.status === 'packed' && (
+            <div className="flex items-center gap-3">
+              <span className="text-sm font-medium text-slate-600">Returns:</span>
+              <Button size="sm" variant="outline" onClick={() => setShowReturnLabel(true)}>
+                <RotateCcw className="h-3.5 w-3.5 mr-1.5" /> Issue return label
+              </Button>
+            </div>
+          )}
 
           {/* Hold/Unhold buttons for comms team only */}
           {isCommsTeam && (
@@ -667,6 +680,7 @@ export function OrderDetailDialog({ order, onClose }: Props) {
           </div>
         </div>
       </DialogContent>
+      {showReturnLabel && <ReturnLabelDialog order={order} onClose={() => setShowReturnLabel(false)} />}
     </Dialog>
   );
 }

@@ -136,6 +136,7 @@ export async function POST(req: NextRequest) {
     await supabase.from('ebay_messages').insert({
       order_id: orderId,
       item_id: itemId,
+      conversation_id: conversationId,
       buyer_username: recipientUsername,
       buyer_name: buyerName,
       item_title: itemTitle,
@@ -156,6 +157,7 @@ export async function POST(req: NextRequest) {
     ebay_message_id: responseData.messageId,
     order_id: orderId,
     item_id: itemId,
+    conversation_id: conversationId,
     buyer_username: recipientUsername,
     buyer_name: buyerName,
     item_title: itemTitle,

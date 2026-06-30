@@ -24,6 +24,7 @@ import {
   Store,
   Inbox,
 } from 'lucide-react';
+import { MyTicketsWidget } from './my-tickets-widget';
 
 const statusIcons: Record<OrderStatus, React.ElementType> = {
   pending: Clock,
@@ -193,6 +194,9 @@ export function Dashboard() {
           {isCommsOnly ? 'Buyer messages awaiting action' : 'Overview of your warehouse pipeline'}
         </p>
       </div>
+
+      {/* Active support tickets across the team */}
+      <MyTicketsWidget limit={isCommsOnly ? 10 : 6} />
 
       {/* Summary cards — hidden for comms-only users */}
       {!isCommsOnly && (

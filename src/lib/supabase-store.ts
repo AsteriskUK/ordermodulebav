@@ -1,5 +1,5 @@
 import { supabase } from './supabase-client';
-import { Order, Batch, AppUser, AttendanceRecord, LeaveRequest, LeaveBalance, EodEvent, ReturnRecord } from './types';
+import { Order, Batch, AppUser, AttendanceRecord, LeaveRequest, LeaveBalance, EodEvent, ReturnRecord, TicketRecord, Department, TicketStatus, TicketPriority, TicketContactMethod, TicketActivity, MissingItemRecord, MissingPart } from './types';
 
 // Helper to check if string is valid UUID
 function isValidUUID(str: string): boolean {
@@ -517,10 +517,152 @@ export async function fetchReturns(): Promise<ReturnRecord[]> {
   })) || [];
 }
 
+// ==================== TICKETS ====================
+
+export async function syncTicket(ticket: TicketRecord): Promise<void> {
+  if (!isValidUUID(ticket.id)) {
+    console.log('Skipping sync for ticket with invalid ID:', ticket.id);
+    return;
+  }
+  const { error } = await supabase
+    .from('tickets')
+    .upsert({
+      id: ticket.id,
+      subject: ticket.subject,
+      body: ticket.body,
+      category: ticket.category,
+      status: ticket.status,
+      priority: ticket.priority,
+      department: ticket.department,
+      assignee_user_id: ticket.assigneeUserId,
+      assignee_name: ticket.assigneeName,
+      contact_method: ticket.contactMethod,
+      contact_value: ticket.contactValue,
+      order_id: ticket.orderId,
+      sales_record_number: ticket.salesRecordNumber,
+      order_number: ticket.orderNumber,
+      ebay_conversation_id: ticket.ebayConversationId,
+      buyer_username: ticket.buyerUsername,
+      buyer_name: ticket.buyerName,
+      item_title: ticket.itemTitle,
+      created_by_id: ticket.createdById,
+      created_by_name: ticket.createdByName,
+      activity: ticket.activity ?? [],
+      created_at: ticket.createdAt,
+      resolved_at: ticket.resolvedAt,
+    });
+
+  if (error) console.error('Error syncing ticket:', JSON.stringify(error, null, 2));
+}
+
+export async function deleteTicketFromSupabase(ticketId: string): Promise<void> {
+  if (!isValidUUID(ticketId)) return;
+  const { error } = await supabase.from('tickets').delete().eq('id', ticketId);
+  if (error) console.error('Error deleting ticket:', error);
+}
+
+export async function fetchTickets(): Promise<TicketRecord[]> {
+  const { data, error } = await supabase
+    .from('tickets')
+    .select('*')
+    .order('created_at', { ascending: false });
+
+  if (error) {
+    console.error('Error fetching tickets:', error);
+    return [];
+  }
+
+  return data?.map((t) => ({
+    id: t.id,
+    subject: t.subject,
+    body: t.body ?? undefined,
+    category: t.category ?? undefined,
+    status: (t.status ?? 'open') as TicketStatus,
+    priority: (t.priority ?? 'normal') as TicketPriority,
+    department: (t.department ?? undefined) as Department | undefined,
+    assigneeUserId: t.assignee_user_id ?? undefined,
+    assigneeName: t.assignee_name ?? undefined,
+    contactMethod: (t.contact_method ?? undefined) as TicketContactMethod | undefined,
+    contactValue: t.contact_value ?? undefined,
+    orderId: t.order_id ?? undefined,
+    salesRecordNumber: t.sales_record_number ?? undefined,
+    orderNumber: t.order_number ?? undefined,
+    ebayConversationId: t.ebay_conversation_id ?? undefined,
+    buyerUsername: t.buyer_username ?? undefined,
+    buyerName: t.buyer_name ?? undefined,
+    itemTitle: t.item_title ?? undefined,
+    createdById: t.created_by_id ?? undefined,
+    createdByName: t.created_by_name ?? undefined,
+    activity: (t.activity ?? []) as TicketActivity[],
+    createdAt: t.created_at,
+    updatedAt: t.updated_at ?? t.created_at,
+    resolvedAt: t.resolved_at ?? undefined,
+  })) || [];
+}
+
+// ==================== MISSING ITEMS ====================
+
+export async function syncMissingItem(m: MissingItemRecord): Promise<void> {
+  if (!isValidUUID(m.id)) {
+    console.log('Skipping sync for missing item with invalid ID:', m.id);
+    return;
+  }
+  const { error } = await supabase
+    .from('missing_items')
+    .upsert({
+      id: m.id,
+      order_id: m.orderId,
+      sales_record_number: m.salesRecordNumber,
+      buyer_username: m.buyerUsername,
+      item_title: m.itemTitle,
+      missing_parts: m.missingParts ?? [],
+      notes: m.notes,
+      status: m.status,
+      reported_at: m.reportedAt,
+      reported_by_user_id: m.reportedByUserId,
+      reported_by_user_name: m.reportedByUserName,
+      responsible_department: m.responsibleDepartment,
+      responsible_user_id: m.responsibleUserId,
+      responsible_user_name: m.responsibleUserName,
+      dispatch_order_id: m.dispatchOrderId,
+    });
+  if (error) console.error('Error syncing missing item:', JSON.stringify(error, null, 2));
+}
+
+export async function fetchMissingItems(): Promise<MissingItemRecord[]> {
+  const { data, error } = await supabase
+    .from('missing_items')
+    .select('*')
+    .order('reported_at', { ascending: false });
+
+  if (error) {
+    console.error('Error fetching missing items:', error);
+    return [];
+  }
+
+  return data?.map((m) => ({
+    id: m.id,
+    orderId: m.order_id,
+    salesRecordNumber: m.sales_record_number,
+    buyerUsername: m.buyer_username,
+    itemTitle: m.item_title,
+    missingParts: (m.missing_parts ?? []) as MissingPart[],
+    notes: m.notes ?? '',
+    reportedAt: m.reported_at,
+    reportedByUserId: m.reported_by_user_id ?? undefined,
+    reportedByUserName: m.reported_by_user_name ?? undefined,
+    responsibleDepartment: (m.responsible_department ?? undefined) as Department | undefined,
+    responsibleUserId: m.responsible_user_id ?? undefined,
+    responsibleUserName: m.responsible_user_name ?? undefined,
+    status: (m.status ?? 'pending') as MissingItemRecord['status'],
+    dispatchOrderId: m.dispatch_order_id ?? undefined,
+  })) || [];
+}
+
 // ==================== FULL SYNC ====================
 
 export async function loadAllFromSupabase() {
-  const [users, batches, orders, returns, attendanceRecords, leaveRequests, leaveBalances] = await Promise.all([
+  const [users, batches, orders, returns, attendanceRecords, leaveRequests, leaveBalances, tickets, missingItems] = await Promise.all([
     fetchUsers(),
     fetchBatches(),
     fetchOrders(),
@@ -528,8 +670,10 @@ export async function loadAllFromSupabase() {
     fetchAttendance(),
     fetchLeaveRequests(),
     fetchLeaveBalances(),
+    fetchTickets(),
+    fetchMissingItems(),
   ]);
-  
+
   return {
     users,
     batches,
@@ -538,5 +682,7 @@ export async function loadAllFromSupabase() {
     attendanceRecords,
     leaveRequests,
     leaveBalances,
+    tickets,
+    missingItems,
   };
 }

@@ -13,6 +13,7 @@ import {
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
+import { MyTicketsWidget } from './my-tickets-widget';
 import {
   Clock,
   Wrench,
@@ -371,6 +372,9 @@ export function StaffDashboard() {
           </div>
         </CardContent>
       </Card>
+
+      {/* Tickets assigned to my department / me */}
+      <MyTicketsWidget />
 
       {/* Recent activity — orders I've touched today */}
       {myTodayEvents.length > 0 && (

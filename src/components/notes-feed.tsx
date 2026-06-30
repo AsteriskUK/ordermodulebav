@@ -8,9 +8,13 @@ import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 import { OrderDetailDialog } from './order-detail-dialog';
 import { EbayNewMessageDialog } from './ebay-new-message-dialog';
+import { TicketsPanel } from './tickets-panel';
+import { TicketDialog } from './ticket-dialog';
+import { TicketRecord } from '@/lib/types';
+import { Ticket as TicketIcon } from 'lucide-react';
 import { toast } from 'sonner';
 
-type Tab = 'team' | 'ebay';
+type Tab = 'team' | 'ebay' | 'tickets';
 
 interface FeedEntry {
   note: OrderNote;
@@ -22,6 +26,7 @@ interface FeedEntry {
 interface EbayMessage {
   id: string;
   ebay_message_id: string | null;
+  conversation_id: string | null;
   direction: 'sent' | 'received';
   order_id: string;
   item_id: string | null;
@@ -36,7 +41,8 @@ interface EbayMessage {
 }
 
 interface Conversation {
-  key: string; // buyer_username + order_id
+  key: string; // conversation_id (falls back to buyer_username + order_id)
+  conversation_id: string | null;
   buyer_username: string;
   buyer_name: string | null;
   order_id: string;
@@ -68,8 +74,11 @@ export function NotesFeed() {
   const currentUser = useOrderStore((s) => s.users.find((u) => u.id === s.currentUserId));
   const deleteOrderNote = useOrderStore((s) => s.deleteOrderNote);
   const addOrderNote = useOrderStore((s) => s.addOrderNote);
+  const tickets = useOrderStore((s) => s.tickets);
+  const activeTicketCount = tickets.filter((t) => t.status === 'open' || t.status === 'in_progress' || t.status === 'waiting').length;
 
   const [tab, setTab] = useState<Tab>('team');
+  const [ticketPrefill, setTicketPrefill] = useState<Partial<TicketRecord> | null>(null);
   const [search, setSearch] = useState('');
   const [openOrderId, setOpenOrderId] = useState<string | null>(null);
   const [showAddForm, setShowAddForm] = useState(false);
@@ -80,18 +89,19 @@ export function NotesFeed() {
   // eBay messages
   const [ebayMessages, setEbayMessages] = useState<EbayMessage[]>([]);
   const [ebayLoading, setEbayLoading] = useState(false);
-  const [activeConvo, setActiveConvo] = useState<Conversation | null>(null);
+  const [ebaySyncing, setEbaySyncing] = useState(false);
+  const [activeKey, setActiveKey] = useState<string | null>(null);
   const [replyText, setReplyText] = useState('');
   const [replySending, setReplySending] = useState(false);
 
+  // Fast read of already-synced messages from our Supabase (no eBay calls).
   async function loadEbayMessages() {
     setEbayLoading(true);
     try {
       const res = await fetch('/api/ebay/messages/inbox');
       if (res.ok) {
-        const data = await res.json() as { messages: EbayMessage[]; synced: number };
+        const data = await res.json() as { messages: EbayMessage[] };
         setEbayMessages(data.messages);
-        if (data.synced > 0) toast.success(`${data.synced} new message${data.synced !== 1 ? 's' : ''} synced from eBay`);
       }
     } catch {
       // silent
@@ -100,18 +110,63 @@ export function NotesFeed() {
     }
   }
 
+  // Pull only new messages from eBay into Supabase, then refresh from cache.
+  async function syncEbayInbox() {
+    setEbaySyncing(true);
+    try {
+      const res = await fetch('/api/ebay/messages/inbox', { method: 'POST' });
+      if (res.ok) {
+        const data = await res.json() as { synced: number };
+        if (data.synced > 0) toast.success(`${data.synced} new message${data.synced !== 1 ? 's' : ''} synced from eBay`);
+        await loadEbayMessages();
+      } else if (res.status === 401) {
+        toast.error('eBay not connected');
+      }
+    } catch {
+      toast.error('Failed to sync eBay inbox');
+    } finally {
+      setEbaySyncing(false);
+    }
+  }
+
+  // Load the full message history for one conversation on demand.
+  async function openConversation(convo: Conversation) {
+    setActiveKey(convo.key);
+    markRead(convo);
+    if (!convo.conversation_id) return;
+    try {
+      const res = await fetch(`/api/ebay/messages/inbox?conversationId=${encodeURIComponent(convo.conversation_id)}`);
+      if (res.ok) {
+        const data = await res.json() as { messages: EbayMessage[] };
+        // Merge the freshly-fetched thread into the cached list (dedup by id).
+        setEbayMessages((prev) => {
+          const byId = new Map(prev.map((m) => [m.id, m]));
+          for (const m of data.messages) byId.set(m.id, m);
+          return [...byId.values()];
+        });
+      }
+    } catch {
+      // silent — the cached latest message is still shown
+    }
+  }
+
   useEffect(() => {
-    if (tab === 'ebay') loadEbayMessages();
+    if (tab === 'ebay') {
+      loadEbayMessages();
+      syncEbayInbox();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps, react-hooks/set-state-in-effect
   }, [tab]);
 
-  // Group messages into conversations
+  // Group messages into conversations (by eBay conversation, falling back to buyer+order)
   const conversations = useMemo<Conversation[]>(() => {
     const map = new Map<string, Conversation>();
     for (const msg of ebayMessages) {
-      const key = `${msg.buyer_username}::${msg.order_id}`;
+      const key = msg.conversation_id ?? `${msg.buyer_username}::${msg.order_id}`;
       if (!map.has(key)) {
         map.set(key, {
           key,
+          conversation_id: msg.conversation_id,
           buyer_username: msg.buyer_username,
           buyer_name: msg.buyer_name,
           order_id: msg.order_id,
@@ -130,6 +185,11 @@ export function NotesFeed() {
       .map(c => ({ ...c, messages: c.messages.sort((a, b) => a.sent_at.localeCompare(b.sent_at)) }))
       .sort((a, b) => b.lastAt.localeCompare(a.lastAt));
   }, [ebayMessages]);
+
+  const activeConvo = useMemo(
+    () => conversations.find((c) => c.key === activeKey) ?? null,
+    [conversations, activeKey]
+  );
 
   const unreadTotal = useMemo(() => conversations.reduce((s, c) => s + c.unreadCount, 0), [conversations]);
 
@@ -155,6 +215,7 @@ export function NotesFeed() {
         body: JSON.stringify({
           orderId: activeConvo.order_id,
           itemId: lastMsg?.item_id ?? activeConvo.order_id,
+          conversationId: activeConvo.conversation_id ?? undefined,
           recipientUsername: activeConvo.buyer_username,
           buyerName: activeConvo.buyer_name,
           itemTitle: activeConvo.item_title,
@@ -260,17 +321,25 @@ export function NotesFeed() {
           Team Notes {feed.length > 0 && <span className="ml-1 text-xs opacity-75">({feed.length})</span>}
         </button>
         <button
-          onClick={() => { setTab('ebay'); setSearch(''); setActiveConvo(null); }}
+          onClick={() => { setTab('ebay'); setSearch(''); setActiveKey(null); }}
           className={`px-5 py-2 font-medium transition-colors flex items-center gap-1.5 ${tab === 'ebay' ? 'bg-amber-600 text-white' : 'bg-white text-slate-600 hover:bg-slate-50'}`}
         >
           <img src={PLATFORM_LOGOS.ebay} alt="eBay" className="h-4 w-auto object-contain" />
           Inbox
           {unreadTotal > 0 && <span className="ml-0.5 bg-red-500 text-white text-[10px] font-bold rounded-full px-1.5 py-0.5 leading-none">{unreadTotal}</span>}
         </button>
+        <button
+          onClick={() => { setTab('tickets'); setSearch(''); setActiveKey(null); }}
+          className={`px-5 py-2 font-medium transition-colors flex items-center gap-1.5 ${tab === 'tickets' ? 'bg-blue-600 text-white' : 'bg-white text-slate-600 hover:bg-slate-50'}`}
+        >
+          <TicketIcon className="h-4 w-4" />
+          Tickets
+          {activeTicketCount > 0 && <span className="ml-0.5 bg-red-500 text-white text-[10px] font-bold rounded-full px-1.5 py-0.5 leading-none">{activeTicketCount}</span>}
+        </button>
       </div>
 
-      {/* Search — hidden when inside a conversation thread */}
-      {!(tab === 'ebay' && activeConvo) && (
+      {/* Search — hidden when inside a conversation thread or on the tickets tab (it has its own) */}
+      {tab !== 'tickets' && !(tab === 'ebay' && activeConvo) && (
         <div className="relative">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400" />
           <Input
@@ -370,15 +439,36 @@ export function NotesFeed() {
             <div className="flex flex-col gap-3">
               {/* Thread header */}
               <div className="flex items-center gap-3 pb-2 border-b">
-                <button onClick={() => setActiveConvo(null)} className="text-slate-400 hover:text-slate-700">
+                <button onClick={() => setActiveKey(null)} className="text-slate-400 hover:text-slate-700">
                   <ArrowLeft className="h-4 w-4" />
                 </button>
                 <img src={PLATFORM_LOGOS.ebay} alt="eBay" className="h-5 w-auto object-contain shrink-0" />
-                <div className="min-w-0">
+                <div className="min-w-0 flex-1">
                   <p className="font-medium text-slate-800 font-mono text-sm">{activeConvo.buyer_username}</p>
                   {activeConvo.buyer_name && <p className="text-xs text-slate-400">{activeConvo.buyer_name}</p>}
                   <p className="text-xs text-slate-400 truncate">Order #{activeConvo.order_id}{activeConvo.item_title ? ` · ${activeConvo.item_title}` : ''}</p>
                 </div>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  className="shrink-0"
+                  onClick={() => {
+                    const lastReceived = [...activeConvo.messages].reverse().find((m) => m.direction === 'received');
+                    setTicketPrefill({
+                      subject: `eBay: ${activeConvo.buyer_username}`,
+                      body: lastReceived?.message_text,
+                      ebayConversationId: activeConvo.conversation_id ?? undefined,
+                      buyerUsername: activeConvo.buyer_username,
+                      buyerName: activeConvo.buyer_name ?? undefined,
+                      itemTitle: activeConvo.item_title ?? undefined,
+                      contactMethod: 'ebay_message',
+                      contactValue: activeConvo.buyer_username,
+                      category: 'question',
+                    });
+                  }}
+                >
+                  <TicketIcon className="h-3.5 w-3.5 mr-1.5" /> Create ticket
+                </Button>
               </div>
 
               {/* Messages */}
@@ -432,12 +522,12 @@ export function NotesFeed() {
             <>
               <div className="flex items-center justify-between">
                 <p className="text-xs text-slate-400">{conversations.length} conversation{conversations.length !== 1 ? 's' : ''}</p>
-                <button onClick={loadEbayMessages} className="text-xs text-slate-400 hover:text-slate-600 flex items-center gap-1">
-                  <RefreshCw className={`h-3 w-3 ${ebayLoading ? 'animate-spin' : ''}`} /> Sync inbox
+                <button onClick={syncEbayInbox} disabled={ebaySyncing} className="text-xs text-slate-400 hover:text-slate-600 flex items-center gap-1 disabled:opacity-50">
+                  <RefreshCw className={`h-3 w-3 ${ebaySyncing ? 'animate-spin' : ''}`} /> {ebaySyncing ? 'Syncing…' : 'Sync inbox'}
                 </button>
               </div>
 
-              {ebayLoading ? (
+              {ebayLoading || (ebaySyncing && ebayMessages.length === 0) ? (
                 <div className="text-center py-16 text-slate-400">
                   <RefreshCw className="h-8 w-8 mx-auto mb-3 animate-spin text-slate-200" />
                   <p className="text-sm">Syncing messages from eBay...</p>
@@ -446,7 +536,7 @@ export function NotesFeed() {
                 <div className="text-center py-16 text-slate-400">
                   <Inbox className="h-12 w-12 mx-auto mb-3 text-slate-200" />
                   <p className="font-medium">No messages yet</p>
-                  <p className="text-sm mt-1">Click "Sync inbox" to fetch incoming messages, or send a new message to a buyer</p>
+                  <p className="text-sm mt-1">Click &quot;Sync inbox&quot; to fetch incoming messages, or send a new message to a buyer</p>
                 </div>
               ) : (
                 <div className="space-y-1.5">
@@ -457,7 +547,7 @@ export function NotesFeed() {
                       return (
                         <button
                           key={convo.key}
-                          onClick={() => { setActiveConvo(convo); markRead(convo); }}
+                          onClick={() => openConversation(convo)}
                           className={`w-full text-left border rounded-xl px-4 py-3 hover:border-amber-300 hover:shadow-sm transition-all ${convo.unreadCount > 0 ? 'bg-amber-50 border-amber-200' : 'bg-white border-slate-200'}`}
                         >
                           <div className="flex items-start justify-between gap-2">
@@ -493,8 +583,12 @@ export function NotesFeed() {
         </>
       )}
 
+      {/* ── TICKETS TAB ── */}
+      {tab === 'tickets' && <TicketsPanel />}
+
       {openOrder && <OrderDetailDialog order={openOrder} onClose={() => setOpenOrderId(null)} />}
       {showNewEbayMsg && <EbayNewMessageDialog onClose={() => { setShowNewEbayMsg(false); loadEbayMessages(); }} />}
+      {ticketPrefill && <TicketDialog prefill={ticketPrefill} onClose={() => setTicketPrefill(null)} />}
     </div>
   );
 }

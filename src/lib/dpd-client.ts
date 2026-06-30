@@ -405,3 +405,81 @@ export async function trackDPDShipment(trackingNumber: string): Promise<DPDTrack
   const data = await res.json();
   return data as DPDTrackingResponse;
 }
+
+// ==================== RETURNS API ====================
+// DPD's dedicated Returns API: the returnee drops the parcel at a DPD Pickup
+// location using a printed label or a 2D barcode. GB mainland only.
+
+export interface DPDReturnRequest {
+  outboundConsignment: {
+    collectionDetails: { contactDetails: DPDContact; address: DPDAddress };
+    deliveryDetails: { contactDetails: DPDContact; address: DPDAddress };
+    numberOfParcels: number;
+    totalWeight: number;
+    shipmentDate: string;       // "2026-06-30T17:53:16"
+    shippingRef1?: string;      // max 25 chars
+  };
+}
+
+export interface DPDReturnResponse {
+  data?: {
+    shipmentId?: string;
+    consignments?: { consignmentNumber: string; parcelNumber: string[] }[];
+  };
+  error?: { code: number; type: string; message: string; fieldPath?: string }[];
+}
+
+export interface DPDReturnBarcode {
+  parcelNumber: string;
+  imageData: string;   // base64
+  imageFormat: string; // e.g. "png"
+}
+
+function returnHeaders(token: string, accept: string): Record<string, string> {
+  const headers: Record<string, string> = { Authorization: `Bearer ${token}`, Accept: accept };
+  if (process.env.DPD_API_KEY) headers['Client-Id'] = process.env.DPD_API_KEY;
+  if (process.env.DPD_ACCOUNT_NUMBER) headers['GeoClient'] = `account/${process.env.DPD_ACCOUNT_NUMBER}`;
+  return headers;
+}
+
+// POST /v1/customer/return/shipment
+export async function createDPDReturn(payload: DPDReturnRequest, sendEmail = false): Promise<DPDReturnResponse> {
+  if (!process.env.DPD_ACCOUNT_NUMBER) throw new Error('DPD_ACCOUNT_NUMBER not set in environment');
+  const headers = await getDPDHeaders();
+  const baseUrl = getBaseUrl();
+  const url = `${baseUrl}/v1/customer/return/shipment${sendEmail ? '?sendEmail=true' : ''}`;
+  console.log('[DPD return] creating return at:', url);
+
+  const res = await fetch(url, { method: 'POST', headers, body: JSON.stringify(payload) });
+  const text = await res.text();
+  console.log(`[DPD return] create response ${res.status}:`, text.slice(0, 500));
+  if (!res.ok) throw new Error(`DPD return create error ${res.status}: ${text}`);
+  return JSON.parse(text) as DPDReturnResponse;
+}
+
+// GET /v1/customer/return/shipment/{shipmentId}/label  → HTML (or PDF) label document
+export async function getDPDReturnLabel(shipmentId: string, sendEmail = false): Promise<string> {
+  const token = await getAccessToken();
+  const baseUrl = getBaseUrl();
+  const url = `${baseUrl}/v1/customer/return/shipment/${shipmentId}/label${sendEmail ? '?sendEmail=true' : ''}`;
+  const res = await fetch(url, { headers: returnHeaders(token, 'text/html') });
+  const body = await res.text();
+  if (!res.ok) throw new Error(`DPD return label error ${res.status}: ${body.slice(0, 300)}`);
+  return body;
+}
+
+// GET /v1/customer/return/shipment/{shipmentId}/barcode  → base64 2D barcode image(s)
+export async function getDPDReturnBarcode(shipmentId: string, sendEmail = false): Promise<DPDReturnBarcode[]> {
+  const token = await getAccessToken();
+  const baseUrl = getBaseUrl();
+  const url = `${baseUrl}/v1/customer/return/shipment/${shipmentId}/barcode${sendEmail ? '?sendEmail=true' : ''}`;
+  const res = await fetch(url, { headers: returnHeaders(token, 'application/json') });
+  const body = await res.text();
+  if (!res.ok) throw new Error(`DPD return barcode error ${res.status}: ${body.slice(0, 300)}`);
+  const json = JSON.parse(body) as { data?: { barcodes?: { parcelNumber: string; barcodeImage?: { imageData: string; imageFormat: string } }[] } };
+  return (json.data?.barcodes ?? []).map((b) => ({
+    parcelNumber: b.parcelNumber,
+    imageData: b.barcodeImage?.imageData ?? '',
+    imageFormat: b.barcodeImage?.imageFormat ?? 'png',
+  }));
+}
