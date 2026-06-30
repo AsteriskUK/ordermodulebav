@@ -24,6 +24,7 @@ import {
   RefreshCw,
   MapPin,
   Tag,
+  Warehouse,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useOrderStore } from '@/lib/store';
@@ -34,6 +35,7 @@ const ALL_NAV = [
   { name: 'Dashboard', href: '/', icon: LayoutDashboard, staffVisible: true },
   { name: 'Import Orders', href: '/import', icon: Upload, staffVisible: false },
   { name: 'Listings', href: '/listings', icon: Tag, staffVisible: false },
+  { name: 'Inventory', href: '/inventory', icon: Warehouse, staffVisible: false },
   { name: 'Create Order', href: '/orders/new', icon: FilePlus, staffVisible: false },
   { name: 'Batch Shipping', href: '/shipping', icon: Truck, staffVisible: false },
   { name: 'Tracking', href: '/tracking', icon: MapPin, staffVisible: true },

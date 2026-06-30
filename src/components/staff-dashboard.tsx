@@ -9,11 +9,14 @@ import {
   DEPARTMENT_CONFIG,
   Department,
   OrderStatus,
+  Order,
 } from '@/lib/types';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { MyTicketsWidget } from './my-tickets-widget';
+import { BuildPanel } from './build-panel';
+import { BUILD_STATUS_CONFIG } from '@/lib/inventory-config';
 import {
   Clock,
   Wrench,
@@ -61,6 +64,8 @@ export function StaffDashboard() {
   const eodEvents = useOrderStore((s) => s.eodEvents);
   const users = useOrderStore((s) => s.users);
   const currentUserId = useOrderStore((s) => s.currentUserId);
+  const builds = useOrderStore((s) => s.builds);
+  const [buildOrder, setBuildOrder] = useState<Order | null>(null);
 
   const currentUser = users.find((u) => u.id === currentUserId);
   const userDepts: Department[] = currentUser
@@ -373,8 +378,53 @@ export function StaffDashboard() {
         </CardContent>
       </Card>
 
+      {/* Orders to assemble — with one-click parts/build access */}
+      {(() => {
+        const toAssemble = myOrders
+          .filter((o) => !o.deletedAt && (o.status === 'assembling' || o.status === 'pending'))
+          .sort((a, b) => (a.priority ?? 5) - (b.priority ?? 5))
+          .slice(0, 12);
+        if (toAssemble.length === 0) return null;
+        return (
+          <Card>
+            <CardHeader className="pb-2">
+              <CardTitle className="text-sm flex items-center gap-2">
+                <Wrench className="h-4 w-4 text-blue-500" /> Orders to Assemble
+                <span className="bg-blue-100 text-blue-700 text-[10px] font-bold rounded-full px-1.5 py-0.5">{toAssemble.length}</span>
+              </CardTitle>
+            </CardHeader>
+            <CardContent>
+              <div className="space-y-1.5">
+                {toAssemble.map((o) => {
+                  const build = builds.find((b) => b.orderId === o.id && b.status !== 'cancelled');
+                  return (
+                    <div key={o.id} className="flex items-center gap-2 px-3 py-2 rounded-lg border border-slate-200 hover:border-blue-300">
+                      <Badge variant="outline" className={`text-[10px] ${ORDER_STATUS_CONFIG[o.status].color}`}>{ORDER_STATUS_CONFIG[o.status].label}</Badge>
+                      <div className="min-w-0 flex-1">
+                        <p className="text-xs font-medium text-slate-700 truncate">{o.itemTitle}</p>
+                        <p className="text-[10px] text-slate-400 font-mono">#{o.salesRecordNumber}</p>
+                      </div>
+                      {build && (
+                        <span className={`text-[10px] font-medium px-1.5 py-0.5 rounded border ${BUILD_STATUS_CONFIG[build.status].color}`}>
+                          {BUILD_STATUS_CONFIG[build.status].label}
+                        </span>
+                      )}
+                      <Button size="sm" variant="outline" onClick={() => setBuildOrder(o)}>
+                        <Wrench className="h-3.5 w-3.5 mr-1" /> {build ? 'Parts' : 'Build'}
+                      </Button>
+                    </div>
+                  );
+                })}
+              </div>
+            </CardContent>
+          </Card>
+        );
+      })()}
+
       {/* Tickets assigned to my department / me */}
       <MyTicketsWidget />
+
+      {buildOrder && <BuildPanel order={buildOrder} onClose={() => setBuildOrder(null)} />}
 
       {/* Recent activity — orders I've touched today */}
       {myTodayEvents.length > 0 && (

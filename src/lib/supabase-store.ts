@@ -1,5 +1,6 @@
 import { supabase } from './supabase-client';
-import { Order, Batch, AppUser, AttendanceRecord, LeaveRequest, LeaveBalance, EodEvent, ReturnRecord, TicketRecord, Department, TicketStatus, TicketPriority, TicketContactMethod, TicketActivity, MissingItemRecord, MissingPart } from './types';
+import { Order, Batch, AppUser, AttendanceRecord, LeaveRequest, LeaveBalance, EodEvent, ReturnRecord, TicketRecord, Department, TicketStatus, TicketPriority, TicketContactMethod, TicketActivity, MissingItemRecord, MissingPart, InventoryPart, StockUnit, StockLevel, GoodsReceipt, GoodsReceiptLine, GoodsReceiptStatus, Build, BuildLine } from './types';
+import { StockTracking, StockUnitStatus, BuildStatus } from './inventory-config';
 
 // Helper to check if string is valid UUID
 function isValidUUID(str: string): boolean {
@@ -181,6 +182,12 @@ export async function fetchOrders(): Promise<Order[]> {
     labelData: o.label_data,
     isReplacement: o.metadata?.is_replacement,
     originalOrderId: o.metadata?.original_order_id,
+    buyerAddress1: o.metadata?.buyer_address1,
+    buyerAddress2: o.metadata?.buyer_address2,
+    buyerCity: o.metadata?.buyer_city,
+    buyerCounty: o.metadata?.buyer_county,
+    buyerPostcode: o.metadata?.buyer_postcode,
+    buyerCountry: o.metadata?.buyer_country,
     notes: o.order_notes?.map((n: any) => ({
       id: n.id,
       authorId: n.author_id,
@@ -250,6 +257,12 @@ export async function syncOrder(order: Order): Promise<void> {
       metadata: {
         is_replacement: order.isReplacement,
         original_order_id: order.originalOrderId,
+        buyer_address1: order.buyerAddress1,
+        buyer_address2: order.buyerAddress2,
+        buyer_city: order.buyerCity,
+        buyer_county: order.buyerCounty,
+        buyer_postcode: order.buyerPostcode,
+        buyer_country: order.buyerCountry,
       },
       // label_printed_at: order.labelPrintedAt, // TODO: Add column to Supabase
       // label_carrier: order.labelCarrier, // TODO: Add column to Supabase
@@ -659,10 +672,123 @@ export async function fetchMissingItems(): Promise<MissingItemRecord[]> {
   })) || [];
 }
 
+// ==================== INVENTORY ====================
+
+export async function syncInventoryPart(p: InventoryPart): Promise<void> {
+  if (!isValidUUID(p.id)) return;
+  const { error } = await supabase.from('inventory_parts').upsert({
+    id: p.id, sku: p.sku, name: p.name, category: p.category, tracking: p.tracking,
+    attributes: p.attributes ?? {}, barcode: p.barcode, low_stock_threshold: p.lowStockThreshold, notes: p.notes,
+    created_at: p.createdAt,
+  });
+  if (error) console.error('Error syncing inventory part:', JSON.stringify(error, null, 2));
+}
+
+export async function fetchInventoryParts(): Promise<InventoryPart[]> {
+  const { data, error } = await supabase.from('inventory_parts').select('*').order('created_at', { ascending: false });
+  if (error) { console.warn('[inventory] table not ready yet (run migration) — fetching inventory parts:', error?.message || error); return []; }
+  return data?.map((p) => ({
+    id: p.id, sku: p.sku ?? '', name: p.name, category: p.category,
+    tracking: (p.tracking ?? 'bulk') as StockTracking,
+    attributes: (p.attributes ?? {}) as Record<string, string | number>,
+    barcode: p.barcode ?? undefined,
+    lowStockThreshold: p.low_stock_threshold ?? undefined, notes: p.notes ?? undefined,
+    createdAt: p.created_at, updatedAt: p.updated_at ?? p.created_at,
+  })) || [];
+}
+
+export async function syncStockUnit(u: StockUnit): Promise<void> {
+  if (!isValidUUID(u.id)) return;
+  const { error } = await supabase.from('stock_units').upsert({
+    id: u.id, part_id: u.partId, asset_tag: u.assetTag, grade: u.grade, status: u.status,
+    location: u.location, condition_notes: u.conditionNotes, attributes: u.attributes ?? {},
+    goods_receipt_id: isValidUUID(u.goodsReceiptId ?? '') ? u.goodsReceiptId : null,
+    unit_cost: u.unitCost, received_at: u.receivedAt, created_at: u.createdAt,
+  });
+  if (error) console.error('Error syncing stock unit:', JSON.stringify(error, null, 2));
+}
+
+export async function fetchStockUnits(): Promise<StockUnit[]> {
+  const { data, error } = await supabase.from('stock_units').select('*').order('created_at', { ascending: false });
+  if (error) { console.warn('[inventory] table not ready yet (run migration) — fetching stock units:', error?.message || error); return []; }
+  return data?.map((u) => ({
+    id: u.id, partId: u.part_id, assetTag: u.asset_tag ?? undefined, grade: u.grade ?? undefined,
+    status: (u.status ?? 'in_stock') as StockUnitStatus, location: u.location ?? undefined,
+    conditionNotes: u.condition_notes ?? undefined,
+    attributes: (u.attributes ?? {}) as Record<string, string | number>,
+    goodsReceiptId: u.goods_receipt_id ?? undefined, unitCost: u.unit_cost ?? undefined,
+    receivedAt: u.received_at ?? undefined, createdAt: u.created_at, updatedAt: u.updated_at ?? u.created_at,
+  })) || [];
+}
+
+export async function syncStockLevel(l: StockLevel): Promise<void> {
+  if (!isValidUUID(l.id)) return;
+  const { error } = await supabase.from('stock_levels').upsert({
+    id: l.id, part_id: l.partId, grade: l.grade, location: l.location, quantity: l.quantity,
+  });
+  if (error) console.error('Error syncing stock level:', JSON.stringify(error, null, 2));
+}
+
+export async function fetchStockLevels(): Promise<StockLevel[]> {
+  const { data, error } = await supabase.from('stock_levels').select('*');
+  if (error) { console.warn('[inventory] table not ready yet (run migration) — fetching stock levels:', error?.message || error); return []; }
+  return data?.map((l) => ({
+    id: l.id, partId: l.part_id, grade: l.grade ?? undefined, location: l.location ?? undefined,
+    quantity: l.quantity ?? 0, updatedAt: l.updated_at ?? new Date().toISOString(),
+  })) || [];
+}
+
+export async function syncGoodsReceipt(r: GoodsReceipt): Promise<void> {
+  if (!isValidUUID(r.id)) return;
+  const { error } = await supabase.from('goods_receipts').upsert({
+    id: r.id, reference: r.reference, supplier: r.supplier, status: r.status,
+    lines: r.lines ?? [], total_cost: r.totalCost, notes: r.notes,
+    received_at: r.receivedAt, received_by_id: r.receivedById, received_by_name: r.receivedByName,
+    posted_at: r.postedAt, created_at: r.createdAt,
+  });
+  if (error) console.error('Error syncing goods receipt:', JSON.stringify(error, null, 2));
+}
+
+export async function fetchGoodsReceipts(): Promise<GoodsReceipt[]> {
+  const { data, error } = await supabase.from('goods_receipts').select('*').order('received_at', { ascending: false });
+  if (error) { console.warn('[inventory] table not ready yet (run migration) — fetching goods receipts:', error?.message || error); return []; }
+  return data?.map((r) => ({
+    id: r.id, reference: r.reference ?? '', supplier: r.supplier ?? undefined,
+    status: (r.status ?? 'draft') as GoodsReceiptStatus,
+    lines: (r.lines ?? []) as GoodsReceiptLine[], totalCost: r.total_cost ?? undefined,
+    notes: r.notes ?? undefined, receivedAt: r.received_at, receivedById: r.received_by_id ?? undefined,
+    receivedByName: r.received_by_name ?? undefined, postedAt: r.posted_at ?? undefined,
+    createdAt: r.created_at, updatedAt: r.updated_at ?? r.created_at,
+  })) || [];
+}
+
+export async function syncBuild(b: Build): Promise<void> {
+  if (!isValidUUID(b.id)) return;
+  const { error } = await supabase.from('builds').upsert({
+    id: b.id, order_id: b.orderId, status: b.status, lines: b.lines ?? [], notes: b.notes,
+    created_by_id: b.createdById, created_by_name: b.createdByName,
+    reserved_at: b.reservedAt, consumed_at: b.consumedAt, created_at: b.createdAt,
+  });
+  if (error) console.error('Error syncing build:', JSON.stringify(error, null, 2));
+}
+
+export async function fetchBuilds(): Promise<Build[]> {
+  const { data, error } = await supabase.from('builds').select('*').order('created_at', { ascending: false });
+  if (error) { console.warn('[inventory] table not ready yet (run migration) — fetching builds:', error?.message || error); return []; }
+  return data?.map((b) => ({
+    id: b.id, orderId: b.order_id, status: (b.status ?? 'reserved') as BuildStatus,
+    lines: (b.lines ?? []) as BuildLine[], notes: b.notes ?? undefined,
+    createdById: b.created_by_id ?? undefined, createdByName: b.created_by_name ?? undefined,
+    reservedAt: b.reserved_at ?? undefined, consumedAt: b.consumed_at ?? undefined,
+    createdAt: b.created_at, updatedAt: b.updated_at ?? b.created_at,
+  })) || [];
+}
+
 // ==================== FULL SYNC ====================
 
 export async function loadAllFromSupabase() {
-  const [users, batches, orders, returns, attendanceRecords, leaveRequests, leaveBalances, tickets, missingItems] = await Promise.all([
+  const [users, batches, orders, returns, attendanceRecords, leaveRequests, leaveBalances, tickets, missingItems,
+         inventoryParts, stockUnits, stockLevels, goodsReceipts, builds] = await Promise.all([
     fetchUsers(),
     fetchBatches(),
     fetchOrders(),
@@ -672,6 +798,11 @@ export async function loadAllFromSupabase() {
     fetchLeaveBalances(),
     fetchTickets(),
     fetchMissingItems(),
+    fetchInventoryParts(),
+    fetchStockUnits(),
+    fetchStockLevels(),
+    fetchGoodsReceipts(),
+    fetchBuilds(),
   ]);
 
   return {
@@ -684,5 +815,10 @@ export async function loadAllFromSupabase() {
     leaveBalances,
     tickets,
     missingItems,
+    inventoryParts,
+    stockUnits,
+    stockLevels,
+    goodsReceipts,
+    builds,
   };
 }

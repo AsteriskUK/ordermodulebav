@@ -34,7 +34,6 @@ import {
   Hash,
   PackageX,
   Truck,
-  Globe,
   MessageSquare,
   Printer,
   ShoppingBag,
@@ -42,6 +41,7 @@ import {
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { DeliveryBadge } from './delivery-badge';
+import { OrderSourceLogo, GspDestination } from './order-source-logo';
 import { OrderDetailDialog } from './order-detail-dialog';
 import { LabelPrintDialog } from './label-print-dialog';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
@@ -61,8 +61,16 @@ function getAllowedCategories(depts: Department[]): string[] | null {
 
 export function PackagingPipeline() {
   const orders = useOrderStore((s) => s.orders);
+  const batches = useOrderStore((s) => s.batches);
   const users = useOrderStore((s) => s.users);
   const currentUserId = useOrderStore((s) => s.currentUserId);
+  const orderSource = (o: Order): string | undefined => {
+    const fromBatch = batches.find((b) => b.id === o.batchId)?.source;
+    if (fromBatch) return fromBatch;
+    // Fall back to the batchId prefix convention (e.g. "ebay-…", "amazon-…")
+    const prefix = o.batchId?.split('-')[0];
+    return ['ebay', 'amazon', 'backmarket', 'temu', 'onbuy'].includes(prefix) ? prefix : undefined;
+  };
   const updateOrderStatus = useOrderStore((s) => s.updateOrderStatus);
   const updateOrderComment = useOrderStore((s) => s.updateOrderComment);
   const bulkUpdateStatus = useOrderStore((s) => s.bulkUpdateStatus);
@@ -81,7 +89,6 @@ export function PackagingPipeline() {
 
   const currentUser = users.find((u) => u.id === currentUserId);
   const isAdmin = currentUser?.role === 'admin' || currentUser?.role === 'manager';
-  const isStaff = !isAdmin;
   const userDepts: Department[] = currentUser
     ? (currentUser.departments?.length ? currentUser.departments : [currentUser.department ?? 'management'])
     : [];
@@ -304,6 +311,7 @@ export function PackagingPipeline() {
             <X className="h-4 w-4" />
           </button>
           <div className="flex items-center gap-1.5 text-blue-900">
+            <OrderSourceLogo source={orderSource(activeOrder)} className="h-4 w-auto" />
             <Hash className="h-3.5 w-3.5 shrink-0" />
             <span className="font-mono text-sm font-bold">{activeOrder.salesRecordNumber}</span>
             <Badge variant="outline" className={`ml-1 text-xs ${ORDER_STATUS_CONFIG[activeOrder.status].color}`}>
@@ -331,13 +339,12 @@ export function PackagingPipeline() {
             >
               View Variation Details
             </button>
-            {activeOrder.isGSP && (
-              <Badge variant="outline" className="ml-1 text-xs bg-blue-100 text-blue-700 border-blue-300 flex items-center gap-1">
-                <Globe className="h-3 w-3" />
-                {activeOrder.postToCountry || 'Overseas'}
-              </Badge>
-            )}
           </div>
+          {activeOrder.isGSP && (
+            <div className="w-full">
+              <GspDestination order={activeOrder} />
+            </div>
+          )}
           <div className="text-xs text-slate-600">
             <span className="font-medium">Priority: {activeOrder.priority ?? 5}</span>
             {activeOrder.category && activeOrder.category !== 'N/A' && (
@@ -376,7 +383,7 @@ export function PackagingPipeline() {
                       {s.orders.length}
                     </Badge>
                   </CardTitle>
-                  {s.orders.length > 0 && !isStaff && (
+                  {s.orders.length > 0 && (
                     <div className="flex items-center gap-1">
                       {s.prevStage && (
                         <Button
@@ -434,6 +441,7 @@ export function PackagingPipeline() {
                         <div className="flex items-start justify-between gap-2">
                           <div className="min-w-0 flex-1">
                             <div className="flex items-center gap-1.5 flex-wrap">
+                              <OrderSourceLogo source={orderSource(order)} className="h-4 w-auto" />
                               <p className="text-xs font-mono text-slate-500">
                                 #{order.salesRecordNumber}
                               </p>
@@ -484,10 +492,9 @@ export function PackagingPipeline() {
                               <DeliveryBadge deliveryType={order.deliveryType} deliveryCarrier={order.deliveryCarrier} />
                             </div>
                             {order.isGSP && (
-                              <p className="text-xs text-blue-600 mt-0.5 flex items-center gap-1">
-                                <Globe className="h-3 w-3" />
-                                {order.postToCountry || 'Overseas'}
-                              </p>
+                              <div className="mt-1">
+                                <GspDestination order={order} />
+                              </div>
                             )}
                           </div>
                           <div className="flex flex-col gap-1 shrink-0" onClick={(e) => e.stopPropagation()}>
@@ -518,18 +525,16 @@ export function PackagingPipeline() {
                                     );
                                   })()
                                 ) : (
-                                  !isStaff && (
-                                    <Button
-                                      size="sm"
-                                      className="h-6 text-xs px-2"
-                                      onClick={() => moveToNext(order.id, s.nextStage)}
-                                    >
-                                      <CheckCircle className="h-3 w-3 mr-1" />
-                                      Done
-                                    </Button>
-                                  )
+                                  <Button
+                                    size="sm"
+                                    className="h-6 text-xs px-2"
+                                    onClick={() => moveToNext(order.id, s.nextStage)}
+                                  >
+                                    <CheckCircle className="h-3 w-3 mr-1" />
+                                    Done
+                                  </Button>
                                 )}
-                                {s.prevStage && !isStaff && (
+                                {s.prevStage && (
                                   <Button
                                     size="sm"
                                     variant="outline"
@@ -560,7 +565,7 @@ export function PackagingPipeline() {
                                     Invoice
                                   </Button>
                                 )}
-                                {['pending','assembling','checking','packing'].includes(s.stage) && !isStaff && (
+                                {['pending','assembling','checking','packing'].includes(s.stage) && (
                                   <>
                                     <Button
                                       size="sm"
@@ -596,16 +601,14 @@ export function PackagingPipeline() {
                             {/* Packed: note + manual ship */}
                             {s.stage === 'packed' && (
                               <>
-                                {!isStaff && (
-                                  <Button
-                                    size="sm"
-                                    className="h-6 text-xs px-2 bg-green-600 hover:bg-green-700 text-white"
-                                    onClick={() => moveToNext(order.id, 'shipped')}
-                                  >
-                                    <Truck className="h-3 w-3 mr-1" />
-                                    Ship
-                                  </Button>
-                                )}
+                                <Button
+                                  size="sm"
+                                  className="h-6 text-xs px-2 bg-green-600 hover:bg-green-700 text-white"
+                                  onClick={() => moveToNext(order.id, 'shipped')}
+                                >
+                                  <Truck className="h-3 w-3 mr-1" />
+                                  Ship
+                                </Button>
                                 <Button
                                   size="sm"
                                   variant="outline"

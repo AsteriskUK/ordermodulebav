@@ -1,3 +1,5 @@
+import type { StockTracking, StockUnitStatus, BuildStatus } from './inventory-config';
+
 export type OrderStatus = 'pending' | 'assembling' | 'checking' | 'packing' | 'packed' | 'shipped' | 'delivered' | 'held' | 'no-stock' | 'cancelled' | 'refunded' | 'returned' | 'archived';
 
 export type DeliveryCarrier = 'DPD' | 'FedEx' | 'Parcelforce' | 'Royal Mail' | 'Other';
@@ -144,6 +146,112 @@ export interface MissingPart {
   notes?: string;
 }
 
+// ==================== INVENTORY ====================
+
+/** A catalogued part/product definition (SKU). Spec lives in `attributes`. */
+export interface InventoryPart {
+  id: string;
+  sku: string;
+  name: string;
+  category: string;                              // INVENTORY_CATEGORIES key
+  tracking: StockTracking;
+  attributes: Record<string, string | number>;
+  /** Manufacturer/product barcode (EAN/UPC) for scan-to-receive */
+  barcode?: string;
+  lowStockThreshold?: number;
+  notes?: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+/** A single physical serialized unit (laptop/PC/monitor). */
+export interface StockUnit {
+  id: string;
+  partId: string;
+  assetTag?: string;                             // serial / asset id
+  grade?: string;
+  status: StockUnitStatus;
+  location?: string;
+  conditionNotes?: string;
+  attributes?: Record<string, string | number>;  // unit-specific config (installed RAM/SSD etc.)
+  goodsReceiptId?: string;
+  unitCost?: number;
+  receivedAt?: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+/** Quantity-on-hand for a bulk part, per grade + location. */
+export interface StockLevel {
+  id: string;
+  partId: string;
+  grade?: string;
+  location?: string;
+  quantity: number;
+  updatedAt: string;
+}
+
+export type GoodsReceiptStatus = 'draft' | 'posted';
+
+export interface GoodsReceiptLine {
+  id: string;
+  /** When set (e.g. from a barcode scan), receive into this exact part instead of matching by spec */
+  partId?: string;
+  category: string;
+  tracking: StockTracking;
+  attributes: Record<string, string | number>;
+  grade?: string;
+  quantity: number;
+  unitCost?: number;
+  location?: string;
+  notes?: string;
+}
+
+/** One allocated part within a build (BOM line). */
+export interface BuildLine {
+  partId: string;
+  category: string;
+  description: string;          // snapshot of the part spec at allocation time
+  quantity: number;             // bulk quantity
+  stockUnitId?: string;         // specific serialized unit (e.g. the base laptop)
+}
+
+/**
+ * A build links an order to the parts allocated to it. While `reserved` the parts
+ * are on hold (assembling); when the order reaches packed the build is `consumed`
+ * and stock is deducted (negative allowed).
+ */
+export interface Build {
+  id: string;
+  orderId: string;
+  status: BuildStatus;
+  lines: BuildLine[];
+  notes?: string;
+  createdById?: string;
+  createdByName?: string;
+  reservedAt?: string;
+  consumedAt?: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+/** A pallet / delivery received into the warehouse. */
+export interface GoodsReceipt {
+  id: string;
+  reference: string;
+  supplier?: string;
+  status: GoodsReceiptStatus;
+  lines: GoodsReceiptLine[];
+  totalCost?: number;
+  notes?: string;
+  receivedAt: string;
+  receivedById?: string;
+  receivedByName?: string;
+  postedAt?: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
 // ==================== SUPPORT TICKETS ====================
 
 export type TicketStatus = 'open' | 'in_progress' | 'waiting' | 'resolved' | 'closed';
@@ -234,6 +342,14 @@ export interface Order {
   buyerName: string;
   buyerEmail: string;
   buyerNote: string;
+  // Buyer / billing address — the buyer's real address. For GSP orders this is the
+  // overseas destination, distinct from the UK "Post to" hub address below.
+  buyerAddress1?: string;
+  buyerAddress2?: string;
+  buyerCity?: string;
+  buyerCounty?: string;
+  buyerPostcode?: string;
+  buyerCountry?: string;
   // Shipping address
   postToName: string;
   postToPhone: string;

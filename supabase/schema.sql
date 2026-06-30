@@ -71,7 +71,7 @@ CREATE TABLE IF NOT EXISTS orders (
   
   -- Shipping
   delivery_carrier TEXT DEFAULT 'FedEx' CHECK (delivery_carrier IN ('DPD', 'FedEx', 'Parcelforce', 'Royal Mail', 'Other')),
-  delivery_type TEXT DEFAULT 'standard' CHECK (delivery_type IN ('standard', 'next_day', 'express', 'collection')),
+  delivery_type TEXT DEFAULT 'standard' CHECK (delivery_type IN ('standard', 'next_day', 'two_day', 'express', 'collection')),
   tracking_number TEXT,
   delivery_service TEXT,
   number_of_boxes INTEGER DEFAULT 1,
@@ -259,6 +259,10 @@ CREATE INDEX IF NOT EXISTS idx_ebay_messages_sent_at ON ebay_messages(sent_at DE
 ALTER TABLE returns DROP CONSTRAINT IF EXISTS returns_status_check;
 ALTER TABLE returns ADD CONSTRAINT returns_status_check CHECK (status IN ('pending', 'received', 'refunded', 'rejected', 'replacement'));
 
+-- Allow 'two_day' delivery type (deriveShipping can produce it; was missing from the check)
+ALTER TABLE orders DROP CONSTRAINT IF EXISTS orders_delivery_type_check;
+ALTER TABLE orders ADD CONSTRAINT orders_delivery_type_check CHECK (delivery_type IN ('standard', 'next_day', 'two_day', 'express', 'collection'));
+
 -- Add responsible department/user columns for returns productivity tracking
 ALTER TABLE returns ADD COLUMN IF NOT EXISTS responsible_department TEXT;
 ALTER TABLE returns ADD COLUMN IF NOT EXISTS responsible_user_id UUID REFERENCES users(id);
@@ -350,6 +354,128 @@ BEGIN
   END IF;
 END
 $$;
+
+-- ==================== INVENTORY MODULE ====================
+-- Fully additive: parts catalog, serialized stock units, bulk stock levels, and
+-- goods-inward (pallet) receipts. Does not touch the orders/listings flow.
+
+-- Part / product catalog (SKU definitions; spec in attributes JSONB)
+CREATE TABLE IF NOT EXISTS inventory_parts (
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  sku TEXT,
+  name TEXT NOT NULL,
+  category TEXT NOT NULL,                       -- inventory category key
+  tracking TEXT NOT NULL DEFAULT 'bulk',        -- serialized | bulk
+  attributes JSONB DEFAULT '{}'::jsonb,
+  barcode TEXT,                                 -- manufacturer/product barcode for scan-to-receive
+  low_stock_threshold INTEGER,
+  notes TEXT,
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+ALTER TABLE inventory_parts ADD COLUMN IF NOT EXISTS barcode TEXT;
+CREATE INDEX IF NOT EXISTS idx_inventory_parts_category ON inventory_parts(category);
+CREATE INDEX IF NOT EXISTS idx_inventory_parts_sku ON inventory_parts(sku);
+CREATE INDEX IF NOT EXISTS idx_inventory_parts_barcode ON inventory_parts(barcode);
+
+-- Serialized physical units (laptops/desktops/monitors)
+CREATE TABLE IF NOT EXISTS stock_units (
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  part_id UUID REFERENCES inventory_parts(id) ON DELETE CASCADE,
+  asset_tag TEXT,
+  grade TEXT,
+  status TEXT NOT NULL DEFAULT 'in_stock',
+  location TEXT,
+  condition_notes TEXT,
+  attributes JSONB DEFAULT '{}'::jsonb,
+  goods_receipt_id UUID,
+  unit_cost NUMERIC,
+  received_at TIMESTAMPTZ,
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_stock_units_part ON stock_units(part_id);
+CREATE INDEX IF NOT EXISTS idx_stock_units_status ON stock_units(status);
+
+-- Bulk quantity-on-hand per part + grade + location
+CREATE TABLE IF NOT EXISTS stock_levels (
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  part_id UUID REFERENCES inventory_parts(id) ON DELETE CASCADE,
+  grade TEXT,
+  location TEXT,
+  quantity INTEGER NOT NULL DEFAULT 0,
+  updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_stock_levels_part ON stock_levels(part_id);
+
+-- Goods inward (pallet) receipts; lines held as JSONB
+CREATE TABLE IF NOT EXISTS goods_receipts (
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  reference TEXT,
+  supplier TEXT,
+  status TEXT NOT NULL DEFAULT 'draft',          -- draft | posted
+  lines JSONB DEFAULT '[]'::jsonb,
+  total_cost NUMERIC,
+  notes TEXT,
+  received_at TIMESTAMPTZ DEFAULT NOW(),
+  received_by_id TEXT,
+  received_by_name TEXT,
+  posted_at TIMESTAMPTZ,
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_goods_receipts_status ON goods_receipts(status);
+
+-- Builds: parts allocated to an order. reserved = on hold (assembling);
+-- consumed = deducted from stock when the order reaches packed.
+CREATE TABLE IF NOT EXISTS builds (
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  order_id TEXT NOT NULL,
+  status TEXT NOT NULL DEFAULT 'reserved',        -- draft | reserved | consumed | cancelled
+  lines JSONB DEFAULT '[]'::jsonb,                 -- [{ partId, category, description, quantity, stockUnitId }]
+  notes TEXT,
+  created_by_id TEXT,
+  created_by_name TEXT,
+  reserved_at TIMESTAMPTZ,
+  consumed_at TIMESTAMPTZ,
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_builds_order ON builds(order_id);
+CREATE INDEX IF NOT EXISTS idx_builds_status ON builds(status);
+
+DO $$
+BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_policies WHERE schemaname='public' AND tablename='builds' AND policyname='Allow all') THEN
+    EXECUTE 'ALTER TABLE builds ENABLE ROW LEVEL SECURITY';
+    CREATE POLICY "Allow all" ON builds FOR ALL USING (true);
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_policies WHERE schemaname='public' AND tablename='inventory_parts' AND policyname='Allow all') THEN
+    EXECUTE 'ALTER TABLE inventory_parts ENABLE ROW LEVEL SECURITY';
+    CREATE POLICY "Allow all" ON inventory_parts FOR ALL USING (true);
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_policies WHERE schemaname='public' AND tablename='stock_units' AND policyname='Allow all') THEN
+    EXECUTE 'ALTER TABLE stock_units ENABLE ROW LEVEL SECURITY';
+    CREATE POLICY "Allow all" ON stock_units FOR ALL USING (true);
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_policies WHERE schemaname='public' AND tablename='stock_levels' AND policyname='Allow all') THEN
+    EXECUTE 'ALTER TABLE stock_levels ENABLE ROW LEVEL SECURITY';
+    CREATE POLICY "Allow all" ON stock_levels FOR ALL USING (true);
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_policies WHERE schemaname='public' AND tablename='goods_receipts' AND policyname='Allow all') THEN
+    EXECUTE 'ALTER TABLE goods_receipts ENABLE ROW LEVEL SECURITY';
+    CREATE POLICY "Allow all" ON goods_receipts FOR ALL USING (true);
+  END IF;
+END
+$$;
+CREATE OR REPLACE TRIGGER update_inventory_parts_updated_at BEFORE UPDATE ON inventory_parts
+  FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
+CREATE OR REPLACE TRIGGER update_stock_units_updated_at BEFORE UPDATE ON stock_units
+  FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
+CREATE OR REPLACE TRIGGER update_goods_receipts_updated_at BEFORE UPDATE ON goods_receipts
+  FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
+CREATE OR REPLACE TRIGGER update_builds_updated_at BEFORE UPDATE ON builds
+  FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
 
 -- ==================== TRIGGERS ====================
 

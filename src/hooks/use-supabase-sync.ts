@@ -66,6 +66,12 @@ export function useSupabaseSync() {
         tickets: data.tickets.length > 0 ? data.tickets : currentState.tickets,
         // Missing items: merge local + any from Supabase
         missingItems: [...currentState.missingItems, ...newMissing],
+        // Inventory: Supabase is source of truth for multi-device sync
+        inventoryParts: data.inventoryParts.length > 0 ? data.inventoryParts : currentState.inventoryParts,
+        stockUnits: data.stockUnits.length > 0 ? data.stockUnits : currentState.stockUnits,
+        stockLevels: data.stockLevels.length > 0 ? data.stockLevels : currentState.stockLevels,
+        goodsReceipts: data.goodsReceipts.length > 0 ? data.goodsReceipts : currentState.goodsReceipts,
+        builds: data.builds.length > 0 ? data.builds : currentState.builds,
       });
 
       setLastSync(new Date());

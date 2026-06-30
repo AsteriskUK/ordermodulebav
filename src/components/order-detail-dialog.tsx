@@ -23,7 +23,9 @@ import {
 import { MapPin, Package, User, Truck, MessageSquare, Send, Trash2, ShoppingBag, Star, PackageMinus, Plus } from 'lucide-react';
 import { DeliveryBadge } from './delivery-badge';
 import { ReturnLabelDialog } from './return-label-dialog';
-import { RotateCcw } from 'lucide-react';
+import { BuildPanel } from './build-panel';
+import { GspDestination } from './order-source-logo';
+import { RotateCcw, Wrench } from 'lucide-react';
 import { toast } from 'sonner';
 
 interface Props {
@@ -62,6 +64,7 @@ export function OrderDetailDialog({ order, onClose }: Props) {
 
   // eBay messaging
   const [showReturnLabel, setShowReturnLabel] = useState(false);
+  const [showBuild, setShowBuild] = useState(false);
   const [ebayMsgText, setEbayMsgText] = useState('');
   const [ebayMsgReason, setEbayMsgReason] = useState('SHIPPING');
   const [ebayMsgSending, setEbayMsgSending] = useState(false);
@@ -228,6 +231,14 @@ export function OrderDetailDialog({ order, onClose }: Props) {
             </Select>
           </div>
 
+          {/* Build / parts allocation */}
+          <div className="flex items-center gap-3">
+            <span className="text-sm font-medium text-slate-600">Build:</span>
+            <Button size="sm" variant="outline" onClick={() => setShowBuild(true)}>
+              <Wrench className="h-3.5 w-3.5 mr-1.5" /> Parts &amp; build
+            </Button>
+          </div>
+
           {/* Return label — available once the order is packed */}
           {order.status === 'packed' && (
             <div className="flex items-center gap-3">
@@ -363,6 +374,11 @@ export function OrderDetailDialog({ order, onClose }: Props) {
                 </p>
               )}
             </div>
+            {order.isGSP && (
+              <div className="mt-2">
+                <GspDestination order={order} />
+              </div>
+            )}
           </div>
 
           {/* Tracking */}
@@ -681,6 +697,7 @@ export function OrderDetailDialog({ order, onClose }: Props) {
         </div>
       </DialogContent>
       {showReturnLabel && <ReturnLabelDialog order={order} onClose={() => setShowReturnLabel(false)} />}
+      {showBuild && <BuildPanel order={order} onClose={() => setShowBuild(false)} />}
     </Dialog>
   );
 }

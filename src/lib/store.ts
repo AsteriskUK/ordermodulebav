@@ -1,8 +1,9 @@
 import { create } from 'zustand';
 import { persist, createJSONStorage } from 'zustand/middleware';
 import { get, set as idbSet, del } from 'idb-keyval';
-import { Order, OrderNote, OrderStatus, Batch, DeliveryCarrier, DeliveryType, AppUser, EodEvent, ReturnRecord, ReplacementItem, MissingItemRecord, Department, AttendanceRecord, LeaveRequest, LeaveBalance, TicketRecord, TicketActivity } from './types';
-import { syncAttendance, syncLeaveRequest, syncLeaveBalance, syncOrder, syncBatch, syncUser, deleteUserFromSupabase, syncReturn, syncTicket, deleteTicketFromSupabase, syncMissingItem } from './supabase-store';
+import { Order, OrderNote, OrderStatus, Batch, DeliveryCarrier, DeliveryType, AppUser, EodEvent, ReturnRecord, ReplacementItem, MissingItemRecord, Department, AttendanceRecord, LeaveRequest, LeaveBalance, TicketRecord, TicketActivity, InventoryPart, StockUnit, StockLevel, GoodsReceipt, Build } from './types';
+import { syncAttendance, syncLeaveRequest, syncLeaveBalance, syncOrder, syncBatch, syncUser, deleteUserFromSupabase, syncReturn, syncTicket, deleteTicketFromSupabase, syncMissingItem, syncInventoryPart, syncStockUnit, syncStockLevel, syncGoodsReceipt, syncBuild } from './supabase-store';
+import { buildSku, INVENTORY_CATEGORY_MAP } from './inventory-config';
 
 // Generate proper UUID v4 for PostgreSQL compatibility
 function generateUUID(): string {
@@ -90,6 +91,21 @@ interface OrderStore {
   addTicket: (ticket: TicketRecord) => void;
   updateTicket: (id: string, updates: Partial<TicketRecord>, activity?: Omit<TicketActivity, 'at'>) => void;
   deleteTicket: (id: string) => void;
+  // Inventory
+  inventoryParts: InventoryPart[];
+  stockUnits: StockUnit[];
+  stockLevels: StockLevel[];
+  goodsReceipts: GoodsReceipt[];
+  upsertInventoryPart: (part: InventoryPart) => void;
+  saveGoodsReceipt: (receipt: GoodsReceipt) => void;
+  deleteGoodsReceipt: (id: string) => void;
+  postGoodsReceipt: (receiptId: string) => void;
+  updateStockUnit: (id: string, updates: Partial<StockUnit>) => void;
+  // Builds (assembly) — reserve on hold, deduct at packed
+  builds: Build[];
+  saveBuild: (build: Build) => void;          // create/update + reserve serialized units
+  cancelBuild: (buildId: string) => void;     // release the hold
+  consumeBuild: (buildId: string) => void;    // deduct from stock (negative allowed)
   // HR Actions
   attendanceRecords: AttendanceRecord[];
   leaveRequests: LeaveRequest[];
@@ -113,6 +129,11 @@ export const useOrderStore = create<OrderStore>()(
       returns: [] as ReturnRecord[],
       missingItems: [] as MissingItemRecord[],
       tickets: [] as TicketRecord[],
+      inventoryParts: [] as InventoryPart[],
+      stockUnits: [] as StockUnit[],
+      stockLevels: [] as StockLevel[],
+      goodsReceipts: [] as GoodsReceipt[],
+      builds: [] as Build[],
       attendanceRecords: [] as AttendanceRecord[],
       leaveRequests: [] as LeaveRequest[],
       leaveBalances: [] as LeaveBalance[],
@@ -174,7 +195,8 @@ export const useOrderStore = create<OrderStore>()(
             batches: [...state.batches, batch],
           };
         }),
-      updateOrderStatus: (orderId, status) =>
+      updateOrderStatus: (orderId, status) => {
+        const before = get().orders.find((o) => o.id === orderId);
         set((state) => {
           const order = state.orders.find((o) => o.id === orderId);
           if (!order) return {};
@@ -199,7 +221,13 @@ export const useOrderStore = create<OrderStore>()(
             orders: updatedOrders,
             eodEvents: [...state.eodEvents, event],
           };
-        }),
+        });
+        // Deduct stock when the order reaches packed: consume its on-hold build.
+        if (status === 'packed' && before && before.status !== 'packed') {
+          const build = get().builds.find((b) => b.orderId === orderId && b.status === 'reserved');
+          if (build) get().consumeBuild(build.id);
+        }
+      },
       updateOrderComment: (orderId, comment) =>
         set((state) => {
           const updatedOrders = state.orders.map((o) =>
@@ -566,6 +594,200 @@ export const useOrderStore = create<OrderStore>()(
         set((state) => ({ tickets: state.tickets.filter((t) => t.id !== id) }));
         deleteTicketFromSupabase(id).catch(console.error);
       },
+      // ── Inventory ──
+      upsertInventoryPart: (part) => {
+        set((state) => {
+          const exists = state.inventoryParts.some((p) => p.id === part.id);
+          return {
+            inventoryParts: exists
+              ? state.inventoryParts.map((p) => (p.id === part.id ? part : p))
+              : [part, ...state.inventoryParts],
+          };
+        });
+        syncInventoryPart(part).catch(console.error);
+      },
+      saveGoodsReceipt: (receipt) => {
+        set((state) => {
+          const exists = state.goodsReceipts.some((r) => r.id === receipt.id);
+          return {
+            goodsReceipts: exists
+              ? state.goodsReceipts.map((r) => (r.id === receipt.id ? receipt : r))
+              : [receipt, ...state.goodsReceipts],
+          };
+        });
+        syncGoodsReceipt(receipt).catch(console.error);
+      },
+      deleteGoodsReceipt: (id) => {
+        set((state) => ({ goodsReceipts: state.goodsReceipts.filter((r) => r.id !== id) }));
+      },
+      updateStockUnit: (id, updates) => {
+        set((state) => {
+          const stockUnits = state.stockUnits.map((u) =>
+            u.id === id ? { ...u, ...updates, updatedAt: new Date().toISOString() } : u
+          );
+          const updated = stockUnits.find((u) => u.id === id);
+          if (updated) syncStockUnit(updated).catch(console.error);
+          return { stockUnits };
+        });
+      },
+      postGoodsReceipt: (receiptId) => {
+        const state = get();
+        const receipt = state.goodsReceipts.find((r) => r.id === receiptId);
+        if (!receipt || receipt.status === 'posted') return;
+        const now = new Date().toISOString();
+        const user = state.users.find((u) => u.id === state.currentUserId);
+
+        const parts = [...state.inventoryParts];
+        const newUnits: StockUnit[] = [];
+        const levels = [...state.stockLevels];
+        const touchedParts: InventoryPart[] = [];
+        const touchedLevels: StockLevel[] = [];
+
+        const findOrCreatePart = (line: GoodsReceipt['lines'][number]): InventoryPart => {
+          // Scanned lines carry the exact part id — receive straight into it.
+          if (line.partId) {
+            const existing = parts.find((p) => p.id === line.partId);
+            if (existing) return existing;
+          }
+          const sku = buildSku(line.category, line.attributes);
+          let part = parts.find((p) => p.sku === sku && p.category === line.category);
+          if (!part) {
+            const cat = INVENTORY_CATEGORY_MAP[line.category];
+            part = {
+              id: generateUUID(), sku, category: line.category,
+              tracking: line.tracking,
+              name: `${cat?.label ?? line.category}${sku.replace(line.category.toUpperCase(), '').replace(/-/g, ' ')}`.trim(),
+              attributes: line.attributes, createdAt: now, updatedAt: now,
+            };
+            parts.push(part);
+            touchedParts.push(part);
+          }
+          return part;
+        };
+
+        for (const line of receipt.lines) {
+          if (!line.quantity || line.quantity < 1) continue;
+          const part = findOrCreatePart(line);
+
+          if (line.tracking === 'serialized') {
+            for (let i = 0; i < line.quantity; i++) {
+              newUnits.push({
+                id: generateUUID(), partId: part.id, grade: line.grade, status: 'in_stock',
+                location: line.location, attributes: line.attributes, goodsReceiptId: receipt.id,
+                unitCost: line.unitCost, receivedAt: receipt.receivedAt, createdAt: now, updatedAt: now,
+              });
+            }
+          } else {
+            let level = levels.find((l) => l.partId === part.id && (l.grade ?? '') === (line.grade ?? '') && (l.location ?? '') === (line.location ?? ''));
+            if (!level) {
+              level = { id: generateUUID(), partId: part.id, grade: line.grade, location: line.location, quantity: 0, updatedAt: now };
+              levels.push(level);
+            }
+            level.quantity += line.quantity;
+            level.updatedAt = now;
+            if (!touchedLevels.includes(level)) touchedLevels.push(level);
+          }
+        }
+
+        const postedReceipt: GoodsReceipt = {
+          ...receipt, status: 'posted', postedAt: now,
+          receivedById: receipt.receivedById ?? user?.id,
+          receivedByName: receipt.receivedByName ?? user?.name,
+          updatedAt: now,
+        };
+
+        set({
+          inventoryParts: parts,
+          stockUnits: [...newUnits, ...state.stockUnits],
+          stockLevels: levels,
+          goodsReceipts: state.goodsReceipts.map((r) => (r.id === receiptId ? postedReceipt : r)),
+        });
+
+        // Persist everything that changed
+        touchedParts.forEach((p) => syncInventoryPart(p).catch(console.error));
+        newUnits.forEach((u) => syncStockUnit(u).catch(console.error));
+        touchedLevels.forEach((l) => syncStockLevel(l).catch(console.error));
+        syncGoodsReceipt(postedReceipt).catch(console.error);
+      },
+      // ── Builds (assembly) ──
+      saveBuild: (build) => {
+        const state = get();
+        const existing = state.builds.find((b) => b.id === build.id);
+        // Serialized units referenced by the build go on hold (in_build) while reserved.
+        const newUnitIds = build.status === 'reserved'
+          ? build.lines.map((l) => l.stockUnitId).filter(Boolean) as string[]
+          : [];
+        const prevUnitIds = existing?.lines.map((l) => l.stockUnitId).filter(Boolean) as string[] | undefined;
+        const releaseIds = (prevUnitIds ?? []).filter((id) => !newUnitIds.includes(id));
+
+        set((s) => {
+          const builds = existing
+            ? s.builds.map((b) => (b.id === build.id ? build : b))
+            : [build, ...s.builds];
+          const stockUnits = s.stockUnits.map((u) => {
+            if (newUnitIds.includes(u.id) && u.status === 'in_stock') return { ...u, status: 'in_build' as const, updatedAt: new Date().toISOString() };
+            if (releaseIds.includes(u.id) && u.status === 'in_build') return { ...u, status: 'in_stock' as const, updatedAt: new Date().toISOString() };
+            return u;
+          });
+          return { builds, stockUnits };
+        });
+
+        syncBuild(build).catch(console.error);
+        get().stockUnits.filter((u) => newUnitIds.includes(u.id) || releaseIds.includes(u.id))
+          .forEach((u) => syncStockUnit(u).catch(console.error));
+      },
+      cancelBuild: (buildId) => {
+        const state = get();
+        const build = state.builds.find((b) => b.id === buildId);
+        if (!build || build.status === 'consumed') return;
+        const unitIds = build.lines.map((l) => l.stockUnitId).filter(Boolean) as string[];
+        const now = new Date().toISOString();
+        const cancelled: Build = { ...build, status: 'cancelled', updatedAt: now };
+        set((s) => ({
+          builds: s.builds.map((b) => (b.id === buildId ? cancelled : b)),
+          stockUnits: s.stockUnits.map((u) => (unitIds.includes(u.id) && u.status === 'in_build') ? { ...u, status: 'in_stock' as const, updatedAt: now } : u),
+        }));
+        syncBuild(cancelled).catch(console.error);
+        get().stockUnits.filter((u) => unitIds.includes(u.id)).forEach((u) => syncStockUnit(u).catch(console.error));
+      },
+      consumeBuild: (buildId) => {
+        const state = get();
+        const build = state.builds.find((b) => b.id === buildId);
+        if (!build || build.status === 'consumed') return;
+        const now = new Date().toISOString();
+
+        const levels = [...state.stockLevels];
+        const touchedLevels: StockLevel[] = [];
+        const consumedUnitIds: string[] = [];
+
+        for (const line of build.lines) {
+          const part = state.inventoryParts.find((p) => p.id === line.partId);
+          if (line.stockUnitId) {
+            consumedUnitIds.push(line.stockUnitId);
+          } else if (part?.tracking !== 'serialized') {
+            // Deduct bulk quantity — negative is allowed (warehouse is never blocked).
+            let level = levels.find((l) => l.partId === line.partId);
+            if (!level) {
+              level = { id: generateUUID(), partId: line.partId, quantity: 0, updatedAt: now };
+              levels.push(level);
+            }
+            level.quantity -= (line.quantity || 1);
+            level.updatedAt = now;
+            if (!touchedLevels.includes(level)) touchedLevels.push(level);
+          }
+        }
+
+        const consumed: Build = { ...build, status: 'consumed', consumedAt: now, updatedAt: now };
+        set((s) => ({
+          builds: s.builds.map((b) => (b.id === buildId ? consumed : b)),
+          stockLevels: levels,
+          stockUnits: s.stockUnits.map((u) => consumedUnitIds.includes(u.id) ? { ...u, status: 'sold' as const, updatedAt: now } : u),
+        }));
+
+        syncBuild(consumed).catch(console.error);
+        touchedLevels.forEach((l) => syncStockLevel(l).catch(console.error));
+        get().stockUnits.filter((u) => consumedUnitIds.includes(u.id)).forEach((u) => syncStockUnit(u).catch(console.error));
+      },
       createReplacementOrder: (returnId) => {
         const state = get();
         const ret = state.returns.find((r) => r.id === returnId);
@@ -771,6 +993,11 @@ export const useOrderStore = create<OrderStore>()(
           returns:     s.returns     ?? [],
           missingItems: (s as OrderStore).missingItems ?? [],
           tickets: (s as OrderStore).tickets ?? [],
+          inventoryParts: (s as OrderStore).inventoryParts ?? [],
+          stockUnits: (s as OrderStore).stockUnits ?? [],
+          stockLevels: (s as OrderStore).stockLevels ?? [],
+          goodsReceipts: (s as OrderStore).goodsReceipts ?? [],
+          builds: (s as OrderStore).builds ?? [],
           attendanceRecords: (s as OrderStore).attendanceRecords ?? [],
           leaveRequests: (s as OrderStore).leaveRequests ?? [],
           leaveBalances: (s as OrderStore).leaveBalances ?? [],
