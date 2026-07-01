@@ -263,6 +263,14 @@ ALTER TABLE returns ADD CONSTRAINT returns_status_check CHECK (status IN ('pendi
 ALTER TABLE orders DROP CONSTRAINT IF EXISTS orders_delivery_type_check;
 ALTER TABLE orders ADD CONSTRAINT orders_delivery_type_check CHECK (delivery_type IN ('standard', 'next_day', 'two_day', 'express', 'collection'));
 
+-- Fast ILIKE '%…%' search over the orders table (Historical Orders page) at 40k+ rows
+CREATE EXTENSION IF NOT EXISTS pg_trgm;
+CREATE INDEX IF NOT EXISTS idx_orders_item_title_trgm       ON orders USING gin (item_title gin_trgm_ops);
+CREATE INDEX IF NOT EXISTS idx_orders_buyer_username_trgm   ON orders USING gin (buyer_username gin_trgm_ops);
+CREATE INDEX IF NOT EXISTS idx_orders_buyer_name_trgm       ON orders USING gin (buyer_name gin_trgm_ops);
+CREATE INDEX IF NOT EXISTS idx_orders_srn_trgm              ON orders USING gin (sales_record_number gin_trgm_ops);
+CREATE INDEX IF NOT EXISTS idx_orders_order_number_trgm     ON orders USING gin (order_number gin_trgm_ops);
+
 -- Add responsible department/user columns for returns productivity tracking
 ALTER TABLE returns ADD COLUMN IF NOT EXISTS responsible_department TEXT;
 ALTER TABLE returns ADD COLUMN IF NOT EXISTS responsible_user_id UUID REFERENCES users(id);
