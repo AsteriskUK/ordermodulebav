@@ -25,6 +25,7 @@ import {
   MapPin,
   Tag,
   Warehouse,
+  History,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useOrderStore } from '@/lib/store';
@@ -40,6 +41,7 @@ const ALL_NAV = [
   { name: 'Batch Shipping', href: '/shipping', icon: Truck, staffVisible: false },
   { name: 'Tracking', href: '/tracking', icon: MapPin, staffVisible: true },
   { name: 'Order Sheet', href: '/orders', icon: ClipboardList, staffVisible: false },
+  { name: 'Historical Orders', href: '/historical', icon: History, staffVisible: false },
   { name: 'Queue', href: '/packaging', icon: Workflow, staffVisible: true },
   { name: 'Messages', href: '/notes', icon: MessageSquare, staffVisible: true },
   { name: 'Batches', href: '/batches', icon: Package, staffVisible: false },
