@@ -26,6 +26,8 @@ import {
   Tag,
   Warehouse,
   History,
+  MessageSquareWarning,
+  BarChart3,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useOrderStore } from '@/lib/store';
@@ -34,6 +36,7 @@ import { GlobalSearch } from './global-search';
 
 const ALL_NAV = [
   { name: 'Dashboard', href: '/', icon: LayoutDashboard, staffVisible: true },
+  { name: 'Overview', href: '/overview', icon: BarChart3, staffVisible: false },
   { name: 'Import Orders', href: '/import', icon: Upload, staffVisible: false },
   { name: 'Listings', href: '/listings', icon: Tag, staffVisible: false },
   { name: 'Inventory', href: '/inventory', icon: Warehouse, staffVisible: false },
@@ -44,6 +47,7 @@ const ALL_NAV = [
   { name: 'Historical Orders', href: '/historical', icon: History, staffVisible: false },
   { name: 'Queue', href: '/packaging', icon: Workflow, staffVisible: true },
   { name: 'Messages', href: '/notes', icon: MessageSquare, staffVisible: true },
+  { name: 'Feedback', href: '/feedback', icon: MessageSquareWarning, staffVisible: false },
   { name: 'Batches', href: '/batches', icon: Package, staffVisible: false },
   { name: 'Returns', href: '/returns', icon: PackageOpen, staffVisible: false },
   { name: 'Replacements', href: '/replacements', icon: RefreshCw, staffVisible: false },

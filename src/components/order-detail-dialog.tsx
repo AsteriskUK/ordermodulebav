@@ -24,6 +24,7 @@ import { MapPin, Package, User, Truck, MessageSquare, Send, Trash2, ShoppingBag,
 import { DeliveryBadge } from './delivery-badge';
 import { ReturnLabelDialog } from './return-label-dialog';
 import { BuildPanel } from './build-panel';
+import { QuickActions } from './quick-actions';
 import { GspDestination } from './order-source-logo';
 import { RotateCcw, Wrench } from 'lucide-react';
 import { toast } from 'sonner';
@@ -238,6 +239,18 @@ export function OrderDetailDialog({ order, onClose }: Props) {
               <Wrench className="h-3.5 w-3.5 mr-1.5" /> Parts &amp; build
             </Button>
           </div>
+
+          {/* Quick actions — raise a customer-request ticket in one tap */}
+          <QuickActions context={{
+            buyerUsername: order.buyerUsername,
+            buyerName: order.buyerName,
+            itemTitle: order.itemTitle,
+            orderId: order.id,
+            salesRecordNumber: order.salesRecordNumber,
+            orderNumber: order.orderNumber,
+            contactPhone: order.postToPhone,
+            contactEmail: order.buyerEmail,
+          }} />
 
           {/* Return label — available once the order is packed */}
           {order.status === 'packed' && (

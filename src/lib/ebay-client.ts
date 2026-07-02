@@ -42,9 +42,12 @@ async function doRefresh(refreshToken: string): Promise<string | null> {
   const data = (await res.json()) as { access_token: string; expires_in: number };
   const expiresAt = Date.now() + data.expires_in * 1000;
 
+  // Own cache key — this token carries ALL granted scopes (inventory/account).
+  // The orders/backfill routes clobber `ebay_access_token` with a fulfillment-only
+  // token, so listings must not share that key.
   await Promise.all([
-    setDbSetting('ebay_access_token', data.access_token),
-    setDbSetting('ebay_token_expires_at', String(expiresAt)),
+    setDbSetting('ebay_listing_access_token', data.access_token),
+    setDbSetting('ebay_listing_token_expires_at', String(expiresAt)),
   ]);
 
   return data.access_token;
@@ -77,8 +80,8 @@ export async function getEbayAccessToken(): Promise<string | null> {
 
   const [dbRefreshToken, dbAccessToken, dbExpiresAt] = await Promise.all([
     envRefreshToken ? Promise.resolve(null) : getDbSetting('ebay_refresh_token'),
-    getDbSetting('ebay_access_token'),
-    getDbSetting('ebay_token_expires_at'),
+    getDbSetting('ebay_listing_access_token'),
+    getDbSetting('ebay_listing_token_expires_at'),
   ]);
 
   const refreshTokenValue = envRefreshToken ?? dbRefreshToken;

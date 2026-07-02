@@ -1,50 +1,31 @@
 'use client';
 
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect } from 'react';
 import { Sidebar } from './sidebar';
 import { EodScheduler } from './eod-scheduler';
-import { Menu } from 'lucide-react';
+import { PanelLeftClose, PanelLeftOpen } from 'lucide-react';
 import { Button } from './ui/button';
 import { useSupabaseSync } from '@/hooks/use-supabase-sync';
 import { CancellationAlert } from './cancellation-alert';
 import { TrackingScheduler } from './tracking-scheduler';
+import { FeedbackMonitor } from './feedback-monitor';
 import { useOrderStore } from '@/lib/store';
 import { SignIn } from './sign-in';
 
-const SIDEBAR_AUTO_HIDE_MS = 3000;
+const SIDEBAR_KEY = 'sidebar-collapsed';
 
 export function AppShell({ children }: { children: React.ReactNode }) {
-  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
-  const autoHideTimer = useRef<NodeJS.Timeout | null>(null);
+  // Manual show/hide toggle, persisted across pages/reloads (no auto-hide).
+  const [sidebarCollapsed, setSidebarCollapsed] = useState<boolean>(() => {
+    if (typeof window === 'undefined') return false;
+    return localStorage.getItem(SIDEBAR_KEY) === '1';
+  });
 
-  const clearAutoHideTimer = () => {
-    if (autoHideTimer.current) {
-      clearTimeout(autoHideTimer.current);
-      autoHideTimer.current = null;
-    }
-  };
-
-  const startAutoHideTimer = () => {
-    clearAutoHideTimer();
-    autoHideTimer.current = setTimeout(() => {
-      setSidebarCollapsed(true);
-    }, SIDEBAR_AUTO_HIDE_MS);
-  };
-
-  const handleMouseEnter = () => {
-    clearAutoHideTimer();
-    if (sidebarCollapsed) {
-      setSidebarCollapsed(false);
-    }
-  };
-
-  const handleMouseLeave = () => {
-    startAutoHideTimer();
-  };
-
-  useEffect(() => {
-    return () => clearAutoHideTimer();
-  }, []);
+  const toggleSidebar = () => setSidebarCollapsed((prev) => {
+    const next = !prev;
+    try { localStorage.setItem(SIDEBAR_KEY, next ? '1' : '0'); } catch { /* ignore */ }
+    return next;
+  });
 
   // Initialize Supabase sync (auto-syncs on load and periodically)
   const { isSyncing, isOnline } = useSupabaseSync();
@@ -58,6 +39,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   const [hydrated, setHydrated] = useState(useOrderStore.persist.hasHydrated());
   useEffect(() => {
     const unsub = useOrderStore.persist.onFinishHydration(() => setHydrated(true));
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     setHydrated(useOrderStore.persist.hasHydrated());
     return unsub;
   }, []);
@@ -75,27 +57,24 @@ export function AppShell({ children }: { children: React.ReactNode }) {
     <div className="flex h-screen overflow-hidden">
       <EodScheduler />
       <TrackingScheduler />
-      <div
-        className="flex-shrink-0"
-        onMouseEnter={handleMouseEnter}
-        onMouseLeave={handleMouseLeave}
-      >
+      <div className="flex-shrink-0">
         <Sidebar
           collapsed={sidebarCollapsed}
-          onToggle={() => setSidebarCollapsed(!sidebarCollapsed)}
-          onNavigate={() => setSidebarCollapsed(true)}
+          onToggle={toggleSidebar}
         />
       </div>
       <CancellationAlert />
+      <FeedbackMonitor />
       <main className="flex-1 bg-slate-50 overflow-y-auto">
         <div className="p-6">
           <Button
             variant="outline"
             size="sm"
-            onClick={() => setSidebarCollapsed(!sidebarCollapsed)}
+            onClick={toggleSidebar}
             className="mb-4"
+            title={sidebarCollapsed ? 'Show sidebar' : 'Hide sidebar'}
           >
-            <Menu className="h-4 w-4" />
+            {sidebarCollapsed ? <PanelLeftOpen className="h-4 w-4" /> : <PanelLeftClose className="h-4 w-4" />}
           </Button>
           {children}
         </div>

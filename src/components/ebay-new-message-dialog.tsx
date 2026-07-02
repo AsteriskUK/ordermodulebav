@@ -8,6 +8,8 @@ import { Button } from '@/components/ui/button';
 import { Send, ShoppingBag, Search, User } from 'lucide-react';
 import { toast } from 'sonner';
 import { useOrderStore } from '@/lib/store';
+import { ImageUpload } from './image-upload';
+import { MESSAGE_IMAGE_BUCKET } from '@/lib/image-upload';
 
 interface Props {
   onClose: () => void;
@@ -41,6 +43,7 @@ export function EbayNewMessageDialog({ onClose }: Props) {
   const [manualOrderId, setManualOrderId] = useState('');
   const [reason, setReason] = useState('ORDER');
   const [text, setText] = useState('');
+  const [images, setImages] = useState<string[]>([]);
   const [sending, setSending] = useState(false);
   const [mode, setMode] = useState<'search' | 'manual'>('search');
 
@@ -80,7 +83,7 @@ export function EbayNewMessageDialog({ onClose }: Props) {
   const effectiveUsername = recipient?.username || manualUsername.trim();
   const effectiveItemId = recipient?.itemId || manualItemId.trim();
   const effectiveOrderId = recipient?.orderId || manualOrderId.trim();
-  const canSend = !!effectiveUsername && !!effectiveItemId && !!text.trim();
+  const canSend = !!effectiveUsername && !!effectiveItemId && (!!text.trim() || images.length > 0);
 
   async function handleSend() {
     if (!canSend) return;
@@ -97,6 +100,7 @@ export function EbayNewMessageDialog({ onClose }: Props) {
           itemTitle: recipient?.itemTitle,
           contactReason: reason,
           text,
+          imageUrls: images,
           sentById: currentUser?.id,
           sentByName: currentUser?.name,
         }),
@@ -234,6 +238,9 @@ export function EbayNewMessageDialog({ onClose }: Props) {
                   autoFocus
                 />
                 <p className="text-xs text-slate-400 text-right mt-0.5">{text.length}/2000</p>
+                <div className="mt-2">
+                  <ImageUpload bucket={MESSAGE_IMAGE_BUCKET} recordId={effectiveOrderId || effectiveUsername || 'new'} images={images} onChange={setImages} maxFiles={5} />
+                </div>
               </div>
             </>
           )}

@@ -26,6 +26,8 @@ const CATEGORIES = [
   { value: 'wrong-address', label: 'Address issue' },
   { value: 'refund-request', label: 'Refund request' },
   { value: 'return-request', label: 'Return request' },
+  { value: 'cancellation', label: 'Cancellation' },
+  { value: 'callback', label: 'Callback request' },
   { value: 'question', label: 'General question' },
   { value: 'other', label: 'Other' },
 ];

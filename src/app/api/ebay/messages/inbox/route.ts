@@ -75,6 +75,7 @@ interface EbayApiMessage {
   createdDate?: string;
   readStatus?: boolean;
   subject?: string;
+  messageMedia?: { mediaName?: string; mediaType?: string; mediaUrl?: string }[];
 }
 
 interface MessageRow {
@@ -84,8 +85,11 @@ interface MessageRow {
   order_id: string;
   item_id?: string | null;
   buyer_username: string;
+  sender_username?: string | null;
   contact_reason?: string;
   message_text: string;
+  media_urls?: string[];
+  conversation_type: string;   // FROM_MEMBERS (client) | FROM_EBAY (eBay)
   sent_at: string;
   status: string;
 }
@@ -97,15 +101,19 @@ const SELLER_USERNAME = (process.env.EBAY_SELLER_USERNAME ?? '').toLowerCase();
 
 function buildRow(
   msg: EbayApiMessage,
-  conv: { conversationId?: string; referenceId?: string }
+  conv: { conversationId?: string; referenceId?: string },
+  conversationType: string,
 ): MessageRow | null {
   if (!msg.messageId) return null;
   const sender = (msg.senderUsername ?? '').toLowerCase();
-  // Received unless we know the sender is us.
-  const direction: 'sent' | 'received' = SELLER_USERNAME && sender === SELLER_USERNAME ? 'sent' : 'received';
-  const buyerUsername = direction === 'received'
-    ? (msg.senderUsername ?? 'unknown')
-    : (msg.recipientUsername ?? 'unknown');
+  // eBay-originated messages are always inbound. For member threads, received
+  // unless we know the sender is us.
+  const direction: 'sent' | 'received' = conversationType === 'FROM_EBAY'
+    ? 'received'
+    : (SELLER_USERNAME && sender === SELLER_USERNAME ? 'sent' : 'received');
+  const buyerUsername = conversationType === 'FROM_EBAY'
+    ? (msg.senderUsername ?? 'eBay')
+    : (direction === 'received' ? (msg.senderUsername ?? 'unknown') : (msg.recipientUsername ?? 'unknown'));
   return {
     ebay_message_id: msg.messageId,
     conversation_id: conv.conversationId,
@@ -113,8 +121,11 @@ function buildRow(
     order_id: conv.referenceId ?? conv.conversationId ?? 'unknown',
     item_id: conv.referenceId ?? null,
     buyer_username: buyerUsername,
-    contact_reason: msg.subject ?? 'BUYER_MESSAGE',
+    sender_username: msg.senderUsername ?? null,
+    contact_reason: msg.subject ?? (conversationType === 'FROM_EBAY' ? 'EBAY_MESSAGE' : 'BUYER_MESSAGE'),
     message_text: msg.messageBody ?? '',
+    media_urls: (msg.messageMedia ?? []).map((m) => m.mediaUrl).filter((u): u is string => !!u),
+    conversation_type: conversationType,
     sent_at: msg.createdDate ?? new Date().toISOString(),
     status: direction === 'received' && msg.readStatus === false ? 'unread' : 'read',
   };
@@ -128,19 +139,21 @@ export async function GET(req: NextRequest) {
   const conversationId = new URL(req.url).searchParams.get('conversationId');
 
   if (conversationId) {
+    const conversationType = new URL(req.url).searchParams.get('conversationType') || 'FROM_MEMBERS';
     const token = await getAccessToken();
     if (token) {
       const res = await fetch(
-        `${MSG_BASE}/conversation/${conversationId}?conversation_type=FROM_MEMBERS&limit=100`,
+        `${MSG_BASE}/conversation/${conversationId}?conversation_type=${conversationType}&limit=100`,
         { headers: ebayHeaders(token) }
       );
       if (res.ok) {
         const data = await res.json() as { messages?: EbayApiMessage[]; referenceId?: string };
         const rows = (data.messages ?? [])
-          .map((m) => buildRow(m, { conversationId, referenceId: data.referenceId }))
+          .map((m) => buildRow(m, { conversationId, referenceId: data.referenceId }, conversationType))
           .filter((r): r is MessageRow => r !== null);
         if (rows.length) {
-          await supabase.from('ebay_messages').upsert(rows, { onConflict: 'ebay_message_id', ignoreDuplicates: true });
+          // Update on conflict (not ignore) so existing rows get sender_username backfilled.
+          await supabase.from('ebay_messages').upsert(rows, { onConflict: 'ebay_message_id' });
         }
       } else {
         console.warn('[eBay inbox] thread fetch failed', conversationId, res.status);
@@ -162,20 +175,19 @@ export async function GET(req: NextRequest) {
   return NextResponse.json({ messages: messages ?? [] });
 }
 
-// POST /api/ebay/messages/inbox — incremental sync of the conversation list.
-// Walks pages newest-first, stops at the last-synced watermark, and saves only
-// new messages. One API call covers 50 conversations, so this stays well within
-// serverless time limits (unlike per-conversation thread fetching).
-export async function POST() {
-  const token = await getAccessToken();
-  if (!token) return NextResponse.json({ error: 'not_connected' }, { status: 401 });
-
-  const supabase = getSupabase();
-  const { data: wmRow } = await supabase
-    .from('app_settings').select('value').eq('key', LAST_SYNC_KEY).single();
+// Incremental sync of one conversation type (FROM_MEMBERS = client, FROM_EBAY =
+// eBay). Walks pages newest-first, stops at that type's watermark, saves only new
+// messages. Returns how many were saved.
+async function syncConversationType(
+  supabase: ReturnType<typeof getSupabase>,
+  token: string,
+  conversationType: string,
+  startedAt: number,
+): Promise<{ synced: number; lastStatus: number }> {
+  const wmKey = `${LAST_SYNC_KEY}_${conversationType}`;
+  const { data: wmRow } = await supabase.from('app_settings').select('value').eq('key', wmKey).single();
   const watermark = wmRow?.value ? new Date(wmRow.value).getTime() : 0;
 
-  const startedAt = Date.now();
   let offset = 0;
   let synced = 0;
   let newestSeen = watermark;
@@ -185,21 +197,17 @@ export async function POST() {
   for (let page = 0; page < MAX_PAGES && !reachedKnown; page++) {
     if (Date.now() - startedAt > TIME_BUDGET_MS) break;
     const res = await fetch(
-      `${MSG_BASE}/conversation?conversation_type=FROM_MEMBERS&limit=${PAGE_SIZE}&offset=${offset}`,
+      `${MSG_BASE}/conversation?conversation_type=${conversationType}&limit=${PAGE_SIZE}&offset=${offset}`,
       { headers: ebayHeaders(token) }
     );
     lastStatus = res.status;
     if (!res.ok) {
-      console.error('[eBay inbox] conversation list failed', res.status, (await res.text()).slice(0, 300));
+      console.error(`[eBay inbox] ${conversationType} list failed`, res.status, (await res.text()).slice(0, 300));
       break;
     }
 
     const data = await res.json() as {
-      conversations?: Array<{
-        conversationId?: string;
-        referenceId?: string;
-        latestMessage?: EbayApiMessage;
-      }>;
+      conversations?: Array<{ conversationId?: string; referenceId?: string; latestMessage?: EbayApiMessage }>;
     };
     const conversations = data.conversations ?? [];
     if (conversations.length === 0) break;
@@ -209,20 +217,14 @@ export async function POST() {
     for (const conv of conversations) {
       const lm = conv.latestMessage;
       const created = lm?.createdDate ? new Date(lm.createdDate).getTime() : 0;
-      // Conversations come back newest-first; once we cross the watermark
-      // everything beyond is already synced.
       if (created && created <= watermark) { reachedKnown = true; break; }
       if (created > pageNewest) pageNewest = created;
-      const row = lm && buildRow(lm, conv);
+      const row = lm && buildRow(lm, conv, conversationType);
       if (row) rows.push(row);
     }
 
     if (rows.length) {
-      const { error } = await supabase
-        .from('ebay_messages')
-        .upsert(rows, { onConflict: 'ebay_message_id', ignoreDuplicates: true });
-      // Only advance the watermark for data we actually persisted — otherwise a
-      // failed write would make us skip those messages forever on the next sync.
+      const { error } = await supabase.from('ebay_messages').upsert(rows, { onConflict: 'ebay_message_id', ignoreDuplicates: true });
       if (error) { console.error('[eBay inbox] upsert error:', error.message); break; }
       synced += rows.length;
     }
@@ -233,30 +235,46 @@ export async function POST() {
   }
 
   if (newestSeen > watermark) {
-    await supabase.from('app_settings').upsert({
-      key: LAST_SYNC_KEY,
-      value: new Date(newestSeen).toISOString(),
-      updated_at: new Date().toISOString(),
-    });
+    await supabase.from('app_settings').upsert({ key: wmKey, value: new Date(newestSeen).toISOString(), updated_at: new Date().toISOString() });
   }
+  return { synced, lastStatus };
+}
 
-  return NextResponse.json({ synced, ebayApiStatus: lastStatus });
+// POST /api/ebay/messages/inbox — incremental sync of both client and eBay
+// conversation lists (sharing one serverless time budget).
+export async function POST() {
+  const token = await getAccessToken();
+  if (!token) return NextResponse.json({ error: 'not_connected' }, { status: 401 });
+
+  const supabase = getSupabase();
+  const startedAt = Date.now();
+
+  const members = await syncConversationType(supabase, token, 'FROM_MEMBERS', startedAt);
+  const ebay = await syncConversationType(supabase, token, 'FROM_EBAY', startedAt);
+
+  return NextResponse.json({
+    synced: members.synced + ebay.synced,
+    client: members.synced,
+    ebay: ebay.synced,
+    ebayApiStatus: members.lastStatus || ebay.lastStatus,
+  });
 }
 
 // PATCH /api/ebay/messages/inbox — mark conversation(s) as read (both eBay + Supabase)
 export async function PATCH(req: Request) {
-  const { ids, conversationIds, conversationType } = await req.json() as {
+  const { ids, conversationIds, conversationType, read = true } = await req.json() as {
     ids: string[];                 // Supabase row IDs
     conversationIds?: string[];    // eBay conversation IDs (optional)
     conversationType?: string;     // FROM_MEMBERS or FROM_EBAY
+    read?: boolean;                // true = mark read, false = mark unread
   };
 
   const supabase = getSupabase();
 
-  // Update Supabase
-  await supabase.from('ebay_messages').update({ status: 'read' }).in('id', ids);
+  // Update Supabase — received messages toggle unread/read; our sent stay 'sent'.
+  await supabase.from('ebay_messages').update({ status: read ? 'read' : 'unread' }).in('id', ids).eq('direction', 'received');
 
-  // Optionally mark as read on eBay too
+  // Mirror the read/unread status on eBay too
   if (conversationIds?.length) {
     const token = await getAccessToken();
     if (token) {
@@ -266,11 +284,7 @@ export async function PATCH(req: Request) {
           fetch(`${MSG_BASE}/update_conversation`, {
             method: 'POST',
             headers: ebayHeaders(token),
-            body: JSON.stringify({
-              conversationId: cid,
-              conversationType: convType,
-              read: true,
-            }),
+            body: JSON.stringify({ conversationId: cid, conversationType: convType, read }),
           })
         )
       );

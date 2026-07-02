@@ -84,14 +84,17 @@ export async function POST(req: NextRequest) {
     itemTitle?: string;
     contactReason?: string;
     text: string;
+    imageUrls?: string[];        // self-hosted HTTPS image URLs to attach (max 5)
     sentById?: string;
     sentByName?: string;
   };
 
-  const { orderId, itemId, recipientUsername, conversationId, buyerName, itemTitle, contactReason, text, sentById, sentByName } = body;
+  const { orderId, itemId, recipientUsername, conversationId, buyerName, itemTitle, contactReason, text, imageUrls, sentById, sentByName } = body;
 
-  if (!text?.trim()) {
-    return NextResponse.json({ error: 'Missing required field: text' }, { status: 400 });
+  // eBay allows message text OR one or more media attachments (error 355015).
+  const media = (imageUrls ?? []).filter((u) => typeof u === 'string' && u.startsWith('https://')).slice(0, 5);
+  if (!text?.trim() && media.length === 0) {
+    return NextResponse.json({ error: 'Provide message text or at least one image' }, { status: 400 });
   }
   if (!conversationId && !recipientUsername) {
     return NextResponse.json({ error: 'Either conversationId or recipientUsername is required' }, { status: 400 });
@@ -99,8 +102,17 @@ export async function POST(req: NextRequest) {
 
   // Build eBay sendMessage payload
   const payload: Record<string, unknown> = {
-    messageText: text,
+    messageText: text ?? '',
   };
+
+  // Attach media — all three messageMedia fields are required (error 355012); URLs must be HTTPS.
+  if (media.length > 0) {
+    payload.messageMedia = media.map((url) => ({
+      mediaName: decodeURIComponent(url.split('/').pop() || 'image'),
+      mediaType: 'IMAGE',
+      mediaUrl: url,
+    }));
+  }
 
   if (conversationId) {
     // Reply in existing conversation
@@ -142,6 +154,8 @@ export async function POST(req: NextRequest) {
       item_title: itemTitle,
       contact_reason: contactReason,
       message_text: text,
+      media_urls: media,
+      conversation_type: 'FROM_MEMBERS',
       sent_by_id: sentById,
       sent_by_name: sentByName,
       direction: 'sent',
@@ -163,6 +177,8 @@ export async function POST(req: NextRequest) {
     item_title: itemTitle,
     contact_reason: contactReason,
     message_text: text,
+    media_urls: media,
+    conversation_type: 'FROM_MEMBERS',
     sent_by_id: sentById,
     sent_by_name: sentByName,
     sent_at: responseData.createdDate ?? new Date().toISOString(),

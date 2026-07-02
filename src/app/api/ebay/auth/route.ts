@@ -8,6 +8,9 @@ const SCOPES = [
   'https://api.ebay.com/oauth/api_scope/commerce.message',
   'https://api.ebay.com/oauth/api_scope/sell.inventory',
   'https://api.ebay.com/oauth/api_scope/sell.account.readonly',
+  'https://api.ebay.com/oauth/api_scope/sell.analytics.readonly',
+  'https://api.ebay.com/oauth/api_scope/commerce.feedback',
+  'https://api.ebay.com/oauth/api_scope/sell.finances',
 ].join(' ');
 
 export async function GET() {

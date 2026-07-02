@@ -3,7 +3,7 @@
 import { useState, useRef } from 'react';
 import { Button } from '@/components/ui/button';
 import { uploadImage, deleteImage, getPathFromUrl } from '@/lib/image-upload';
-import { Upload, X, Loader2, ImageIcon } from 'lucide-react';
+import { X, Loader2, ImageIcon, Plus } from 'lucide-react';
 import { toast } from 'sonner';
 
 interface ImageUploadProps {
@@ -12,9 +12,11 @@ interface ImageUploadProps {
   images: string[];
   onChange: (images: string[]) => void;
   maxFiles?: number;
+  /** Compact mode: a small "+" button + small thumbnails (for chat/reply bars) */
+  compact?: boolean;
 }
 
-export function ImageUpload({ bucket, recordId, images, onChange, maxFiles = 5 }: ImageUploadProps) {
+export function ImageUpload({ bucket, recordId, images, onChange, maxFiles = 5, compact = false }: ImageUploadProps) {
   const [uploading, setUploading] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
 
@@ -68,11 +70,13 @@ export function ImageUpload({ bucket, recordId, images, onChange, maxFiles = 5 }
     onChange(images.filter((u) => u !== url));
   };
 
+  const thumb = compact ? 'w-12 h-12' : 'w-20 h-20';
+
   return (
-    <div className="space-y-2">
-      <div className="flex flex-wrap gap-2">
+    <div className={compact ? '' : 'space-y-2'}>
+      <div className="flex flex-wrap gap-2 items-center">
         {images.map((url) => (
-          <div key={url} className="relative group w-20 h-20 rounded-lg border overflow-hidden bg-slate-100">
+          <div key={url} className={`relative group ${thumb} rounded-lg border overflow-hidden bg-slate-100`}>
             <img src={url} alt="Uploaded" className="w-full h-full object-cover" />
             <button
               type="button"
@@ -85,26 +89,31 @@ export function ImageUpload({ bucket, recordId, images, onChange, maxFiles = 5 }
           </div>
         ))}
         {images.length < maxFiles && (
-          <button
-            type="button"
-            onClick={() => inputRef.current?.click()}
-            disabled={uploading}
-            className="w-20 h-20 rounded-lg border border-dashed border-slate-300 flex flex-col items-center justify-center text-slate-400 hover:bg-slate-50 hover:text-slate-600 transition-colors disabled:opacity-50"
-          >
-            {uploading ? <Loader2 className="h-4 w-4 animate-spin" /> : <ImageIcon className="h-4 w-4" />}
-            <span className="text-[10px] mt-1">{uploading ? 'Uploading' : 'Add image'}</span>
-          </button>
+          compact ? (
+            <button
+              type="button"
+              onClick={() => inputRef.current?.click()}
+              disabled={uploading}
+              title="Attach image"
+              className="h-9 w-9 shrink-0 rounded-full border border-slate-300 flex items-center justify-center text-slate-400 hover:bg-slate-100 hover:text-slate-600 transition-colors disabled:opacity-50"
+            >
+              {uploading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Plus className="h-4 w-4" />}
+            </button>
+          ) : (
+            <button
+              type="button"
+              onClick={() => inputRef.current?.click()}
+              disabled={uploading}
+              className="w-20 h-20 rounded-lg border border-dashed border-slate-300 flex flex-col items-center justify-center text-slate-400 hover:bg-slate-50 hover:text-slate-600 transition-colors disabled:opacity-50"
+            >
+              {uploading ? <Loader2 className="h-4 w-4 animate-spin" /> : <ImageIcon className="h-4 w-4" />}
+              <span className="text-[10px] mt-1">{uploading ? 'Uploading' : 'Add image'}</span>
+            </button>
+          )
         )}
       </div>
-      <input
-        ref={inputRef}
-        type="file"
-        accept="image/*"
-        multiple
-        className="hidden"
-        onChange={handleFileSelect}
-      />
-      <p className="text-xs text-slate-400">Max {maxFiles} images, 5MB each</p>
+      <input ref={inputRef} type="file" accept="image/*" multiple className="hidden" onChange={handleFileSelect} />
+      {!compact && <p className="text-xs text-slate-400">Max {maxFiles} images, 5MB each</p>}
     </div>
   );
 }

@@ -288,6 +288,58 @@ WHERE metadata ? 'responsible_department'
 -- eBay messages: track conversation for on-demand thread loading + incremental sync
 ALTER TABLE ebay_messages ADD COLUMN IF NOT EXISTS conversation_id TEXT;
 CREATE INDEX IF NOT EXISTS idx_ebay_messages_conversation_id ON ebay_messages(conversation_id);
+-- Image/media attachments (eBay Message API messageMedia — self-hosted HTTPS URLs)
+ALTER TABLE ebay_messages ADD COLUMN IF NOT EXISTS media_urls JSONB DEFAULT '[]'::jsonb;
+-- Conversation type: FROM_MEMBERS (buyer/client) vs FROM_EBAY (eBay system messages)
+ALTER TABLE ebay_messages ADD COLUMN IF NOT EXISTS conversation_type TEXT DEFAULT 'FROM_MEMBERS';
+-- Message sender's eBay username — lets the UI place bubbles by sender vs the
+-- conversation's buyer (reliable left/right without knowing our own username).
+ALTER TABLE ebay_messages ADD COLUMN IF NOT EXISTS sender_username TEXT;
+
+-- eBay feedback received on the seller account, for proactive negative alerts.
+CREATE TABLE IF NOT EXISTS ebay_feedback (
+  feedback_id TEXT PRIMARY KEY,
+  comment_type TEXT,              -- POSITIVE | NEUTRAL | NEGATIVE
+  comment_text TEXT,
+  listing_id TEXT,
+  listing_title TEXT,
+  price NUMERIC,
+  currency TEXT,
+  buyer_masked TEXT,
+  entered_period TEXT,           -- eBay returns coarse relative time e.g. "30 DAY"
+  automated BOOLEAN DEFAULT false,
+  state TEXT,
+  ticket_id UUID,                -- ticket auto-raised for a negative
+  acknowledged BOOLEAN DEFAULT false,
+  first_seen_at TIMESTAMPTZ DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_ebay_feedback_type ON ebay_feedback(comment_type);
+CREATE INDEX IF NOT EXISTS idx_ebay_feedback_ack ON ebay_feedback(acknowledged);
+ALTER TABLE ebay_feedback ENABLE ROW LEVEL SECURITY;
+DO $$ BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_policies WHERE schemaname='public' AND tablename='ebay_feedback' AND policyname='Allow all') THEN
+    CREATE POLICY "Allow all" ON ebay_feedback FOR ALL USING (true);
+  END IF;
+END $$;
+
+-- Cache of eBay listing details (image/title/price) keyed by item id, so message
+-- threads can show the related listing without re-hitting the Browse API each open.
+CREATE TABLE IF NOT EXISTS ebay_listings (
+  item_id TEXT PRIMARY KEY,
+  title TEXT,
+  image_url TEXT,
+  additional_images JSONB DEFAULT '[]'::jsonb,
+  price NUMERIC,
+  currency TEXT,
+  web_url TEXT,
+  fetched_at TIMESTAMPTZ DEFAULT NOW()
+);
+ALTER TABLE ebay_listings ENABLE ROW LEVEL SECURITY;
+DO $$ BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_policies WHERE schemaname='public' AND tablename='ebay_listings' AND policyname='Allow all') THEN
+    CREATE POLICY "Allow all" ON ebay_listings FOR ALL USING (true);
+  END IF;
+END $$;
 
 -- Customer support tickets (raised from buyer messages or created manually)
 CREATE TABLE IF NOT EXISTS tickets (
@@ -564,7 +616,8 @@ $$;
 INSERT INTO storage.buckets (id, name, public, avif_autodetection, file_size_limit, allowed_mime_types)
 VALUES
   ('return-images', 'return-images', true, false, 5242880, ARRAY['image/jpeg', 'image/png', 'image/webp', 'image/gif']),
-  ('replacement-images', 'replacement-images', true, false, 5242880, ARRAY['image/jpeg', 'image/png', 'image/webp', 'image/gif'])
+  ('replacement-images', 'replacement-images', true, false, 5242880, ARRAY['image/jpeg', 'image/png', 'image/webp', 'image/gif']),
+  ('message-images', 'message-images', true, false, 5242880, ARRAY['image/jpeg', 'image/png', 'image/webp', 'image/gif'])
 ON CONFLICT (id) DO UPDATE SET
   public = EXCLUDED.public,
   file_size_limit = EXCLUDED.file_size_limit,
@@ -582,6 +635,11 @@ BEGIN
     CREATE POLICY "Allow public read replacement images"
       ON storage.objects FOR SELECT
       USING (bucket_id = 'replacement-images');
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_policies WHERE schemaname = 'storage' AND tablename = 'objects' AND policyname = 'Allow public read message images') THEN
+    CREATE POLICY "Allow public read message images"
+      ON storage.objects FOR SELECT
+      USING (bucket_id = 'message-images');
   END IF;
 END
 $$;
@@ -601,6 +659,12 @@ BEGIN
       ON storage.objects FOR ALL
       USING (bucket_id = 'replacement-images')
       WITH CHECK (bucket_id = 'replacement-images');
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_policies WHERE schemaname = 'storage' AND tablename = 'objects' AND policyname = 'Allow all message image uploads') THEN
+    CREATE POLICY "Allow all message image uploads"
+      ON storage.objects FOR ALL
+      USING (bucket_id = 'message-images')
+      WITH CHECK (bucket_id = 'message-images');
   END IF;
 END
 $$;

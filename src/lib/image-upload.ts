@@ -2,6 +2,7 @@ import { supabase } from './supabase-client';
 
 export const RETURN_IMAGE_BUCKET = 'return-images';
 export const REPLACEMENT_IMAGE_BUCKET = 'replacement-images';
+export const MESSAGE_IMAGE_BUCKET = 'message-images';
 
 export interface UploadResult {
   url: string;
