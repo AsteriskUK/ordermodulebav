@@ -42,6 +42,7 @@ import {
 import { toast } from 'sonner';
 import { DeliveryBadge } from './delivery-badge';
 import { OrderSourceLogo, GspDestination } from './order-source-logo';
+import { AssemblyBuilder } from './assembly-builder';
 import { OrderDetailDialog } from './order-detail-dialog';
 import { LabelPrintDialog } from './label-print-dialog';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
@@ -75,6 +76,7 @@ export function PackagingPipeline() {
   const updateOrderComment = useOrderStore((s) => s.updateOrderComment);
   const bulkUpdateStatus = useOrderStore((s) => s.bulkUpdateStatus);
   const [activeOrderId, setActiveOrderId] = useState<string | null>(null);
+  const [assemblyOrderId, setAssemblyOrderId] = useState<string | null>(null);
   const activeOrder = orders.find((o) => o.id === activeOrderId) ?? null;
   const [dialogOrderId, setDialogOrderId] = useState<string | null>(null);
   const dialogOrder = dialogOrderId ? orders.find((o) => o.id === dialogOrderId) : null;
@@ -425,6 +427,8 @@ export function PackagingPipeline() {
                       <div
                         key={order.id}
                         onClick={() => {
+                          // Assembling stage → open the full-screen parts/build picker.
+                          if (s.stage === 'assembling') { setAssemblyOrderId(order.id); return; }
                           const newId = order.id === activeOrderId ? null : order.id;
                           setActiveOrderId(newId);
                           if (newId && order.variation) {
@@ -871,6 +875,12 @@ export function PackagingPipeline() {
       {dialogOrder && (
         <OrderDetailDialog order={dialogOrder} onClose={() => setDialogOrderId(null)} />
       )}
+
+      {/* Full-screen assembly builder (tap an order in the Assembling stage) */}
+      {assemblyOrderId && (() => {
+        const o = orders.find((x) => x.id === assemblyOrderId);
+        return o ? <AssemblyBuilder order={o} onClose={() => setAssemblyOrderId(null)} /> : null;
+      })()}
 
       {/* Hold with reason dialog */}
       {holdOrderId && (

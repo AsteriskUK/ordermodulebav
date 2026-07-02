@@ -98,12 +98,14 @@ export const INVENTORY_CATEGORIES: InventoryCategory[] = [
   },
   {
     key: 'cpu',
-    label: 'CPU',
+    label: 'Processor',
     tracking: 'bulk',
     productCategory: 'MB/RAM/HDD/SSD',
     attributes: [
       { key: 'brand', label: 'Brand', type: 'select', options: ['Intel', 'AMD'], identifying: true },
-      { key: 'model', label: 'Model', type: 'text', identifying: true },
+      { key: 'family', label: 'Family', type: 'select', options: ['Core i3', 'Core i5', 'Core i7', 'Core i9', 'Pentium', 'Celeron', 'Xeon', 'Ryzen 3', 'Ryzen 5', 'Ryzen 7', 'Ryzen 9', 'Other'], identifying: true },
+      { key: 'generation', label: 'Generation', type: 'select', options: ['2nd', '3rd', '4th', '5th', '6th', '7th', '8th', '9th', '10th', '11th', '12th', '13th', '14th'], identifying: true },
+      { key: 'model', label: 'Model', type: 'text' },
     ],
   },
   {
@@ -127,6 +129,61 @@ export const INVENTORY_CATEGORIES: InventoryCategory[] = [
     ],
   },
   {
+    key: 'motherboard',
+    label: 'Motherboard',
+    tracking: 'bulk',
+    productCategory: 'MB/RAM/HDD/SSD',
+    attributes: [
+      { key: 'brand', label: 'Brand', type: 'text', identifying: true },
+      { key: 'socket', label: 'Socket', type: 'select', options: ['LGA1151', 'LGA1200', 'LGA1700', 'AM4', 'AM5', 'Other'], identifying: true },
+      { key: 'form_factor', label: 'Form factor', type: 'select', options: ['ATX', 'Micro-ATX', 'Mini-ITX'], identifying: true },
+      { key: 'model', label: 'Model', type: 'text' },
+    ],
+  },
+  {
+    key: 'gpu',
+    label: 'Graphics Card',
+    tracking: 'bulk',
+    productCategory: 'PC-GAMING',
+    attributes: [
+      { key: 'brand', label: 'Chipset', type: 'select', options: ['NVIDIA', 'AMD', 'Intel'], identifying: true },
+      { key: 'model', label: 'Model', type: 'text', identifying: true },
+      { key: 'memory', label: 'Memory', type: 'number', unit: 'GB', identifying: true },
+    ],
+  },
+  {
+    key: 'psu',
+    label: 'Power Supply',
+    tracking: 'bulk',
+    productCategory: 'MB/RAM/HDD/SSD',
+    attributes: [
+      { key: 'wattage', label: 'Wattage', type: 'number', unit: 'W', identifying: true },
+      { key: 'rating', label: 'Rating', type: 'select', options: ['80+ White', '80+ Bronze', '80+ Silver', '80+ Gold', '80+ Platinum'], identifying: true },
+      { key: 'modular', label: 'Modular', type: 'select', options: ['Non', 'Semi', 'Full'] },
+    ],
+  },
+  {
+    key: 'case',
+    label: 'Case',
+    tracking: 'bulk',
+    productCategory: 'MB/RAM/HDD/SSD',
+    attributes: [
+      { key: 'brand', label: 'Brand', type: 'text', identifying: true },
+      { key: 'form_factor', label: 'Form factor', type: 'select', options: ['ATX', 'Micro-ATX', 'Mini-ITX', 'Full Tower', 'Mid Tower', 'SFF'], identifying: true },
+      { key: 'model', label: 'Model', type: 'text' },
+    ],
+  },
+  {
+    key: 'cooler',
+    label: 'CPU Cooler',
+    tracking: 'bulk',
+    productCategory: 'MB/RAM/HDD/SSD',
+    attributes: [
+      { key: 'type', label: 'Type', type: 'select', options: ['Air', 'AIO Liquid'], identifying: true },
+      { key: 'model', label: 'Model', type: 'text', identifying: true },
+    ],
+  },
+  {
     key: 'misc',
     label: 'Other / Misc part',
     tracking: 'bulk',
@@ -136,6 +193,18 @@ export const INVENTORY_CATEGORIES: InventoryCategory[] = [
     ],
   },
 ];
+
+// Which component slots a build needs, by the order's product category. The
+// assembler fills each slot from stock. First entry may be a serialized base unit.
+export function requiredSlotsForCategory(productCategory: string | undefined): string[] {
+  switch (productCategory) {
+    case 'PC-GAMING':   return ['cpu', 'motherboard', 'ram', 'gpu', 'storage', 'psu', 'case', 'cooler'];
+    case 'PC-AIO-MINI': return ['cpu', 'motherboard', 'ram', 'storage', 'psu', 'case'];
+    case 'LAPTOP':      return ['laptop', 'ram', 'storage'];
+    case 'MONITOR':     return ['monitor'];
+    default:            return [];
+  }
+}
 
 export const INVENTORY_CATEGORY_MAP: Record<string, InventoryCategory> = Object.fromEntries(
   INVENTORY_CATEGORIES.map((c) => [c.key, c]),
