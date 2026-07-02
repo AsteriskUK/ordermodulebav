@@ -19,12 +19,14 @@ export async function GET(request: NextRequest) {
     
     const delivered = results.filter(r => r.status === 'delivered');
     const inTransit = results.filter(r => r.status === 'in_transit');
+    const shipped = results.filter(r => r.status === 'shipped');
     const errors = results.filter(r => r.status === 'error');
     
     const summary = {
       total: results.length,
       delivered: delivered.length,
       inTransit: inTransit.length,
+      shipped: shipped.length,
       errors: errors.length,
     };
     
@@ -79,12 +81,14 @@ export async function POST(request: NextRequest) {
     
     const delivered = results.filter(r => r.status === 'delivered');
     const inTransit = results.filter(r => r.status === 'in_transit');
+    const shipped = results.filter(r => r.status === 'shipped');
     const errors = results.filter(r => r.status === 'error');
     
     const summary = {
       total: results.length,
       delivered: delivered.length,
       inTransit: inTransit.length,
+      shipped: shipped.length,
       errors: errors.length,
     };
     

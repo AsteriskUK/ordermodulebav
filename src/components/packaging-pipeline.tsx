@@ -170,6 +170,18 @@ export function PackagingPipeline() {
     { stage: 'shipped' as OrderStatus, orders: shippedOrders, icon: Truck, prevStage: 'packed' as OrderStatus, nextStage: 'delivered' as OrderStatus },
   ];
 
+  // Stage visibility by role: assembling teams see up to Checking; packers see
+  // Packing → Shipped; admin/manager (and anyone in both) see everything.
+  const ASSEMBLE_STAGES: OrderStatus[] = ['pending', 'assembling', 'checking'];
+  const PACK_STAGES: OrderStatus[] = ['packing', 'packed', 'shipped'];
+  const isPacker = userDepts.includes('packing');
+  const isAssembler = userDepts.some((d) => ['assembler', 'qa', 'laptop', 'gaming-pc', 'projector', 'pc-aio-mini', 'monitor', 'networking'].includes(d));
+  const allowedStages: OrderStatus[] | null = isAdmin || (isPacker && isAssembler) ? null
+    : isPacker ? PACK_STAGES
+    : isAssembler ? ASSEMBLE_STAGES
+    : null;
+  const visibleStages = allowedStages ? stageData.filter((s) => allowedStages.includes(s.stage)) : stageData;
+
   function moveToNext(orderId: string, nextStatus: OrderStatus) {
     updateOrderStatus(orderId, nextStatus);
     toast.success(`Moved to ${ORDER_STATUS_CONFIG[nextStatus].label}`);
@@ -276,7 +288,7 @@ export function PackagingPipeline() {
 
       {/* Pipeline overview */}
       <div className="flex items-center gap-2 overflow-x-auto pb-2">
-        {stageData.map((s, i) => {
+        {visibleStages.map((s, i) => {
           const config = ORDER_STATUS_CONFIG[s.stage];
           const Icon = s.icon;
           return (
@@ -293,7 +305,7 @@ export function PackagingPipeline() {
                   <p className="text-lg font-bold">{s.orders.length}</p>
                 </div>
               </button>
-              {i < stageData.length - 1 && (
+              {i < visibleStages.length - 1 && (
                 <ArrowRight className="h-4 w-4 text-slate-400 shrink-0" />
               )}
             </div>
@@ -369,7 +381,7 @@ export function PackagingPipeline() {
 
       {/* Stage cards */}
       <div className="grid grid-cols-1 lg:grid-cols-2 xl:grid-cols-3 gap-4">
-        {stageData.map((s) => {
+        {visibleStages.map((s) => {
           const config = ORDER_STATUS_CONFIG[s.stage];
           const Icon = s.icon;
           const stageInfo = PACKAGING_STAGES.find((ps) => ps.stage === s.stage);

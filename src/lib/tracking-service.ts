@@ -12,10 +12,14 @@ export interface TrackingUpdateResult {
   orderId: string;
   trackingNumber: string;
   carrier: DeliveryCarrier;
-  status: 'delivered' | 'in_transit' | 'error';
+  status: 'delivered' | 'shipped' | 'in_transit' | 'error';
   message?: string;
   error?: string;
 }
+
+// A real courier scan (parcel physically in the network) — not the pre-ship
+// "information sent to carrier" placeholder that exists before pickup.
+const PRE_SCAN_RE = /information sent|shipment information|label (created|generated)|order (created|received|processed)|awaiting|pre.?advice|not yet/i;
 
 /**
  * Check a single order's tracking status
@@ -34,6 +38,7 @@ export async function checkOrderTracking(order: Order): Promise<TrackingUpdateRe
   try {
     let trackingData: FedExTrackingResponse | DPDTrackingResponse;
     let isDelivered = false;
+    let hasCourierScan = false;   // parcel physically scanned by the courier
     let latestStatus = '';
 
     switch (order.deliveryCarrier) {
@@ -46,6 +51,7 @@ export async function checkOrderTracking(order: Order): Promise<TrackingUpdateRe
             event => event.scanType.toLowerCase().includes('delivered')
           );
           isDelivered = !!deliveredEvent;
+          hasCourierScan = fedexResult.scanEvents.some((e) => !PRE_SCAN_RE.test(e.scanType || ''));
           latestStatus = fedexResult.scanEvents[0]?.scanType || '';
         }
         break;
@@ -56,7 +62,9 @@ export async function checkOrderTracking(order: Order): Promise<TrackingUpdateRe
         const dpdResult = trackingData.data.trackingInfo?.trackingResult;
         if (dpdResult?.parcelInfo) {
           for (const parcel of dpdResult.parcelInfo) {
-            if (parcel.events) {
+            if (parcel.events && parcel.events.length) {
+              // DPD only emits events once the parcel is collected/scanned.
+              if (parcel.events.some((e) => !PRE_SCAN_RE.test(e.description || ''))) hasCourierScan = true;
               const deliveredEvent = parcel.events.find(
                 event => event.description.toLowerCase().includes('delivered')
               );
@@ -81,27 +89,30 @@ export async function checkOrderTracking(order: Order): Promise<TrackingUpdateRe
         };
     }
 
+    const store = useOrderStore.getState();
+
     if (isDelivered) {
-      // Update order status to delivered
-      const store = useOrderStore.getState();
-      store.updateOrderStatus(order.id, 'delivered');
-      
+      // Delivered → mark delivered (from shipped or packed).
+      if (order.status !== 'delivered') store.updateOrderStatus(order.id, 'delivered');
       return {
-        orderId: order.id,
-        trackingNumber: order.trackingNumber,
-        carrier: order.deliveryCarrier,
-        status: 'delivered',
-        message: 'Order marked as delivered',
-      };
-    } else {
-      return {
-        orderId: order.id,
-        trackingNumber: order.trackingNumber,
-        carrier: order.deliveryCarrier,
-        status: 'in_transit',
-        message: latestStatus || 'In transit',
+        orderId: order.id, trackingNumber: order.trackingNumber, carrier: order.deliveryCarrier,
+        status: 'delivered', message: 'Order marked as delivered',
       };
     }
+
+    if (order.status === 'packed' && hasCourierScan) {
+      // Courier has scanned/collected the parcel → auto-advance Packed → Shipped.
+      store.updateOrderStatus(order.id, 'shipped');
+      return {
+        orderId: order.id, trackingNumber: order.trackingNumber, carrier: order.deliveryCarrier,
+        status: 'shipped', message: `Scanned by ${order.deliveryCarrier} — moved to Shipped`,
+      };
+    }
+
+    return {
+      orderId: order.id, trackingNumber: order.trackingNumber, carrier: order.deliveryCarrier,
+      status: 'in_transit', message: latestStatus || 'In transit',
+    };
   } catch (error) {
     console.error(`[Tracking] Error checking ${order.deliveryCarrier} tracking ${order.trackingNumber}:`, error);
     return {
@@ -119,14 +130,15 @@ export async function checkOrderTracking(order: Order): Promise<TrackingUpdateRe
  */
 export async function checkAllShippedOrders(): Promise<TrackingUpdateResult[]> {
   const store = useOrderStore.getState();
+  // Packed orders (await courier scan → Shipped) + shipped orders (await delivery).
   const shippedOrders = store.orders.filter(
-    order => order.status === 'shipped' && 
-              order.trackingNumber && 
+    order => (order.status === 'packed' || order.status === 'shipped') &&
+              order.trackingNumber &&
               order.deliveryCarrier &&
               !order.deletedAt
   );
 
-  console.log(`[Tracking] Checking ${shippedOrders.length} shipped orders`);
+  console.log(`[Tracking] Checking ${shippedOrders.length} packed/shipped orders`);
 
   // Check orders in batches to avoid rate limiting
   const batchSize = 5;

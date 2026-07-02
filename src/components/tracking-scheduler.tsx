@@ -5,12 +5,12 @@ import { useOrderStore } from '@/lib/store';
 
 /**
  * Background tracking scheduler.
- * Automatically checks DPD/FedEx tracking for shipped orders every 4 hours
- * and marks delivered orders as "delivered".
+ * Polls DPD/FedEx tracking for packed + shipped orders and auto-advances them:
+ * Packed → Shipped on the first courier scan, Shipped → Delivered on delivery.
  */
 export function TrackingScheduler() {
   const orders = useOrderStore((s) => s.orders);
-  const shippedCount = orders.filter((o) => o.status === 'shipped' && o.trackingNumber && o.deliveryCarrier && !o.deletedAt).length;
+  const shippedCount = orders.filter((o) => (o.status === 'packed' || o.status === 'shipped') && o.trackingNumber && o.deliveryCarrier && !o.deletedAt).length;
 
   useEffect(() => {
     if (shippedCount === 0) return;
@@ -26,8 +26,8 @@ export function TrackingScheduler() {
     // Check once on mount (with a small delay to avoid app startup congestion)
     const initialTimeout = setTimeout(check, 30_000);
 
-    // Then every 4 hours
-    const interval = setInterval(check, 4 * 60 * 60 * 1000);
+    // Then hourly (responsive enough for scan → Shipped without hammering carriers)
+    const interval = setInterval(check, 60 * 60 * 1000);
 
     return () => {
       clearTimeout(initialTimeout);
