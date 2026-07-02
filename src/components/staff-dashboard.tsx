@@ -16,6 +16,7 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { MyTicketsWidget } from './my-tickets-widget';
 import { BuildPanel } from './build-panel';
+import { DeliveryBadge } from './delivery-badge';
 import { BUILD_STATUS_CONFIG } from '@/lib/inventory-config';
 import {
   Clock,
@@ -65,6 +66,7 @@ export function StaffDashboard() {
   const users = useOrderStore((s) => s.users);
   const currentUserId = useOrderStore((s) => s.currentUserId);
   const builds = useOrderStore((s) => s.builds);
+  const updateOrderStatus = useOrderStore((s) => s.updateOrderStatus);
   const [buildOrder, setBuildOrder] = useState<Order | null>(null);
 
   const currentUser = users.find((u) => u.id === currentUserId);
@@ -72,6 +74,7 @@ export function StaffDashboard() {
     ? (currentUser.departments?.length ? currentUser.departments : [currentUser.department ?? 'management'])
     : [];
   const allowedCategories = getAllowedCategories(userDepts);
+  const isPacker = userDepts.includes('packing');
 
   const myOrders = useMemo(() => {
     if (!allowedCategories) return orders;
@@ -378,8 +381,45 @@ export function StaffDashboard() {
         </CardContent>
       </Card>
 
-      {/* Orders to assemble — with one-click parts/build access */}
-      {(() => {
+      {/* Packers → Orders to Pack; assemblers → Orders to Assemble */}
+      {isPacker ? (() => {
+        const toPack = myOrders
+          .filter((o) => !o.deletedAt && (o.status === 'packing' || o.status === 'checking'))
+          .sort((a, b) => (a.priority ?? 5) - (b.priority ?? 5))
+          .slice(0, 15);
+        if (toPack.length === 0) return null;
+        return (
+          <Card>
+            <CardHeader className="pb-2">
+              <CardTitle className="text-sm flex items-center gap-2">
+                <Package className="h-4 w-4 text-indigo-500" /> Orders to Pack
+                <span className="bg-indigo-100 text-indigo-700 text-[10px] font-bold rounded-full px-1.5 py-0.5">{toPack.length}</span>
+              </CardTitle>
+            </CardHeader>
+            <CardContent>
+              <div className="space-y-1.5">
+                {toPack.map((o) => (
+                  <div key={o.id} className="flex items-center gap-2 px-3 py-2 rounded-lg border border-slate-200 hover:border-indigo-300">
+                    <Badge variant="outline" className={`text-[10px] ${ORDER_STATUS_CONFIG[o.status].color}`}>{ORDER_STATUS_CONFIG[o.status].label}</Badge>
+                    <div className="min-w-0 flex-1">
+                      <p className="text-xs font-medium text-slate-700 truncate">{o.itemTitle}</p>
+                      <p className="text-[10px] text-slate-400 font-mono">#{o.salesRecordNumber}</p>
+                    </div>
+                    <DeliveryBadge deliveryType={o.deliveryType} deliveryCarrier={o.deliveryCarrier} size="sm" />
+                    {o.status === 'packing' ? (
+                      <Button size="sm" onClick={() => { updateOrderStatus(o.id, 'packed'); }}>
+                        <Package className="h-3.5 w-3.5 mr-1" /> Packed
+                      </Button>
+                    ) : (
+                      <Button size="sm" variant="outline" onClick={() => { updateOrderStatus(o.id, 'packing'); }}>Start packing</Button>
+                    )}
+                  </div>
+                ))}
+              </div>
+            </CardContent>
+          </Card>
+        );
+      })() : (() => {
         const toAssemble = myOrders
           .filter((o) => !o.deletedAt && (o.status === 'assembling' || o.status === 'pending'))
           .sort((a, b) => (a.priority ?? 5) - (b.priority ?? 5))
