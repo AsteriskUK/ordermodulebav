@@ -27,6 +27,7 @@ interface Metrics {
     itemNotReceivedProjected: number | string | null;
   };
   analyticsAvailable: boolean;
+  financesNeedsSignature: boolean;
   analyticsHint: string | null;
 }
 
@@ -88,7 +89,7 @@ export function OverviewDashboard() {
               <Stat label="Gross Sale" value={money(m.grossSale)} icon={PoundSterling} tone="green" />
               <Stat label="Total Orders" value={m.totalOrders.toLocaleString()} icon={ShoppingCart} tone="blue" />
               <Stat label="Refunds Issued" value={money(m.refundsIssued)} icon={RotateCcw} tone="red" />
-              <Stat label="eBay Selling Cost" value={m.ebayFees != null ? money(m.ebayFees) : '—'} sub={m.ebayFees == null ? 'reconnect eBay' : 'fees'} icon={PoundSterling} tone="amber" />
+              <Stat label="eBay Selling Cost" value={m.ebayFees != null ? money(m.ebayFees) : '—'} sub={m.ebayFees == null ? (m.financesNeedsSignature ? 'needs API signature' : 'unavailable') : 'fees'} icon={PoundSterling} tone="amber" />
               <Stat label="Net Payout" value={money(m.netPayout)} sub={m.financesAvailable ? 'gross − refunds − fees' : 'gross − refunds (est.)'} icon={PoundSterling} tone="green" />
             </div>
           </div>
@@ -105,10 +106,10 @@ export function OverviewDashboard() {
           {/* eBay performance */}
           <div>
             <h3 className="text-xs font-semibold text-slate-500 uppercase tracking-wide mb-2 flex items-center gap-2"><Gauge className="h-3.5 w-3.5" /> eBay Performance</h3>
-            {!m.analyticsAvailable && (
+            {m.analyticsHint && (
               <div className="mb-3 flex items-start gap-2 text-xs bg-amber-50 border border-amber-200 text-amber-800 rounded-lg px-3 py-2">
                 <AlertTriangle className="h-4 w-4 shrink-0 mt-0.5" />
-                <span>{m.analyticsHint ?? 'Performance metrics need the analytics permission. Reconnect eBay (Import Orders → Connect eBay Account).'}</span>
+                <span>{m.analyticsHint}</span>
               </div>
             )}
             <div className="grid grid-cols-2 md:grid-cols-4 gap-3">

@@ -88,42 +88,87 @@ export async function GET(req: NextRequest) {
     itemNotAsDescribedProjected: null, itemNotReceivedProjected: null,
   };
   let analyticsAvailable = false;
+  // Debug passthrough exposes raw eBay responses, so require an explicit env flag
+  // as well as the query param — this endpoint is unauthenticated.
+  const debug = new URL(req.url).searchParams.get('debug') === '1' && process.env.EBAY_METRICS_DEBUG === '1';
+  const debugRaw: Record<string, unknown> = {};
+
+  // A getCustomerServiceMetric response breaks the seller's rate down per
+  // dimension (listing category for INAD, shipping region for INR). Each
+  // dimension carries a metric with metricKey "RATE" whose `value` is the
+  // seller's rate for that slice. Surface the worst (highest) slice as the
+  // headline figure. Returns null when eBay has no data (empty, or 54200).
+  interface SspMetric { metricKey?: string; name?: string; value?: { value?: string | number } }
+  interface CsmResponse { dimensionMetrics?: { metrics?: { metricKey?: string; value?: string | number }[] }[] }
+  const csmWorstRate = (d: CsmResponse): string | number | null => {
+    let worst: number | null = null;
+    let worstRaw: string | number | null = null;
+    for (const dm of d.dimensionMetrics ?? []) {
+      for (const mm of dm.metrics ?? []) {
+        if (mm.metricKey !== 'RATE' || mm.value == null) continue;
+        const n = Number(mm.value);
+        if (!Number.isFinite(n)) continue;
+        if (worst == null || n > worst) { worst = n; worstRaw = mm.value; }
+      }
+    }
+    return worstRaw;
+  };
 
   const token = await getAnalyticsToken();
   if (token) {
     const headers = { Authorization: `Bearer ${token}`, 'X-EBAY-C-MARKETPLACE-ID': 'EBAY_GB', 'Content-Type': 'application/json' };
     try {
       // Seller standards profile → transaction defect rate, late shipment rate.
+      // Match by known metricKey, falling back to the human-readable name since
+      // eBay's exact key abbreviations aren't guaranteed across programs.
       const sp = await fetch(`${ANALYTICS_BASE}/seller_standards_profile`, { headers });
       if (sp.ok) {
         analyticsAvailable = true;
-        const data = await sp.json() as { standardsProfiles?: { metrics?: { metricKey?: string; value?: { value?: string | number } }[] }[] };
+        const data = await sp.json() as { standardsProfiles?: { metrics?: SspMetric[] }[] };
+        if (debug) debugRaw.sellerStandardsProfile = data;
         const metrics = data.standardsProfiles?.flatMap((p) => p.metrics ?? []) ?? [];
-        const find = (k: string) => metrics.find((m) => m.metricKey === k)?.value?.value;
-        performance.transactionDefectRate = (find('TRANSACTION_DEFECT_RATE') as number | undefined) ?? null;
-        performance.lateShipmentRate = (find('SHIPPING_MISS_RATE') as number | undefined) ?? (find('LATE_SHIPMENT_RATE') as number | undefined) ?? null;
+        const findValue = (pred: (m: SspMetric) => boolean) => metrics.find(pred)?.value?.value ?? null;
+        performance.transactionDefectRate = findValue((m) =>
+          m.metricKey === 'DEFECTIVE_TRANSACTION_RATE' ||
+          m.metricKey === 'TRANSACTION_DEFECT_RATE' ||
+          (m.name ?? '').toLowerCase().includes('defect'));
+        performance.lateShipmentRate = findValue((m) =>
+          m.metricKey === 'SHIPPING_MISS_RATE' ||
+          m.metricKey === 'LATE_SHIPMENT_RATE' ||
+          (m.name ?? '').toLowerCase().includes('late'));
+      } else if (debug) {
+        debugRaw.sellerStandardsProfileError = { status: sp.status, body: await sp.text() };
       }
-      // Customer service metrics → INAD (returns) and INR (disputes) rates.
+      // Customer service metrics → INAD (returns) and INR (disputes). CURRENT is
+      // the headline rate; PROJECTED is the trend toward the next evaluation.
       for (const [type, key, projKey] of [
         ['ITEM_NOT_AS_DESCRIBED', 'itemNotAsDescribedRate', 'itemNotAsDescribedProjected'],
         ['ITEM_NOT_RECEIVED', 'itemNotReceivedRate', 'itemNotReceivedProjected'],
       ] as const) {
-        const m = await fetch(`${ANALYTICS_BASE}/customer_service_metric/${type}/CURRENT?evaluation_marketplace_id=EBAY_GB`, { headers });
-        if (m.ok) {
-          analyticsAvailable = true;
-          const d = await m.json() as { metricValue?: string | number; peerBenchmark?: { metricValue?: string | number } };
-          performance[key] = (d.metricValue as number | undefined) ?? null;
-          performance[projKey] = (d.peerBenchmark?.metricValue as number | undefined) ?? null;
+        for (const [evalType, field] of [['CURRENT', key], ['PROJECTED', projKey]] as const) {
+          const m = await fetch(`${ANALYTICS_BASE}/customer_service_metric/${type}/${evalType}?evaluation_marketplace_id=EBAY_GB`, { headers });
+          if (m.ok) {
+            analyticsAvailable = true;
+            const d = await m.json() as CsmResponse;
+            if (debug) debugRaw[`csm_${type}_${evalType}`] = d;
+            performance[field] = csmWorstRate(d);
+          } else if (debug) {
+            debugRaw[`csm_${type}_${evalType}_error`] = { status: m.status, body: await m.text() };
+          }
         }
       }
     } catch (e) {
       console.warn('[eBay metrics] analytics fetch error', e);
+      if (debug) debugRaw.analyticsException = String(e);
     }
+  } else if (debug) {
+    debugRaw.analyticsToken = 'null — sell.analytics.readonly scope not granted on refresh token';
   }
 
   // ---- eBay Finances (real fees + net payout; needs sell.finances scope) ----
   let ebayFees: number | null = null;
   let financesAvailable = false;
+  let financesNeedsSignature = false;
   const finToken = await getFinancesToken();
   if (finToken) {
     try {
@@ -133,13 +178,29 @@ export async function GET(req: NextRequest) {
       });
       if (fr.ok) {
         financesAvailable = true;
-        const d = await fr.json() as { totalFeeAmount?: { value?: string | number } };
-        if (d.totalFeeAmount?.value != null) ebayFees = Number(d.totalFeeAmount.value);
+        const d = await fr.json() as { totalFeeAmount?: { value?: string | number }; feeAmount?: { value?: string | number } };
+        if (debug) debugRaw.financesTransactionSummary = d;
+        const fee = d.totalFeeAmount?.value ?? d.feeAmount?.value;
+        if (fee != null) ebayFees = Number(fee);
+      } else {
+        const body = await fr.text();
+        // The Finances API mandates request signing (eBay Digital Signatures);
+        // without the x-ebay-signature-key header it returns 403 / errorId 215001.
+        if (fr.status === 403 && /signature/i.test(body)) financesNeedsSignature = true;
+        if (debug) debugRaw.financesError = { status: fr.status, body };
       }
-    } catch (e) { console.warn('[eBay metrics] finances fetch error', e); }
+    } catch (e) { console.warn('[eBay metrics] finances fetch error', e); if (debug) debugRaw.financesException = String(e); }
+  } else if (debug) {
+    debugRaw.financesToken = 'null — sell.finances scope not granted on refresh token';
   }
 
   const netPayout = ebayFees != null ? db.grossSale - db.refundsIssued - ebayFees : db.netEstimate;
+
+  const hints: string[] = [];
+  if (!analyticsAvailable) hints.push('Reconnect eBay (Import Orders → Connect eBay Account) to enable performance metrics.');
+  if (!financesAvailable) hints.push(financesNeedsSignature
+    ? 'eBay fee & net-payout figures need the Finances API digital signature (x-ebay-signature-key) — reconnecting won’t enable it; the signing setup is required.'
+    : 'Reconnect eBay with the finance permission to show fees & net payout.');
 
   return NextResponse.json({
     ...db,
@@ -148,6 +209,8 @@ export async function GET(req: NextRequest) {
     performance,
     analyticsAvailable,
     financesAvailable,
-    analyticsHint: (analyticsAvailable && financesAvailable) ? null : 'Reconnect eBay (Import Orders → Connect eBay Account) to enable performance & finance metrics.',
+    financesNeedsSignature,
+    analyticsHint: hints.length ? hints.join(' ') : null,
+    ...(debug ? { _debug: debugRaw } : {}),
   });
 }
