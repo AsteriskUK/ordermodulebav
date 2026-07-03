@@ -1,139 +1,10 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { createFedExShipment, FedExShipmentRequest } from '@/lib/fedex-client';
+import { createFedExShipment } from '@/lib/fedex-client';
+import { buildFedExShipmentPayload } from '@/lib/fedex-payload';
 import { Order } from '@/lib/types';
 
 function notConfigured() {
   return !process.env.FEDEX_CLIENT_ID || !process.env.FEDEX_CLIENT_SECRET || !process.env.FEDEX_ACCOUNT_NUMBER;
-}
-
-function sanitizeFedExString(value: string, maxLength: number): string {
-  return (value || '').trim().slice(0, maxLength);
-}
-
-function sanitizeFedExPhone(value: string): string {
-  return (value || '').replace(/\D/g, '').slice(0, 15);
-}
-
-function sanitizeFedExAddressLines(address1: string, address2: string): string[] {
-  const line1 = sanitizeFedExString(address1, 35);
-  const line2 = sanitizeFedExString(address2, 35);
-  const lines: string[] = [];
-  if (line1.length >= 3) lines.push(line1);
-  if (line2.length >= 3) lines.push(line2);
-
-  // If address line 1 is too short, merge with line 2 if possible
-  if (line1.length > 0 && line1.length < 3 && line2.length >= 3) {
-    const combined = sanitizeFedExString(`${line1} ${line2}`, 35);
-    if (combined.length >= 3) return [combined];
-  }
-
-  if (lines.length > 0) return lines;
-
-  // Fallback for empty/invalid addresses
-  return ['Unknown Address'];
-}
-
-function ensureMinLength(value: string, minLength: number, fallback: string): string {
-  const trimmed = value.trim();
-  if (trimmed.length >= minLength) return trimmed;
-  return fallback;
-}
-
-function sanitizePostcode(postcode: string): string {
-  return (postcode || '').trim().toUpperCase();
-}
-
-function normalizeUKPostcode(postcode: string): string | null {
-  const cleaned = postcode.replace(/\s+/g, '').toUpperCase();
-  // UK postcode pattern: A(A)9(A) 9AA or A(A)9 9AA
-  const match = cleaned.match(/^([A-Z]{1,2})([0-9][A-Z0-9]?)([0-9][A-Z]{2})$/);
-  if (!match) return null;
-  const [, area, district, inward] = match;
-  return `${area}${district} ${inward}`;
-}
-
-function orderToPayload(order: Order, shipDate: string): FedExShipmentRequest {
-  const isInternational = order.postToCountry !== 'United Kingdom' && order.postToCountry !== 'GB';
-  const isNextDay = order.deliveryType === 'next_day' || order.deliveryType === 'express';
-  const serviceType = isInternational
-    ? 'INTERNATIONAL_ECONOMY'
-    : isNextDay
-    ? 'FEDEX_PRIORITY_EXPRESS'  // next day by noon, Europe domestic
-    : 'FEDEX_PRIORITY';         // end of day standard, Europe domestic
-  const numberOfBoxes = order.numberOfBoxes ?? 1;
-
-  const countryCode = order.postToCountry === 'United Kingdom' ? 'GB' : (order.postToCountry || 'GB');
-  const rawRecipientPostcode = sanitizePostcode(order.postToPostcode || '');
-  const normalizedUKPostcode = countryCode === 'GB' ? normalizeUKPostcode(rawRecipientPostcode) : null;
-  // For GB: always use normalized postcode or fallback to placeholder to prevent validation errors
-  const recipientPostcode = countryCode === 'GB'
-    ? (normalizedUKPostcode || 'AA1 1AA')
-    : (rawRecipientPostcode || '00000');
-  const shipperPostcode = sanitizePostcode(process.env.FEDEX_SHIPPER_POSTCODE || '') || 'AA1 1AA';
-
-  console.log(`[FedEx] Order ${order.salesRecordNumber}: country=${countryCode}, rawPostcode="${rawRecipientPostcode}", normalizedPostcode="${recipientPostcode}"`);
-
-  const recipientAddress = {
-    streetLines: sanitizeFedExAddressLines(order.postToAddress1, order.postToAddress2),
-    city: ensureMinLength(sanitizeFedExString(order.postToCity, 35), 3, sanitizeFedExString(order.postToCounty || '', 35) || 'Unknown'),
-    stateOrProvinceCode: order.postToCounty ? sanitizeFedExString(order.postToCounty, 3) : undefined,
-    postalCode: recipientPostcode,
-    countryCode,
-  };
-
-  const shipperAddress = {
-    streetLines: sanitizeFedExAddressLines(process.env.FEDEX_SHIPPER_ADDRESS1 || '', process.env.FEDEX_SHIPPER_ADDRESS2 || ''),
-    city: ensureMinLength(sanitizeFedExString(process.env.FEDEX_SHIPPER_CITY || '', 35), 3, 'Unknown'),
-    postalCode: shipperPostcode,
-    countryCode: 'GB',
-  };
-
-  const recipientPhone = sanitizeFedExPhone(order.postToPhone || '');
-  const recipientName = sanitizeFedExString(order.postToName || order.buyerUsername || '', 35);
-
-  return {
-    shipDatestamp: shipDate,
-    serviceType,
-    packagingType: 'YOUR_PACKAGING',
-    pickupType: 'USE_SCHEDULED_PICKUP',
-    shipper: {
-      contact: {
-        personName: sanitizeFedExString(process.env.FEDEX_SHIPPER_NAME || 'Warehouse', 35),
-        phoneNumber: sanitizeFedExPhone(process.env.FEDEX_SHIPPER_PHONE || '').replace(/^$/, '0000000000'),
-        companyName: sanitizeFedExString(process.env.FEDEX_SHIPPER_COMPANY || '', 35),
-      },
-      address: shipperAddress,
-    },
-    recipients: [
-      {
-        contact: {
-          personName: ensureMinLength(recipientName, 3, 'Recipient'),
-          phoneNumber: recipientPhone.replace(/^$/, '0000000000'),
-          emailAddress: sanitizeFedExString(order.buyerEmail || '', 100),
-        },
-        address: recipientAddress,
-      },
-    ],
-    shippingChargesPayment: {
-      paymentType: 'SENDER',
-      payor: {
-        responsibleParty: {
-          accountNumber: { value: process.env.FEDEX_ACCOUNT_NUMBER! },
-        },
-      },
-    },
-    labelSpecification: {
-      labelFormatType: 'COMMON2D',
-      imageType: 'PDF',
-      labelStockType: 'PAPER_4X6',
-    },
-    requestedPackageLineItems: Array.from({ length: numberOfBoxes }, () => ({
-      weight: { units: 'KG' as const, value: 1 },
-      customerReferences: [
-        { customerReferenceType: 'CUSTOMER_REFERENCE' as const, value: sanitizeFedExString(order.salesRecordNumber, 30) },
-      ],
-    })),
-  };
 }
 
 export async function POST(req: NextRequest) {
@@ -156,7 +27,7 @@ export async function POST(req: NextRequest) {
   const results: ShipResult[] = await Promise.all(
     orders.map(async (order): Promise<ShipResult> => {
       try {
-        const payload = orderToPayload(order, shipDate);
+        const payload = buildFedExShipmentPayload(order, shipDate);
         const res = await createFedExShipment(payload);
         const shipment = res.output?.transactionShipments?.[0];
         const trackingNumber = shipment?.masterTrackingNumber;

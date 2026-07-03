@@ -8,9 +8,10 @@ import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 import { GoodsInwardForm } from './goods-inward-form';
 import { ScanReceiving } from './scan-receiving';
-import { Boxes, Search, PackagePlus, ChevronDown, ChevronRight, Warehouse, ScanLine } from 'lucide-react';
+import { CatalogBrowser } from './catalog-browser';
+import { Boxes, Search, PackagePlus, ChevronDown, ChevronRight, Warehouse, ScanLine, Library } from 'lucide-react';
 
-type Tab = 'stock' | 'scan' | 'receipts';
+type Tab = 'stock' | 'scan' | 'catalog' | 'receipts';
 
 export function InventoryModule() {
   const parts = useOrderStore((s) => s.inventoryParts);
@@ -64,6 +65,9 @@ export function InventoryModule() {
         <button onClick={() => setTab('scan')} className={`px-5 py-2 font-medium flex items-center gap-1.5 ${tab === 'scan' ? 'bg-blue-600 text-white' : 'bg-white text-slate-600 hover:bg-slate-50'}`}>
           <ScanLine className="h-4 w-4" /> Scan In
         </button>
+        <button onClick={() => setTab('catalog')} className={`px-5 py-2 font-medium flex items-center gap-1.5 ${tab === 'catalog' ? 'bg-blue-600 text-white' : 'bg-white text-slate-600 hover:bg-slate-50'}`}>
+          <Library className="h-4 w-4" /> Catalog
+        </button>
         <button onClick={() => setTab('receipts')} className={`px-5 py-2 font-medium ${tab === 'receipts' ? 'bg-blue-600 text-white' : 'bg-white text-slate-600 hover:bg-slate-50'}`}>
           Receipts {goodsReceipts.length > 0 && <span className="ml-1 text-xs opacity-75">({goodsReceipts.length})</span>}
         </button>
@@ -71,6 +75,8 @@ export function InventoryModule() {
 
       {tab === 'scan' ? (
         <ScanReceiving />
+      ) : tab === 'catalog' ? (
+        <CatalogBrowser />
       ) : tab === 'stock' ? (
         <>
           <div className="flex gap-2 flex-wrap">

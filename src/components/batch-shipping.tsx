@@ -23,10 +23,20 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table';
-import { Download, Truck, CheckSquare, MinusSquare, Square, PackageOpen, ChevronDown, ChevronRight, Layers, Sparkles, AlertTriangle, X, Loader2, CheckCircle2, Check, Lock as LockIcon } from 'lucide-react';
+import { Download, Truck, CheckSquare, MinusSquare, Square, PackageOpen, ChevronDown, ChevronRight, Layers, Sparkles, AlertTriangle, X, Loader2, CheckCircle2, Check, Lock as LockIcon, PoundSterling } from 'lucide-react';
 import { DeliveryBadge } from './delivery-badge';
 import { Input } from '@/components/ui/input';
 import { toast } from 'sonner';
+
+interface RateResult {
+  orderId: string;
+  carrier: string;
+  amount: number | null;
+  currency: string;
+  source: 'fedex_live' | 'dpd_card';
+  estimated: boolean;
+  error?: string;
+}
 
 const CARRIER_PILL: Record<string, string> = {
   DPD:        'bg-purple-100 text-purple-700 border-purple-300',
@@ -223,6 +233,9 @@ export function BatchShipping() {
   const [selectedDPDService, setSelectedDPDService] = useState<DPDService>('next_day');
   const [aiChecking, setAiChecking] = useState(false);
   const [aiIssues, setAiIssues] = useState<{ id: string; issue: string }[] | null>(null);
+  // Estimated label costs keyed by order id (DPD from rate card, FedEx live).
+  const [rates, setRates] = useState<Map<string, RateResult>>(new Map());
+  const [fetchingRates, setFetchingRates] = useState(false);
 
   const handleSort = (field: typeof sortField) => {
     if (sortField === field) {
@@ -300,6 +313,58 @@ export function BatchShipping() {
     } finally {
       setAiChecking(false);
     }
+  };
+
+  const handleFetchRates = async (ordersToPrice: typeof exportableOrders) => {
+    if (ordersToPrice.length === 0) { toast.error('No orders to price'); return; }
+    setFetchingRates(true);
+    try {
+      const res = await fetch('/api/shipping/rates', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ orders: ordersToPrice }),
+      });
+      const data = await res.json() as { rates?: RateResult[]; error?: string };
+      if (!res.ok || !data.rates) { toast.error(data.error || 'Failed to fetch prices'); return; }
+      setRates((prev) => {
+        const next = new Map(prev);
+        for (const r of data.rates!) next.set(r.orderId, r);
+        return next;
+      });
+      const priced = data.rates.filter((r) => r.amount != null).length;
+      const failed = data.rates.length - priced;
+      toast.success(`Priced ${priced} order${priced !== 1 ? 's' : ''}${failed > 0 ? ` — ${failed} unavailable` : ''}`);
+    } catch {
+      toast.error('Failed to fetch prices');
+    } finally {
+      setFetchingRates(false);
+    }
+  };
+
+  // Total estimated cost across a set of orders (only those already priced).
+  const sumRates = (list: { id: string }[]): { total: number; priced: number } => {
+    let total = 0;
+    let priced = 0;
+    for (const o of list) {
+      const r = rates.get(o.id);
+      if (r?.amount != null) { total += r.amount; priced += 1; }
+    }
+    return { total, priced };
+  };
+
+  // Sum estimated cost across a group's order ids; null if none are priced yet.
+  const groupRate = (ids: string[]): { amount: number | null; anyEstimated: boolean; error?: string } => {
+    let sum = 0;
+    let found = false;
+    let anyEstimated = false;
+    let error: string | undefined;
+    for (const id of ids) {
+      const r = rates.get(id);
+      if (!r) continue;
+      if (r.amount != null) { sum += r.amount; found = true; anyEstimated = anyEstimated || r.estimated; }
+      else if (r.error) error = r.error;
+    }
+    return { amount: found ? sum : null, anyEstimated, error };
   };
 
   // Show orders that are pending or packed (ready for shipping)
@@ -572,6 +637,17 @@ export function BatchShipping() {
             {aiChecking ? <Loader2 className="h-3 w-3 mr-1 animate-spin" /> : <Sparkles className="h-3 w-3 mr-1" />}
             {aiChecking ? 'Checking…' : 'AI Check'}
           </Button>
+          <Button
+            size="sm"
+            variant="outline"
+            className="border-emerald-300 text-emerald-700 hover:bg-emerald-50"
+            onClick={() => handleFetchRates(selectedIds.size > 0 ? exportableOrders.filter((o) => selectedIds.has(o.id)) : exportableOrders)}
+            disabled={fetchingRates || exportableOrders.length === 0}
+            title="Estimate label costs (DPD from rate card, FedEx live)"
+          >
+            {fetchingRates ? <Loader2 className="h-3 w-3 mr-1 animate-spin" /> : <PoundSterling className="h-3 w-3 mr-1" />}
+            {fetchingRates ? 'Pricing…' : selectedIds.size > 0 ? `Get Prices (${selectedIds.size})` : 'Get Prices'}
+          </Button>
         <div className="flex items-center gap-1 bg-slate-100 rounded-lg p-1 shrink-0">
           <button
             onClick={() => setBundleMode(false)}
@@ -718,6 +794,14 @@ export function BatchShipping() {
                 <Truck className="h-3 w-3 mr-1" />
                 {bookingLabels ? 'Booking...' : `Book Labels DPD (${dpdOrders.length})`}
               </Button>
+              {(() => {
+                const { total, priced } = sumRates(dpdOrders);
+                return priced > 0 ? (
+                  <span className="text-xs text-slate-500 whitespace-nowrap" title="Estimated from DPD rate card">
+                    ~£{total.toFixed(2)} est{priced < dpdOrders.length ? ` (${priced}/${dpdOrders.length})` : ''}
+                  </span>
+                ) : null;
+              })()}
             </>
           )}
           {fedexOrders.length > 0 && (
@@ -750,6 +834,14 @@ export function BatchShipping() {
                 <Truck className="h-3 w-3 mr-1" />
                 {bookingLabels ? 'Booking...' : `Book Labels FedEx (${fedexOrders.length})`}
               </Button>
+              {(() => {
+                const { total, priced } = sumRates(fedexOrders);
+                return priced > 0 ? (
+                  <span className="text-xs text-slate-500 whitespace-nowrap" title="Estimated from live FedEx quotes">
+                    ~£{total.toFixed(2)} est{priced < fedexOrders.length ? ` (${priced}/${fedexOrders.length})` : ''}
+                  </span>
+                ) : null;
+              })()}
             </>
           )}
         </div>
@@ -905,6 +997,7 @@ export function BatchShipping() {
                     <TableHead className="text-xs cursor-pointer hover:bg-slate-100 bg-slate-50" onClick={() => handleSort('itemTitle')}>Item {sortField === 'itemTitle' && (sortDir === 'asc' ? '▲' : '▼')}</TableHead>
                     <TableHead className="text-xs bg-slate-50">Qty</TableHead>
                     <TableHead className="text-xs bg-slate-50">Price</TableHead>
+                    <TableHead className="text-xs bg-slate-50">Est. Cost</TableHead>
                     <TableHead className="text-xs bg-slate-50">Boxes</TableHead>
                     <TableHead className="text-xs bg-slate-50">Carrier</TableHead>
                     <TableHead className="text-xs bg-slate-50">Service</TableHead>
@@ -963,6 +1056,26 @@ export function BatchShipping() {
                         </TableCell>
                         <TableCell className="text-xs font-medium whitespace-nowrap">
                           £{totalPrice.toFixed(2)}
+                        </TableCell>
+                        <TableCell className="text-xs whitespace-nowrap">
+                          {(() => {
+                            const gr = groupRate(ids);
+                            if (gr.amount != null) {
+                              return (
+                                <span
+                                  className="inline-flex items-center gap-1 font-medium text-emerald-700"
+                                  title={gr.anyEstimated ? 'Estimated — DPD rate card / FedEx quote' : undefined}
+                                >
+                                  £{gr.amount.toFixed(2)}
+                                  {gr.anyEstimated && <span className="text-[9px] text-slate-400 font-normal">est</span>}
+                                </span>
+                              );
+                            }
+                            if (gr.error) {
+                              return <span className="text-slate-400" title={gr.error}>n/a</span>;
+                            }
+                            return <span className="text-slate-300">—</span>;
+                          })()}
                         </TableCell>
                         <TableCell onClick={(e) => e.stopPropagation()}>
                           <div className="flex flex-col gap-1">

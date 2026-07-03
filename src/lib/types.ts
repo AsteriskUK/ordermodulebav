@@ -101,9 +101,12 @@ export interface ReturnRecord {
   responsibleUserId?: string;
   responsibleUserName?: string;
   refundAmount?: number;
-  status: 'pending' | 'received' | 'refunded' | 'rejected' | 'replacement';
-  resolution?: 'refund' | 'replacement';
+  /** 'swap' = replacement sent ahead of receiving the faulty item back (open until it arrives) */
+  status: 'pending' | 'received' | 'refunded' | 'rejected' | 'replacement' | 'swap';
+  resolution?: 'refund' | 'replacement' | 'swap';
   returnTrackingNumber?: string;
+  /** How the faulty item comes back for a swap: DPD driver collection or a return label */
+  swapReturnMethod?: 'collection' | 'label';
   receivedNotes?: string;
   replacementItems?: ReplacementItem[];
   replacementOrderId?: string;
@@ -158,10 +161,28 @@ export interface InventoryPart {
   attributes: Record<string, string | number>;
   /** Manufacturer/product barcode (EAN/UPC) for scan-to-receive */
   barcode?: string;
+  /** Linked reference-catalog product — rich specs + image live in catalog_products */
+  catalogProductId?: string;
+  imageUrl?: string;
   lowStockThreshold?: number;
   notes?: string;
   createdAt: string;
   updatedAt: string;
+}
+
+/** Reference product from the scraped catalog (catalog_products). NOT physical stock. */
+export interface CatalogProduct {
+  id: string;
+  source: string;
+  category: string;                              // catalog category: cpu | memory | ...
+  name: string;
+  brand?: string;
+  imageUrl?: string;
+  sourceUrl?: string;
+  msrp?: number;
+  currency?: string;
+  ratingCount?: number;
+  specs: Record<string, string | number>;
 }
 
 /** A single physical serialized unit (laptop/PC/monitor). */
@@ -197,6 +218,10 @@ export interface GoodsReceiptLine {
   id: string;
   /** When set (e.g. from a barcode scan), receive into this exact part instead of matching by spec */
   partId?: string;
+  /** When received from the reference catalog, links the created part to it + carries name/image */
+  catalogProductId?: string;
+  catalogName?: string;
+  catalogImageUrl?: string;
   category: string;
   tracking: StockTracking;
   attributes: Record<string, string | number>;

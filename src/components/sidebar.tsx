@@ -51,7 +51,7 @@ const ALL_NAV = [
   { name: 'Batches', href: '/batches', icon: Package, staffVisible: false, commsVisible: false },
   { name: 'Returns', href: '/returns', icon: PackageOpen, staffVisible: false, commsVisible: true },
   { name: 'Replacements', href: '/replacements', icon: RefreshCw, staffVisible: false, commsVisible: true },
-  { name: 'Missing Items', href: '/missing-items', icon: PackageMinus, staffVisible: false, commsVisible: false },
+  { name: 'Missing Items', href: '/missing-items', icon: PackageMinus, staffVisible: false, commsVisible: true },
   { name: 'Recently Deleted', href: '/recently-deleted', icon: Trash, staffVisible: false, commsVisible: false },
   { name: 'Reports', href: '/reports', icon: BarChart2, staffVisible: false, commsVisible: false },
   { name: 'EOD Report', href: '/eod', icon: FileBarChart2, staffVisible: false, commsVisible: false },

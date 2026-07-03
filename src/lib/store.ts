@@ -78,7 +78,7 @@ interface OrderStore {
   clearEodEvents: () => void;
   addReturn: (ret: ReturnRecord) => void;
   updateReturn: (returnId: string, updates: Partial<ReturnRecord>) => void;
-  processReturn: (returnId: string, resolution: 'refund' | 'replacement', processedByUserId: string, processedByUserName: string) => void;
+  processReturn: (returnId: string, resolution: 'refund' | 'replacement' | 'swap', processedByUserId: string, processedByUserName: string) => void;
   addReplacementItem: (returnId: string, item: ReplacementItem) => void;
   createReplacementOrder: (returnId: string) => Order;
   // Missing Items
@@ -467,7 +467,8 @@ export const useOrderStore = create<OrderStore>()(
       },
       processReturn: (returnId, resolution, processedByUserId, processedByUserName) => {
         set((state) => {
-          const newStatus: ReturnRecord['status'] = resolution === 'refund' ? 'refunded' : 'replacement';
+          const newStatus: ReturnRecord['status'] =
+            resolution === 'refund' ? 'refunded' : resolution === 'swap' ? 'swap' : 'replacement';
           const updatedReturns = state.returns.map((r) =>
             r.id === returnId ? { ...r, resolution, status: newStatus, processedByUserId, processedByUserName } : r
           );
@@ -649,6 +650,11 @@ export const useOrderStore = create<OrderStore>()(
             const existing = parts.find((p) => p.id === line.partId);
             if (existing) return existing;
           }
+          // Catalog-linked lines collapse onto one part per catalog product.
+          if (line.catalogProductId) {
+            const byCatalog = parts.find((p) => p.catalogProductId === line.catalogProductId);
+            if (byCatalog) return byCatalog;
+          }
           const sku = buildSku(line.category, line.attributes);
           let part = parts.find((p) => p.sku === sku && p.category === line.category);
           if (!part) {
@@ -656,8 +662,10 @@ export const useOrderStore = create<OrderStore>()(
             part = {
               id: generateUUID(), sku, category: line.category,
               tracking: line.tracking,
-              name: `${cat?.label ?? line.category}${sku.replace(line.category.toUpperCase(), '').replace(/-/g, ' ')}`.trim(),
+              name: line.catalogName ?? `${cat?.label ?? line.category}${sku.replace(line.category.toUpperCase(), '').replace(/-/g, ' ')}`.trim(),
               attributes: line.attributes, createdAt: now, updatedAt: now,
+              catalogProductId: line.catalogProductId,
+              imageUrl: line.catalogImageUrl,
             };
             parts.push(part);
             touchedParts.push(part);
@@ -803,7 +811,9 @@ export const useOrderStore = create<OrderStore>()(
         const replacementItem = ret.replacementItems?.[0];
         const now = new Date().toISOString();
         const newOrderId = generateUUID();
-        const salesRecordNumber = `REPL-${originalOrder.salesRecordNumber}`;
+        const isSwap = ret.resolution === 'swap';
+        const prefix = isSwap ? 'SWAP' : 'REPL';
+        const salesRecordNumber = `${prefix}-${originalOrder.salesRecordNumber}`;
 
         let batch = state.batches.find((b) => b.name === 'Replacements');
         if (!batch) {
@@ -816,7 +826,7 @@ export const useOrderStore = create<OrderStore>()(
           ...originalOrder,
           id: newOrderId,
           salesRecordNumber,
-          orderNumber: `REPL-${originalOrder.orderNumber}`,
+          orderNumber: `${prefix}-${originalOrder.orderNumber}`,
           status: 'pending',
           itemTitle: replacementItem?.itemTitle ?? originalOrder.itemTitle,
           quantity: replacementItem?.quantity ?? originalOrder.quantity,
@@ -834,11 +844,15 @@ export const useOrderStore = create<OrderStore>()(
           dispatchedOnDate: '',
           trackingNumber: '',
           deliveryService: '',
-          comments: `Replacement for return ${ret.id}`,
+          comments: isSwap
+            ? `Swap for return ${ret.id} — sent before faulty item received back`
+            : `Replacement for return ${ret.id}`,
           notes: [
             {
               id: generateUUID(),
-              text: 'Replacement order created from return',
+              text: isSwap
+                ? 'Swap order created — replacement dispatched ahead of the faulty item coming back'
+                : 'Replacement order created from return',
               authorId: 'system',
               authorName: 'System',
               createdAt: now,

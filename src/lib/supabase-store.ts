@@ -462,6 +462,7 @@ export async function syncReturn(ret: ReturnRecord): Promise<void> {
       replacement_items: ret.replacementItems,
       replacement_order_id: ret.replacementOrderId,
       return_tracking_number: ret.returnTrackingNumber,
+      swap_return_method: ret.swapReturnMethod,
       received_notes: ret.receivedNotes,
       image_urls: ret.imageUrls,
     }).filter(([, v]) => v !== undefined)
@@ -522,6 +523,7 @@ export async function fetchReturns(): Promise<ReturnRecord[]> {
     replacementItems: r.metadata?.replacement_items,
     replacementOrderId: r.metadata?.replacement_order_id,
     returnTrackingNumber: r.metadata?.return_tracking_number,
+    swapReturnMethod: r.metadata?.swap_return_method,
     receivedNotes: r.metadata?.received_notes,
     imageUrls: r.metadata?.image_urls,
     responsibleDepartment: r.responsible_department,
@@ -679,6 +681,8 @@ export async function syncInventoryPart(p: InventoryPart): Promise<void> {
   const { error } = await supabase.from('inventory_parts').upsert({
     id: p.id, sku: p.sku, name: p.name, category: p.category, tracking: p.tracking,
     attributes: p.attributes ?? {}, barcode: p.barcode, low_stock_threshold: p.lowStockThreshold, notes: p.notes,
+    catalog_product_id: isValidUUID(p.catalogProductId ?? '') ? p.catalogProductId : null,
+    image_url: p.imageUrl,
     created_at: p.createdAt,
   });
   if (error) console.error('Error syncing inventory part:', JSON.stringify(error, null, 2));
@@ -692,6 +696,8 @@ export async function fetchInventoryParts(): Promise<InventoryPart[]> {
     tracking: (p.tracking ?? 'bulk') as StockTracking,
     attributes: (p.attributes ?? {}) as Record<string, string | number>,
     barcode: p.barcode ?? undefined,
+    catalogProductId: p.catalog_product_id ?? undefined,
+    imageUrl: p.image_url ?? undefined,
     lowStockThreshold: p.low_stock_threshold ?? undefined, notes: p.notes ?? undefined,
     createdAt: p.created_at, updatedAt: p.updated_at ?? p.created_at,
   })) || [];

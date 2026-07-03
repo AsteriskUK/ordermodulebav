@@ -5,7 +5,7 @@ import { RoleGate } from '@/components/role-gate';
 export default function ReplacementsPage() {
   return (
     <AppShell>
-      <RoleGate allowedRoles={['admin', 'manager']}>
+      <RoleGate allowedRoles={['admin', 'manager', 'comms']}>
         <ReplacementsManager />
       </RoleGate>
     </AppShell>

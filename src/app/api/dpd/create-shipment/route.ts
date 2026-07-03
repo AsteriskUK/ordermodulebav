@@ -213,6 +213,12 @@ async function orderToPayload(order: Order, service: string): Promise<any> {
         },
       };
 
+  // One parcel per box, so DPD mints a parcel number (and label) for each.
+  // Without an explicit parcels array DPD only ever returns a single label,
+  // regardless of numberOfParcels.
+  const perParcelWeight = 1;
+  const parcels = Array.from({ length: numberOfBoxes }, () => ({ weight: perParcelWeight }));
+
   const payload = {
     shipmentDate,
     outboundConsignment: {
@@ -220,7 +226,8 @@ async function orderToPayload(order: Order, service: string): Promise<any> {
       deliveryDetails,
       liability: order.extendedLiability ?? false,
       numberOfParcels: numberOfBoxes,
-      totalWeight: numberOfBoxes,
+      totalWeight: numberOfBoxes * perParcelWeight,
+      parcels,
       currency: 'GBP',
       networkCode,
       shippingRef1: sanitizeReference(order.salesRecordNumber),

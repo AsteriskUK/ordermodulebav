@@ -141,8 +141,9 @@ CREATE TABLE IF NOT EXISTS returns (
   processed_by_user_id UUID REFERENCES users(id),
   processed_by_user_name TEXT,
   refund_amount NUMERIC(10,2),
-  status TEXT DEFAULT 'pending' CHECK (status IN ('pending', 'received', 'refunded', 'rejected', 'replacement')),
+  status TEXT DEFAULT 'pending' CHECK (status IN ('pending', 'received', 'refunded', 'rejected', 'replacement', 'swap')),
   metadata JSONB DEFAULT '{}',
+  updated_at TIMESTAMPTZ DEFAULT NOW(),
   -- Responsible department/user for productivity tracking (root cause / attribution)
   responsible_department TEXT,
   responsible_user_id UUID REFERENCES users(id),

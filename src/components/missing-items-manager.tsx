@@ -1,6 +1,7 @@
 'use client';
 
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useEffect } from 'react';
+import { useSearchParams } from 'next/navigation';
 import { useOrderStore } from '@/lib/store';
 import { MissingItemRecord, MissingPart, DEPARTMENT_CONFIG, Department } from '@/lib/types';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -52,18 +53,35 @@ export function MissingItemsManager() {
 
   const currentUser = users.find((u) => u.id === currentUserId);
 
+  const searchParams = useSearchParams();
+
   // --- list filters ---
   const [search, setSearch]           = useState('');
   const [statusFilter, setStatusFilter] = useState<string>('all');
-  const [showForm, setShowForm]       = useState(false);
+  // Quick-action deep link (?new=1&order=&buyer=&notes=) opens the form prefilled.
+  const [showForm, setShowForm]       = useState(() => searchParams.get('new') === '1');
 
   // --- new report form ---
-  const [orderSearch, setOrderSearch]     = useState('');
+  const [orderSearch, setOrderSearch]     = useState(() =>
+    searchParams.get('new') === '1' ? (searchParams.get('order') || searchParams.get('buyer') || '') : ''
+  );
   const [selectedOrderId, setSelectedOrderId] = useState('');
   const [parts, setParts]                 = useState<MissingPart[]>([{ description: '', quantity: 1 }]);
-  const [notes, setNotes]                 = useState('');
+  const [notes, setNotes]                 = useState(() =>
+    searchParams.get('new') === '1' ? (searchParams.get('notes') || '') : ''
+  );
   const [responsibleDept, setResponsibleDept] = useState<Department | ''>('');
   const [responsibleUserId, setResponsibleUserId] = useState('');
+
+  // Deep link auto-select: once orders load, match the order number from the URL.
+  useEffect(() => {
+    if (searchParams.get('new') !== '1' || selectedOrderId) return;
+    const orderQ = searchParams.get('order');
+    if (!orderQ) return;
+    const match = orders.find((o) => o.salesRecordNumber === orderQ || o.orderNumber === orderQ);
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    if (match) setSelectedOrderId(match.id);
+  }, [orders, selectedOrderId, searchParams]);
 
   // --- resolve dialog ---
   const [resolveRecord, setResolveRecord] = useState<MissingItemRecord | null>(null);

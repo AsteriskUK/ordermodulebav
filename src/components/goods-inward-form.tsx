@@ -1,13 +1,14 @@
 'use client';
 
-import { useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useOrderStore } from '@/lib/store';
-import { GoodsReceipt, GoodsReceiptLine } from '@/lib/types';
+import { GoodsReceipt, GoodsReceiptLine, CatalogProduct } from '@/lib/types';
 import { INVENTORY_CATEGORIES, INVENTORY_CATEGORY_MAP, STOCK_GRADES, describeAttributes } from '@/lib/inventory-config';
+import { searchCatalog, catalogToAttributes, CATALOG_TO_INVENTORY_CATEGORY } from '@/lib/catalog';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { toast } from 'sonner';
-import { Plus, Trash2, PackagePlus, X } from 'lucide-react';
+import { Plus, Trash2, PackagePlus, X, Search, Loader2 } from 'lucide-react';
 
 function uuid(): string {
   return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, (c) => {
@@ -36,9 +37,48 @@ export function GoodsInwardForm({ onClose }: { onClose: () => void }) {
   const [unitCost, setUnitCost] = useState<number | ''>('');
   const firstFieldRef = useRef<HTMLInputElement>(null);
 
+  // Reference-catalog lookup — pick a known product to prefill specs + image.
+  const [catalogQuery, setCatalogQuery] = useState('');
+  const [catalogResults, setCatalogResults] = useState<CatalogProduct[]>([]);
+  const [catalogLoading, setCatalogLoading] = useState(false);
+  const [selectedCatalog, setSelectedCatalog] = useState<CatalogProduct | null>(null);
+
   const category = INVENTORY_CATEGORY_MAP[categoryKey];
 
   const setAttr = (key: string, value: string) => setAttributes((a) => ({ ...a, [key]: value }));
+
+  // Debounced catalog search.
+  useEffect(() => {
+    const q = catalogQuery.trim();
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    if (q.length < 2) { setCatalogResults([]); return; }
+    let live = true;
+    setCatalogLoading(true);
+    const t = setTimeout(async () => {
+      const rows = await searchCatalog(q);
+      if (!live) return;
+      setCatalogResults(rows);
+      setCatalogLoading(false);
+    }, 250);
+    return () => { live = false; clearTimeout(t); };
+  }, [catalogQuery]);
+
+  function pickCatalog(p: CatalogProduct) {
+    const invKey = CATALOG_TO_INVENTORY_CATEGORY[p.category];
+    if (invKey && INVENTORY_CATEGORY_MAP[invKey]) {
+      setCategoryKey(invKey);
+      setAttributes(catalogToAttributes(invKey, p));
+    }
+    if (p.msrp) setUnitCost(p.msrp);
+    setSelectedCatalog(p);
+    setCatalogQuery('');
+    setCatalogResults([]);
+  }
+
+  function clearCatalog() {
+    setSelectedCatalog(null);
+    setAttributes({});
+  }
 
   function addLine() {
     const hasAnyAttr = Object.values(attributes).some((v) => String(v).trim() !== '');
@@ -55,12 +95,16 @@ export function GoodsInwardForm({ onClose }: { onClose: () => void }) {
         quantity,
         location: location || undefined,
         unitCost: unitCost === '' ? undefined : Number(unitCost),
+        catalogProductId: selectedCatalog?.id,
+        catalogName: selectedCatalog?.name,
+        catalogImageUrl: selectedCatalog?.imageUrl,
       },
     ]);
-    // Reset spec + qty, keep category/grade/location for the next item.
+    // Reset spec + qty + catalog link, keep category/grade/location for the next item.
     setAttributes({});
     setQuantity(1);
     setUnitCost('');
+    setSelectedCatalog(null);
     firstFieldRef.current?.focus();
   }
 
@@ -119,10 +163,65 @@ export function GoodsInwardForm({ onClose }: { onClose: () => void }) {
 
           {/* Fast line entry */}
           <div className="bg-slate-50 border border-slate-200 rounded-lg p-3 space-y-3">
+            {/* Catalog lookup */}
+            <div className="relative">
+              <label className="text-[11px] font-medium text-slate-500 block mb-1">Find in product catalog</label>
+              {selectedCatalog ? (
+                <div className="flex items-center gap-2 bg-white border border-blue-200 rounded-md px-2 py-1.5">
+                  {selectedCatalog.imageUrl && (
+                    // eslint-disable-next-line @next/next/no-img-element
+                    <img src={selectedCatalog.imageUrl} alt="" className="h-8 w-8 object-contain rounded shrink-0" />
+                  )}
+                  <div className="min-w-0 flex-1">
+                    <p className="text-sm font-medium text-slate-800 truncate">{selectedCatalog.name}</p>
+                    <p className="text-[11px] text-slate-400">Specs prefilled from catalog · linked</p>
+                  </div>
+                  <button onClick={clearCatalog} className="text-slate-400 hover:text-red-500 shrink-0" title="Clear"><X className="h-4 w-4" /></button>
+                </div>
+              ) : (
+                <>
+                  <div className="relative">
+                    <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400" />
+                    <Input
+                      value={catalogQuery}
+                      onChange={(e) => setCatalogQuery(e.target.value)}
+                      placeholder="Search 4,500+ products by name (e.g. Ryzen 7 9800X3D)"
+                      className="pl-8"
+                    />
+                    {catalogLoading && <Loader2 className="absolute right-2.5 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400 animate-spin" />}
+                  </div>
+                  {catalogResults.length > 0 && (
+                    <div className="absolute z-10 mt-1 w-full max-h-72 overflow-y-auto bg-white border border-slate-200 rounded-md shadow-lg">
+                      {catalogResults.map((p) => (
+                        <button
+                          key={p.id}
+                          onClick={() => pickCatalog(p)}
+                          className="flex items-center gap-2 w-full text-left px-2.5 py-2 hover:bg-blue-50 border-b border-slate-100 last:border-0"
+                        >
+                          {p.imageUrl && (
+                            // eslint-disable-next-line @next/next/no-img-element
+                            <img src={p.imageUrl} alt="" className="h-9 w-9 object-contain rounded shrink-0" />
+                          )}
+                          <div className="min-w-0 flex-1">
+                            <p className="text-sm font-medium text-slate-800 truncate">{p.name}</p>
+                            <p className="text-[11px] text-slate-400 truncate">
+                              <span className="uppercase">{p.category}</span>
+                              {Object.entries(p.specs).slice(0, 3).map(([k, v]) => ` · ${v}`).join('')}
+                            </p>
+                          </div>
+                          {p.msrp != null && <span className="text-xs text-slate-500 shrink-0">£{p.msrp}</span>}
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                </>
+              )}
+            </div>
+
             <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
               <div className="col-span-2 sm:col-span-1">
                 <label className="text-[11px] font-medium text-slate-500 block mb-1">Category</label>
-                <select value={categoryKey} onChange={(e) => { setCategoryKey(e.target.value); setAttributes({}); }} className={fieldCls}>
+                <select value={categoryKey} onChange={(e) => { setCategoryKey(e.target.value); setAttributes({}); setSelectedCatalog(null); }} className={fieldCls}>
                   {INVENTORY_CATEGORIES.map((c) => <option key={c.key} value={c.key}>{c.label}{c.tracking === 'serialized' ? ' (unit)' : ''}</option>)}
                 </select>
               </div>
@@ -175,9 +274,13 @@ export function GoodsInwardForm({ onClose }: { onClose: () => void }) {
               {lines.map((l) => (
                 <div key={l.id} className="flex items-center gap-2 bg-white border border-slate-200 rounded-lg px-3 py-2 text-sm">
                   <span className="font-bold text-blue-700 w-10 shrink-0">×{l.quantity}</span>
+                  {l.catalogImageUrl && (
+                    // eslint-disable-next-line @next/next/no-img-element
+                    <img src={l.catalogImageUrl} alt="" className="h-8 w-8 object-contain rounded shrink-0" />
+                  )}
                   <div className="min-w-0 flex-1">
                     <p className="font-medium text-slate-800 truncate">
-                      {INVENTORY_CATEGORY_MAP[l.category]?.label}: {describeAttributes(l.category, l.attributes)}
+                      {l.catalogName ?? `${INVENTORY_CATEGORY_MAP[l.category]?.label}: ${describeAttributes(l.category, l.attributes)}`}
                     </p>
                     <p className="text-xs text-slate-400">
                       Grade {l.grade}{l.location ? ` · ${l.location}` : ''}{l.unitCost ? ` · £${l.unitCost} ea` : ''}

@@ -20,6 +20,7 @@ const STATUS_CONFIG: Record<ReturnRecord['status'], { label: string; color: stri
   refunded: { label: 'Refunded', color: 'bg-green-100 text-green-800 border-green-300' },
   rejected: { label: 'Rejected', color: 'bg-red-100 text-red-800 border-red-300' },
   replacement: { label: 'Replacement', color: 'bg-purple-100 text-purple-800 border-purple-300' },
+  swap: { label: 'Swap — awaiting item', color: 'bg-orange-100 text-orange-800 border-orange-300' },
 };
 
 export function ReplacementsManager() {
@@ -29,7 +30,7 @@ export function ReplacementsManager() {
   const [search, setSearch] = useState('');
 
   const replacementReturns = useMemo(() => {
-    let r = returns.filter((x) => x.status === 'replacement');
+    let r = returns.filter((x) => x.status === 'replacement' || x.status === 'swap');
     if (search.trim()) {
       const q = search.toLowerCase();
       r = r.filter(
@@ -94,6 +95,7 @@ export function ReplacementsManager() {
                   <TableHead className="text-xs">Original Item</TableHead>
                   <TableHead className="text-xs">Replacement Items</TableHead>
                   <TableHead className="text-xs">Status</TableHead>
+                  <TableHead className="text-xs">Faulty Return</TableHead>
                   <TableHead className="text-xs">Replacement Order</TableHead>
                   <TableHead className="text-xs">Actions</TableHead>
                 </TableRow>
@@ -140,6 +142,20 @@ export function ReplacementsManager() {
                         <Badge variant="outline" className={`text-xs ${STATUS_CONFIG[ret.status].color}`}>
                           {STATUS_CONFIG[ret.status].label}
                         </Badge>
+                      </TableCell>
+                      <TableCell className="text-xs">
+                        {ret.resolution === 'swap' ? (
+                          <div>
+                            <span className="text-slate-600">
+                              {ret.swapReturnMethod === 'collection' ? 'DPD Collection' : ret.swapReturnMethod === 'label' ? 'Return Label' : 'Not booked'}
+                            </span>
+                            {ret.returnTrackingNumber && (
+                              <span className="block font-mono text-slate-400">{ret.returnTrackingNumber}</span>
+                            )}
+                          </div>
+                        ) : (
+                          '—'
+                        )}
                       </TableCell>
                       <TableCell className="text-xs">
                         {replacementOrder ? (

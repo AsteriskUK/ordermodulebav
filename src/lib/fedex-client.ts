@@ -248,6 +248,72 @@ export async function createFedExShipment(payload: FedExShipmentRequest): Promis
   throw lastError || new Error('FedEx shipment creation failed after retries');
 }
 
+export interface FedExRateResponse {
+  output?: {
+    rateReplyDetails?: {
+      serviceType?: string;
+      ratedShipmentDetails?: {
+        totalNetCharge?: number;
+        totalNetFedExCharge?: number;
+        currency?: string;
+      }[];
+    }[];
+  };
+  errors?: { code: string; message: string }[];
+}
+
+/**
+ * Live FedEx rate quote for a shipment shape. Returns the cheapest rated total
+ * for the requested service (net charge) and its currency, or null if FedEx
+ * returned no usable rate. Reuses the same shipment payload builder as booking.
+ */
+export async function getFedExRate(
+  payload: FedExShipmentRequest
+): Promise<{ amount: number; currency: string } | null> {
+  const base = getBase();
+  const token = await getFedExToken();
+  const accountNumber = process.env.FEDEX_ACCOUNT_NUMBER;
+  if (!accountNumber) throw new Error('FEDEX_ACCOUNT_NUMBER not set');
+
+  // The Rate API accepts the same requestedShipment shape as Ship, minus the
+  // label spec. Send the order's service so the quote matches what we'd book.
+  const { labelSpecification: _label, ...rateShipment } = payload;
+  void _label;
+  const body = {
+    accountNumber: { value: accountNumber },
+    requestedShipment: {
+      ...rateShipment,
+      rateRequestType: ['ACCOUNT', 'LIST'],
+    },
+  };
+
+  const res = await fetch(`${base}/rate/v1/rates/quotes`, {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${token}`,
+      'Content-Type': 'application/json',
+      'X-locale': 'en_GB',
+    },
+    body: JSON.stringify(body),
+  });
+
+  const text = await res.text();
+  if (!res.ok) throw new Error(`FedEx rate error ${res.status}: ${text.slice(0, 200)}`);
+
+  const data = JSON.parse(text) as FedExRateResponse;
+  const details = data.output?.rateReplyDetails ?? [];
+  let best: { amount: number; currency: string } | null = null;
+  for (const d of details) {
+    for (const r of d.ratedShipmentDetails ?? []) {
+      const amount = r.totalNetCharge ?? r.totalNetFedExCharge;
+      if (typeof amount === 'number' && (!best || amount < best.amount)) {
+        best = { amount, currency: r.currency ?? 'GBP' };
+      }
+    }
+  }
+  return best;
+}
+
 export interface FedExTrackingResponse {
   output?: {
     trackingResults?: {

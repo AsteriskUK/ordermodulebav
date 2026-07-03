@@ -19,7 +19,7 @@ import {
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter,
 } from '@/components/ui/dialog';
-import { PackageOpen, Plus, Search, CheckCircle, Truck, Replace, Pencil } from 'lucide-react';
+import { PackageOpen, Plus, Search, CheckCircle, Truck, Replace, Pencil, ArrowLeftRight, Loader2 } from 'lucide-react';
 import { toast } from 'sonner';
 
 const RETURN_REASONS = [
@@ -39,6 +39,7 @@ const STATUS_CONFIG: Record<ReturnRecord['status'], { label: string; color: stri
   refunded: { label: 'Refunded', color: 'bg-green-100 text-green-800 border-green-300' },
   rejected: { label: 'Rejected', color: 'bg-red-100 text-red-800 border-red-300' },
   replacement: { label: 'Replacement', color: 'bg-purple-100 text-purple-800 border-purple-300' },
+  swap: { label: 'Swap — awaiting item', color: 'bg-orange-100 text-orange-800 border-orange-300' },
 };
 
 function genId() {
@@ -71,14 +72,20 @@ export function ReturnsManager() {
   }, [searchParams]);
   const [statusFilter, setStatusFilter] = useState<string>('all');
   const [tab, setTab] = useState<'open' | 'closed'>('open');
-  const [showForm, setShowForm] = useState(false);
+  // Quick-action deep link (?new=1&order=&buyer=&kind=&notes=) opens the form prefilled.
+  const [showForm, setShowForm] = useState(() => searchParams.get('new') === '1');
 
-  // Replacement dialog
+  // Replacement / swap dialog — swap = send the replacement before the faulty item comes back
   const [replaceReturn, setReplaceReturn] = useState<ReturnRecord | null>(null);
+  const [replaceMode, setReplaceMode] = useState<'replacement' | 'swap'>('replacement');
   const [replacementItemTitle, setReplacementItemTitle] = useState('');
   const [replacementQty, setReplacementQty] = useState('1');
   const [replacementNotes, setReplacementNotes] = useState('');
   const [replacementImageUrls, setReplacementImageUrls] = useState<string[]>([]);
+  const [swapMethod, setSwapMethod] = useState<'collection' | 'label'>('collection');
+  const [swapWeight, setSwapWeight] = useState('1');
+  const [swapEmailLabel, setSwapEmailLabel] = useState(true);
+  const [swapSubmitting, setSwapSubmitting] = useState(false);
 
   // Receive dialog
   const [receiveReturn, setReceiveReturn] = useState<ReturnRecord | null>(null);
@@ -102,15 +109,32 @@ export function ReturnsManager() {
 
   // New return form
   const [newReturnId, setNewReturnId] = useState('');
-  const [orderSearch, setOrderSearch] = useState('');
+  const [orderSearch, setOrderSearch] = useState(() =>
+    searchParams.get('new') === '1' ? (searchParams.get('order') || searchParams.get('buyer') || '') : ''
+  );
   const [selectedOrderId, setSelectedOrderId] = useState('');
   const [reason, setReason] = useState(RETURN_REASONS[0]);
-  const [notes, setNotes] = useState('');
+  const [notes, setNotes] = useState(() => {
+    if (searchParams.get('new') !== '1') return '';
+    const seed = searchParams.get('notes') || '';
+    const prefix = { return: 'Return requested', refund: 'Refund requested', cancel: 'Cancellation requested' }[searchParams.get('kind') || ''] || '';
+    return [prefix, seed].filter(Boolean).join(' — ');
+  });
   const [refundAmount, setRefundAmount] = useState('');
   const [responsibleDepartment, setResponsibleDepartment] = useState<Department | ''>('');
   const [responsibleUserId, setResponsibleUserId] = useState('');
   const [returnTrackingNumber, setReturnTrackingNumber] = useState('');
   const [returnImageUrls, setReturnImageUrls] = useState<string[]>([]);
+
+  // Deep link auto-select: once orders load, match the order number from the URL.
+  useEffect(() => {
+    if (searchParams.get('new') !== '1' || selectedOrderId) return;
+    const orderQ = searchParams.get('order');
+    if (!orderQ) return;
+    const match = orders.find((o) => o.salesRecordNumber === orderQ || o.orderNumber === orderQ);
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    if (match) setSelectedOrderId(match.id);
+  }, [orders, selectedOrderId, searchParams]);
 
   const orderSuggestions = useMemo(() => {
     if (!orderSearch.trim()) return [];
@@ -125,7 +149,7 @@ export function ReturnsManager() {
       .slice(0, 6);
   }, [orders, orderSearch]);
 
-  const openStatuses: ReturnRecord['status'][] = ['pending', 'received'];
+  const openStatuses: ReturnRecord['status'][] = ['pending', 'received', 'swap'];
   const closedStatuses: ReturnRecord['status'][] = ['refunded', 'rejected', 'replacement'];
 
   const filteredReturns = useMemo(() => {
@@ -189,7 +213,61 @@ export function ReturnsManager() {
     setReturnImageUrls([]);
   };
 
-  const handleCreateReplacement = () => {
+  const closeReplaceDialog = () => {
+    setReplaceReturn(null);
+    setReplacementItemTitle('');
+    setReplacementQty('1');
+    setReplacementNotes('');
+    setReplacementImageUrls([]);
+    setSwapMethod('collection');
+    setSwapWeight('1');
+    setSwapEmailLabel(true);
+  };
+
+  // Books the DPD collection or issues a return label for the faulty item on a swap.
+  const initiateSwapReturn = async (ret: ReturnRecord) => {
+    const order = orders.find((o) => o.id === ret.orderId);
+    if (!order) throw new Error('Original order not found — issue the DPD return manually');
+    const endpoint = swapMethod === 'collection' ? '/api/dpd/create-collection' : '/api/dpd/create-return';
+    const res = await fetch(endpoint, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        weight: parseFloat(swapWeight) || 1,
+        reference: order.salesRecordNumber,
+        ...(swapMethod === 'label' ? { sendEmail: swapEmailLabel } : {}),
+        customer: {
+          name: order.postToName || order.buyerName,
+          phone: order.postToPhone,
+          email: order.buyerEmail,
+          address1: order.postToAddress1,
+          address2: order.postToAddress2,
+          city: order.postToCity,
+          county: order.postToCounty,
+          postcode: order.postToPostcode,
+          country: order.postToCountry,
+        },
+      }),
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.message || 'DPD request failed');
+    updateReturn(ret.id, {
+      swapReturnMethod: swapMethod,
+      returnTrackingNumber: data.trackingNumber || ret.returnTrackingNumber,
+    });
+    // Return labels come back printable — open the print window straight away.
+    if (swapMethod === 'label' && data.labelHtml) {
+      const win = window.open('', '_swap_return_label');
+      if (win) {
+        win.document.write(`<html><body style="margin:0">${data.labelHtml}</body></html>`);
+        win.document.close();
+        win.onload = () => win.print();
+      }
+    }
+    return data;
+  };
+
+  const handleCreateReplacement = async () => {
     if (!replaceReturn) return;
     const title = replacementItemTitle.trim();
     if (!title) { toast.error('Enter replacement item title'); return; }
@@ -203,15 +281,28 @@ export function ReturnsManager() {
       imageUrls: replacementImageUrls.length > 0 ? replacementImageUrls : undefined,
     };
     addReplacementItem(replaceReturn.id, item);
-    processReturn(replaceReturn.id, 'replacement', currentUser?.id || '', currentUser?.name || '');
+    processReturn(replaceReturn.id, replaceMode, currentUser?.id || '', currentUser?.name || '');
     const newOrder = createReplacementOrder(replaceReturn.id);
 
-    toast.success(`Replacement order #${newOrder.salesRecordNumber} created`);
-    setReplaceReturn(null);
-    setReplacementItemTitle('');
-    setReplacementQty('1');
-    setReplacementNotes('');
-    setReplacementImageUrls([]);
+    if (replaceMode === 'swap') {
+      setSwapSubmitting(true);
+      try {
+        const data = await initiateSwapReturn(replaceReturn);
+        toast.success(
+          swapMethod === 'collection'
+            ? `Swap order #${newOrder.salesRecordNumber} created — DPD collection booked (${data.trackingNumber})`
+            : `Swap order #${newOrder.salesRecordNumber} created — DPD return label issued (${data.trackingNumber})`
+        );
+      } catch (err) {
+        // The swap order exists either way — the DPD return can be issued again from the order.
+        toast.error(`Swap order #${newOrder.salesRecordNumber} created, but DPD failed: ${err instanceof Error ? err.message : 'unknown error'}`);
+      } finally {
+        setSwapSubmitting(false);
+      }
+    } else {
+      toast.success(`Replacement order #${newOrder.salesRecordNumber} created`);
+    }
+    closeReplaceDialog();
   };
 
   const totalRefunded = returns
@@ -232,8 +323,8 @@ export function ReturnsManager() {
       </div>
 
       {/* Summary */}
-      <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
-        {(['pending', 'received', 'refunded', 'rejected', 'replacement'] as ReturnRecord['status'][]).map((s) => {
+      <div className="grid grid-cols-2 md:grid-cols-6 gap-4">
+        {(['pending', 'received', 'swap', 'refunded', 'rejected', 'replacement'] as ReturnRecord['status'][]).map((s) => {
           const cfg = STATUS_CONFIG[s];
           const count = returns.filter((r) => r.status === s).length;
           return (
@@ -501,7 +592,7 @@ export function ReturnsManager() {
                         >
                           <Pencil className="h-3 w-3 mr-1" />Edit
                         </Button>
-                        {ret.status === 'pending' && (
+                        {(ret.status === 'pending' || ret.status === 'swap') && (
                           <Button size="sm" variant="outline" className="h-6 text-xs px-2"
                             onClick={() => { setReceiveReturn(ret); setReceiveNotes(ret.receivedNotes || ''); }}>
                             <Truck className="h-3 w-3 mr-1" />Received
@@ -511,10 +602,22 @@ export function ReturnsManager() {
                           <Button size="sm" variant="outline" className="h-6 text-xs px-2 text-purple-700 border-purple-300"
                             onClick={() => {
                               const orig = orders.find(o => o.id === ret.orderId);
+                              setReplaceMode('replacement');
                               setReplaceReturn(ret);
                               setReplacementItemTitle(orig?.itemTitle || ret.itemTitle);
                             }}>
                             <Replace className="h-3 w-3 mr-1" />Replace
+                          </Button>
+                        )}
+                        {ret.status === 'pending' && (
+                          <Button size="sm" variant="outline" className="h-6 text-xs px-2 text-orange-700 border-orange-300"
+                            onClick={() => {
+                              const orig = orders.find(o => o.id === ret.orderId);
+                              setReplaceMode('swap');
+                              setReplaceReturn(ret);
+                              setReplacementItemTitle(orig?.itemTitle || ret.itemTitle);
+                            }}>
+                            <ArrowLeftRight className="h-3 w-3 mr-1" />Swap
                           </Button>
                         )}
                         {(ret.status === 'pending' || ret.status === 'received') && (
@@ -540,12 +643,20 @@ export function ReturnsManager() {
       {replaceReturn && (() => {
         const origOrder = orders.find(o => o.id === replaceReturn.orderId);
         return (
-          <Dialog open onOpenChange={(open) => { if (!open) setReplaceReturn(null); }}>
-            <DialogContent className="sm:max-w-lg">
+          <Dialog open onOpenChange={(open) => { if (!open && !swapSubmitting) closeReplaceDialog(); }}>
+            <DialogContent className="sm:max-w-lg max-h-[90vh] overflow-y-auto">
               <DialogHeader>
-                <DialogTitle>Create Replacement — #{replaceReturn.salesRecordNumber}</DialogTitle>
+                <DialogTitle>
+                  {replaceMode === 'swap' ? 'Create Swap' : 'Create Replacement'} — #{replaceReturn.salesRecordNumber}
+                </DialogTitle>
               </DialogHeader>
               <div className="space-y-3 py-2">
+                {replaceMode === 'swap' && (
+                  <div className="bg-orange-50 border border-orange-200 rounded-lg p-3 text-xs text-orange-800">
+                    The replacement is dispatched <strong>before</strong> the faulty item comes back.
+                    A DPD collection or return label is created for the faulty item straight away.
+                  </div>
+                )}
                 {/* Original order details */}
                 {origOrder && (
                   <div className="bg-slate-50 border border-slate-200 rounded-lg p-3 text-xs space-y-1">
@@ -596,10 +707,45 @@ export function ReturnsManager() {
                     onChange={setReplacementImageUrls}
                   />
                 </div>
+                {replaceMode === 'swap' && (
+                  <div className="border-t pt-3 space-y-3">
+                    <p className="text-xs font-semibold text-slate-600">Faulty item return via DPD</p>
+                    <div className="grid grid-cols-2 gap-2">
+                      <button type="button" onClick={() => setSwapMethod('collection')}
+                        className={`rounded-md border text-xs font-medium py-2 px-2 text-left ${swapMethod === 'collection' ? 'bg-orange-600 text-white border-orange-600' : 'bg-white text-slate-600 border-slate-300 hover:bg-slate-50'}`}>
+                        <span className="block font-semibold">DPD Collection</span>
+                        <span className={`block mt-0.5 ${swapMethod === 'collection' ? 'text-orange-100' : 'text-slate-400'}`}>Driver collects from the customer</span>
+                      </button>
+                      <button type="button" onClick={() => setSwapMethod('label')}
+                        className={`rounded-md border text-xs font-medium py-2 px-2 text-left ${swapMethod === 'label' ? 'bg-orange-600 text-white border-orange-600' : 'bg-white text-slate-600 border-slate-300 hover:bg-slate-50'}`}>
+                        <span className="block font-semibold">Return Label</span>
+                        <span className={`block mt-0.5 ${swapMethod === 'label' ? 'text-orange-100' : 'text-slate-400'}`}>Customer drops off at a DPD point</span>
+                      </button>
+                    </div>
+                    <div className="flex items-end gap-3">
+                      <div>
+                        <label className="text-xs text-slate-500 block mb-1">Weight (kg)</label>
+                        <Input type="number" min={0.1} step={0.1} value={swapWeight}
+                          onChange={(e) => setSwapWeight(e.target.value)} className="w-24" />
+                      </div>
+                      {swapMethod === 'label' && (
+                        <button type="button" onClick={() => setSwapEmailLabel((v) => !v)}
+                          className={`rounded-md border text-xs font-medium py-2 px-3 ${swapEmailLabel ? 'bg-blue-600 text-white border-blue-600' : 'bg-white text-slate-600 border-slate-300 hover:bg-slate-50'}`}>
+                          Email label to customer
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                )}
               </div>
               <DialogFooter>
-                <Button variant="outline" onClick={() => setReplaceReturn(null)}>Cancel</Button>
-                <Button onClick={handleCreateReplacement}>Create Replacement Order</Button>
+                <Button variant="outline" onClick={closeReplaceDialog} disabled={swapSubmitting}>Cancel</Button>
+                <Button onClick={handleCreateReplacement} disabled={swapSubmitting}
+                  className={replaceMode === 'swap' ? 'bg-orange-600 hover:bg-orange-700' : undefined}>
+                  {swapSubmitting
+                    ? <><Loader2 className="h-4 w-4 mr-1.5 animate-spin" /> Booking DPD…</>
+                    : replaceMode === 'swap' ? 'Create Swap & Book DPD' : 'Create Replacement Order'}
+                </Button>
               </DialogFooter>
             </DialogContent>
           </Dialog>
@@ -617,6 +763,11 @@ export function ReturnsManager() {
               <div className="bg-slate-50 border border-slate-200 rounded-lg p-3 text-xs">
                 <p className="font-medium">{receiveReturn.itemTitle}</p>
                 <p className="text-slate-500 mt-0.5">Reason: {receiveReturn.reason}</p>
+                {receiveReturn.status === 'swap' && (
+                  <p className="text-orange-700 mt-1 font-medium">
+                    Swap — receiving the faulty item back completes this swap.
+                  </p>
+                )}
               </div>
               <div>
                 <label className="text-xs text-slate-500 block mb-1">Receipt comments (condition, notes…)</label>
@@ -632,8 +783,14 @@ export function ReturnsManager() {
             <DialogFooter>
               <Button variant="outline" onClick={() => setReceiveReturn(null)}>Cancel</Button>
               <Button onClick={() => {
-                updateReturn(receiveReturn.id, { status: 'received', receivedNotes: receiveNotes.trim() || undefined });
-                toast.success('Return marked as received');
+                if (receiveReturn.status === 'swap') {
+                  // Faulty item is back — the swap is complete, close it out as a replacement.
+                  updateReturn(receiveReturn.id, { status: 'replacement', receivedNotes: receiveNotes.trim() || undefined });
+                  toast.success('Faulty item received — swap complete');
+                } else {
+                  updateReturn(receiveReturn.id, { status: 'received', receivedNotes: receiveNotes.trim() || undefined });
+                  toast.success('Return marked as received');
+                }
                 setReceiveReturn(null);
               }}>
                 Confirm Received
@@ -811,8 +968,9 @@ export function ReturnsManager() {
                   responsibleUserName: editResponsibleUserId ? users.find((u) => u.id === editResponsibleUserId)?.name : undefined,
                   imageUrls: editImageUrls.length > 0 ? editImageUrls : undefined,
                 });
-                if (editStatus === 'refunded' || editStatus === 'replacement') {
-                  processReturn(editReturn.id, editStatus === 'refunded' ? 'refund' : 'replacement', currentUser?.id || '', currentUser?.name || '');
+                if (editStatus === 'refunded' || editStatus === 'replacement' || editStatus === 'swap') {
+                  const resolution = editStatus === 'refunded' ? 'refund' : editStatus === 'swap' ? 'swap' : 'replacement';
+                  processReturn(editReturn.id, resolution, currentUser?.id || '', currentUser?.name || '');
                 }
                 toast.success('Return updated');
                 setEditReturn(null);
