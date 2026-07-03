@@ -184,6 +184,11 @@ export function CSVImport() {
   const [temuFetching, setTemuFetching] = useState(false);
   const [temuDays, setTemuDays] = useState(7);
 
+  // OnBuy direct import state
+  const [onbuyConnected, setOnbuyConnected] = useState<boolean | null>(null);
+  const [onbuyFetching, setOnbuyFetching] = useState(false);
+  const [onbuyDays, setOnbuyDays] = useState(7);
+
   const addOrders = useOrderStore((s) => s.addOrders);
   const updateOrderCategory = useOrderStore((s) => s.updateOrderCategory);
   const [aiCategorising, setAiCategorising] = useState(false);
@@ -203,6 +208,7 @@ export function CSVImport() {
     }
     checkBackmarketStatus();
     checkTemuStatus();
+    checkOnbuyStatus();
   }, []);
 
   async function checkBackmarketStatus() {
@@ -286,6 +292,48 @@ export function CSVImport() {
       toast.error(`Failed to fetch Temu orders: ${e instanceof Error ? e.message : 'Unknown error'}`);
     } finally {
       setTemuFetching(false);
+    }
+  }
+
+  async function checkOnbuyStatus() {
+    try {
+      const res = await fetch('/api/onbuy/status');
+      if (res.ok) {
+        const data = await res.json() as { connected: boolean };
+        setOnbuyConnected(data.connected);
+      } else {
+        setOnbuyConnected(false);
+      }
+    } catch {
+      setOnbuyConnected(false);
+    }
+  }
+
+  async function handleOnbuyImport() {
+    setOnbuyFetching(true);
+    try {
+      const res = await fetch(`/api/onbuy/orders?days=${onbuyDays}`);
+      if (res.status === 401) {
+        setOnbuyConnected(false);
+        toast.error('OnBuy credentials not configured. Set ONBUY_CONSUMER_KEY and ONBUY_SECRET_KEY.');
+        return;
+      }
+      if (!res.ok) {
+        const err = await res.json() as { message?: string };
+        toast.error(`OnBuy API error: ${err.message || res.statusText}`);
+        return;
+      }
+      const data = await res.json() as { orders: Order[]; batch: Batch };
+      if (data.orders.length === 0) {
+        toast.info('No orders found in OnBuy for this period.');
+        return;
+      }
+      setPreview({ orders: data.orders, format: 'onbuy', fileName: data.batch.name });
+      toast.success(`Fetched ${data.orders.length} orders from OnBuy`);
+    } catch (e) {
+      toast.error(`Failed to fetch OnBuy orders: ${e instanceof Error ? e.message : 'Unknown error'}`);
+    } finally {
+      setOnbuyFetching(false);
     }
   }
 
@@ -609,6 +657,53 @@ export function CSVImport() {
               >
                 <RefreshCw className={`h-3.5 w-3.5 mr-1.5 ${temuFetching ? 'animate-spin' : ''}`} />
                 {temuFetching ? 'Fetching...' : 'Fetch Orders'}
+              </Button>
+            </div>
+          </div>
+        </CardContent>
+      </Card>
+
+      {/* OnBuy Direct Import */}
+      <Card className="border-teal-200 bg-teal-50">
+        <CardContent className="pt-5">
+          <div className="flex items-center justify-between flex-wrap gap-3">
+            <div className="flex items-center gap-3">
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img src="/onbuy.svg" alt="OnBuy" className="h-6 w-auto object-contain" />
+              <div>
+                <p className="font-semibold text-slate-800">Import from OnBuy</p>
+                <p className="text-xs text-slate-500">Fetch orders directly via the OnBuy v2 API</p>
+              </div>
+              {onbuyConnected === true && (
+                <span className="flex items-center gap-1 text-xs text-green-700 bg-green-100 border border-green-300 rounded-full px-2 py-0.5">
+                  <Wifi className="h-3 w-3" /> Connected
+                </span>
+              )}
+              {onbuyConnected === false && (
+                <span className="flex items-center gap-1 text-xs text-red-700 bg-red-100 border border-red-300 rounded-full px-2 py-0.5">
+                  <WifiOff className="h-3 w-3" /> Not configured
+                </span>
+              )}
+            </div>
+            <div className="flex items-center gap-2">
+              <label className="text-xs text-slate-600">Last</label>
+              <select
+                value={onbuyDays}
+                onChange={(e) => setOnbuyDays(Number(e.target.value))}
+                className="h-8 border rounded px-2 text-xs bg-white"
+              >
+                {[1, 3, 7, 14, 30].map((d) => (
+                  <option key={d} value={d}>{d} days</option>
+                ))}
+              </select>
+              <Button
+                size="sm"
+                className="bg-teal-600 hover:bg-teal-700 text-white"
+                onClick={handleOnbuyImport}
+                disabled={onbuyFetching || !onbuyConnected}
+              >
+                <RefreshCw className={`h-3.5 w-3.5 mr-1.5 ${onbuyFetching ? 'animate-spin' : ''}`} />
+                {onbuyFetching ? 'Fetching...' : 'Fetch Orders'}
               </Button>
             </div>
           </div>
