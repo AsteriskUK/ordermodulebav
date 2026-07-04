@@ -143,7 +143,7 @@ export async function GET(req: NextRequest) {
     const token = await getAccessToken();
     if (token) {
       const res = await fetch(
-        `${MSG_BASE}/conversation/${conversationId}?conversation_type=${conversationType}&limit=100`,
+        `${MSG_BASE}/conversation/${conversationId}?conversation_type=${conversationType}&limit=50`,
         { headers: ebayHeaders(token) }
       );
       if (res.ok) {
@@ -167,12 +167,22 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ messages: messages ?? [] });
   }
 
-  const { data: messages } = await supabase
-    .from('ebay_messages')
-    .select('*')
-    .order('sent_at', { ascending: false })
-    .limit(1000);
-  return NextResponse.json({ messages: messages ?? [] });
+  // Supabase caps a single response at 1000 rows, so page through all messages —
+  // otherwise older conversations drop off the list as active ones accumulate.
+  const PAGE = 1000;
+  const MAX = 30000;
+  const all: Record<string, unknown>[] = [];
+  for (let from = 0; from < MAX; from += PAGE) {
+    const { data } = await supabase
+      .from('ebay_messages')
+      .select('*')
+      .order('sent_at', { ascending: false })
+      .range(from, from + PAGE - 1);
+    if (!data || data.length === 0) break;
+    all.push(...data);
+    if (data.length < PAGE) break;
+  }
+  return NextResponse.json({ messages: all });
 }
 
 // Incremental sync of one conversation type (FROM_MEMBERS = client, FROM_EBAY =
