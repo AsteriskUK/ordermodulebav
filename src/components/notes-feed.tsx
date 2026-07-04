@@ -361,9 +361,10 @@ export function NotesFeed() {
 
   const activeIsBm = activeConvo?.conversation_type === 'BACKMARKET';
   // For BackMarket, prefer the matched order's product title over the SAV reason.
+  // For eBay, fall back to the matched order's product when eBay gives no listing.
   const contextTitle = activeIsBm
     ? (relatedOrder?.itemTitle || activeConvo?.item_title || 'BackMarket order')
-    : (listing?.title || activeConvo?.item_title || 'Listing');
+    : (listing?.title || activeConvo?.item_title || relatedOrder?.itemTitle || 'Listing');
 
   const unreadTotal = useMemo(() => conversations.reduce((s, c) => s + c.unreadCount, 0), [conversations]);
 
