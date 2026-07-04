@@ -14,7 +14,6 @@ import {
   PackageOpen,
   PackageMinus,
   BarChart2,
-  LogOut,
   ChevronLeft,
   ChevronRight,
   MessageSquare,
@@ -144,43 +143,11 @@ export function Sidebar({ collapsed, onToggle, onNavigate }: { collapsed: boolea
           );
         })}
       </nav>
-      <div className="p-4 border-t border-slate-700 space-y-3">
-        {currentUser ? (
-          <>
-            <div className="flex items-center gap-2">
-              <div className="h-7 w-7 rounded-full bg-blue-600 flex items-center justify-center text-xs font-bold shrink-0">
-                {currentUser.name.charAt(0).toUpperCase()}
-              </div>
-              {!collapsed && (
-                <div className="flex-1 min-w-0">
-                  <p className="text-xs font-medium text-slate-300 truncate">{currentUser.name}</p>
-                  <p className="text-xs text-slate-500 capitalize">{currentUser.role}</p>
-                </div>
-              )}
-            </div>
-            {!collapsed && !isAdminOrManager && userDepts.length > 0 && (
-              <div className="flex flex-wrap gap-1">
-                {userDepts.map((d) => (
-                  <span key={d} className={`text-[10px] px-1.5 py-0.5 rounded border font-medium ${DEPARTMENT_CONFIG[d]?.color ?? ''}`}>
-                    {DEPARTMENT_CONFIG[d]?.label ?? d}
-                  </span>
-                ))}
-              </div>
-            )}
-            {!collapsed && (
-              <button
-                onClick={() => setCurrentUser(null)}
-                className="flex items-center gap-2 w-full px-2 py-1.5 rounded-md text-xs text-slate-400 hover:text-white hover:bg-slate-700 transition-colors"
-              >
-                <LogOut className="h-3.5 w-3.5" />
-                Sign out
-              </button>
-            )}
-          </>
-        ) : (
-          !collapsed && <p className="text-xs text-slate-500">v1.0 — Core Module</p>
-        )}
-      </div>
+      {!collapsed && (
+        <div className="p-4 border-t border-slate-700">
+          <p className="text-xs text-slate-500">v1.0 — Core Module</p>
+        </div>
+      )}
     </aside>
   );
 }

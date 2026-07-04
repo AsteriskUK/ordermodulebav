@@ -31,7 +31,7 @@ const TYPE_META = {
 } as const;
 
 export function FeedbackList() {
-  const [filter, setFilter] = useState<Filter>('NEGATIVE');
+  const [filter, setFilter] = useState<Filter>('ALL');
   const [rows, setRows] = useState<FeedbackRow[]>([]);
   const [loading, setLoading] = useState(false);
   const [syncing, setSyncing] = useState(false);
@@ -81,10 +81,10 @@ export function FeedbackList() {
   }
 
   const FILTERS: { key: Filter; label: string }[] = [
-    { key: 'NEGATIVE', label: `Negative${counts.NEGATIVE ? ` (${counts.NEGATIVE})` : ''}` },
+    { key: 'ALL', label: `All${(counts.NEGATIVE + counts.NEUTRAL + counts.POSITIVE) ? ` (${counts.NEGATIVE + counts.NEUTRAL + counts.POSITIVE})` : ''}` },
     { key: 'NEUTRAL', label: `Neutral${counts.NEUTRAL ? ` (${counts.NEUTRAL})` : ''}` },
     { key: 'POSITIVE', label: `Positive${counts.POSITIVE ? ` (${counts.POSITIVE})` : ''}` },
-    { key: 'ALL', label: 'All' },
+    { key: 'NEGATIVE', label: `Negative${counts.NEGATIVE ? ` (${counts.NEGATIVE})` : ''}` },
   ];
 
   return (
