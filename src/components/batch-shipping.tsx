@@ -422,6 +422,17 @@ export function BatchShipping() {
   const fedexOrders = useMemo(() => exportableOrders.filter((o) => o.deliveryCarrier === 'FedEx'), [exportableOrders]);
   const expressOrders = useMemo(() => exportableOrders.filter((o) => o.deliveryType === 'express'), [exportableOrders]);
 
+  // The set the action bar acts on: the current selection if any, otherwise the
+  // set implied by the active carrier filter (so filter→FedEx then "Book Labels"
+  // books all FedEx). One bar, actions adapt to context.
+  const targetOrders = useMemo(() => {
+    if (selectedIds.size > 0) return exportableOrders.filter((o) => selectedIds.has(o.id));
+    if (filterCarrier === 'DPD') return dpdOrders;
+    if (filterCarrier === 'FedEx') return fedexOrders;
+    if (filterCarrier === 'express') return expressOrders;
+    return exportableOrders;
+  }, [selectedIds, exportableOrders, dpdOrders, fedexOrders, expressOrders, filterCarrier]);
+
   const bundleGroups = useMemo(
     () => groupOrdersByBuyer(exportableOrders),
     [exportableOrders]
@@ -489,13 +500,9 @@ export function BatchShipping() {
     }
   };
 
-  const handleExport = () => {
-    const selected = exportableOrders.filter((o) => selectedIds.has(o.id));
-    if (selected.length === 0) {
-      toast.error('Select orders to export for shipping');
-      return;
-    }
-    const csv = generateCarrierCSV(selected, selectedCarrier);
+  const handleExport = (orders: typeof exportableOrders) => {
+    if (orders.length === 0) { toast.error('No orders to export'); return; }
+    const csv = generateCarrierCSV(orders, selectedCarrier);
     const blob = new Blob([csv], { type: 'text/csv' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
@@ -503,7 +510,7 @@ export function BatchShipping() {
     a.download = `${selectedCarrier}_batch_ship_${new Date().toISOString().slice(0, 10)}.csv`;
     a.click();
     URL.revokeObjectURL(url);
-    toast.success(`Exported ${selected.length} orders as ${selectedCarrier} CSV`);
+    toast.success(`Exported ${orders.length} orders as ${selectedCarrier} CSV`);
   };
 
   const handleExportBundles = () => {
@@ -594,13 +601,10 @@ export function BatchShipping() {
     }
   };
 
-  const handleMarkShipped = () => {
-    if (selectedIds.size === 0) {
-      toast.error('Select orders first');
-      return;
-    }
-    bulkUpdateStatus(Array.from(selectedIds), 'shipped');
-    toast.success(`Marked ${selectedIds.size} orders as shipped`);
+  const handleMarkShipped = (orders: typeof exportableOrders) => {
+    if (orders.length === 0) { toast.error('No orders to mark'); return; }
+    bulkUpdateStatus(orders.map((o) => o.id), 'shipped');
+    toast.success(`Marked ${orders.length} orders as shipped`);
     setSelectedIds(new Set());
   };
 
@@ -641,12 +645,12 @@ export function BatchShipping() {
             size="sm"
             variant="outline"
             className="border-emerald-300 text-emerald-700 hover:bg-emerald-50"
-            onClick={() => handleFetchRates(selectedIds.size > 0 ? exportableOrders.filter((o) => selectedIds.has(o.id)) : exportableOrders)}
+            onClick={() => handleFetchRates(targetOrders)}
             disabled={fetchingRates || exportableOrders.length === 0}
             title="Estimate label costs (DPD from rate card, FedEx live)"
           >
             {fetchingRates ? <Loader2 className="h-3 w-3 mr-1 animate-spin" /> : <PoundSterling className="h-3 w-3 mr-1" />}
-            {fetchingRates ? 'Pricing…' : selectedIds.size > 0 ? `Get Prices (${selectedIds.size})` : 'Get Prices'}
+            {fetchingRates ? 'Pricing…' : selectedIds.size > 0 ? `Get Label Prices (${selectedIds.size})` : 'Get Label Prices'}
           </Button>
         <div className="flex items-center gap-1 bg-slate-100 rounded-lg p-1 shrink-0">
           <button
@@ -761,100 +765,17 @@ export function BatchShipping() {
         </div>
       )}
 
-      {/* Quick export/book all by carrier */}
+      {/* Unified action bar — acts on the checked orders, else the filtered set.
+          Same buttons, counts/labels adapt to context. */}
       {!bundleMode && exportableOrders.length > 0 && (
-        <div className="flex flex-wrap items-center gap-2">
-          {dpdOrders.length > 0 && (
-            <>
-              <Button
-                size="sm"
-                variant="outline"
-                className="text-purple-700 border-purple-300 hover:bg-purple-50"
-                onClick={() => {
-                  const csv = generateCarrierCSV(dpdOrders, 'dpd');
-                  const blob = new Blob([csv], { type: 'text/csv' });
-                  const url = URL.createObjectURL(blob);
-                  const a = document.createElement('a');
-                  a.href = url;
-                  a.download = `dpd_all_${new Date().toISOString().slice(0, 10)}.csv`;
-                  a.click();
-                  URL.revokeObjectURL(url);
-                  toast.success(`Exported ${dpdOrders.length} DPD orders`);
-                }}
-              >
-                <Download className="h-3 w-3 mr-1" />
-                Export All DPD ({dpdOrders.length})
-              </Button>
-              <Button
-                size="sm"
-                className="bg-purple-600 hover:bg-purple-700 text-white"
-                disabled={bookingLabels}
-                onClick={() => handleBookLabels(dpdOrders)}
-              >
-                <Truck className="h-3 w-3 mr-1" />
-                {bookingLabels ? 'Booking...' : `Book Labels DPD (${dpdOrders.length})`}
-              </Button>
-              {(() => {
-                const { total, priced } = sumRates(dpdOrders);
-                return priced > 0 ? (
-                  <span className="text-xs text-slate-500 whitespace-nowrap" title="Estimated from DPD rate card">
-                    ~£{total.toFixed(2)} est{priced < dpdOrders.length ? ` (${priced}/${dpdOrders.length})` : ''}
-                  </span>
-                ) : null;
-              })()}
-            </>
-          )}
-          {fedexOrders.length > 0 && (
-            <>
-              <Button
-                size="sm"
-                variant="outline"
-                className="text-orange-700 border-orange-300 hover:bg-orange-50"
-                onClick={() => {
-                  const csv = generateCarrierCSV(fedexOrders, 'fedex');
-                  const blob = new Blob([csv], { type: 'text/csv' });
-                  const url = URL.createObjectURL(blob);
-                  const a = document.createElement('a');
-                  a.href = url;
-                  a.download = `fedex_all_${new Date().toISOString().slice(0, 10)}.csv`;
-                  a.click();
-                  URL.revokeObjectURL(url);
-                  toast.success(`Exported ${fedexOrders.length} FedEx orders`);
-                }}
-              >
-                <Download className="h-3 w-3 mr-1" />
-                Export All FedEx ({fedexOrders.length})
-              </Button>
-              <Button
-                size="sm"
-                className="bg-orange-500 hover:bg-orange-600 text-white"
-                disabled={bookingLabels}
-                onClick={() => handleBookLabels(fedexOrders)}
-              >
-                <Truck className="h-3 w-3 mr-1" />
-                {bookingLabels ? 'Booking...' : `Book Labels FedEx (${fedexOrders.length})`}
-              </Button>
-              {(() => {
-                const { total, priced } = sumRates(fedexOrders);
-                return priced > 0 ? (
-                  <span className="text-xs text-slate-500 whitespace-nowrap" title="Estimated from live FedEx quotes">
-                    ~£{total.toFixed(2)} est{priced < fedexOrders.length ? ` (${priced}/${fedexOrders.length})` : ''}
-                  </span>
-                ) : null;
-              })()}
-            </>
-          )}
-        </div>
-      )}
-
-      {/* Actions bar */}
-      {!bundleMode && selectedIds.size > 0 && (
-        <div className="flex items-center gap-3 p-3 bg-blue-50 border border-blue-200 rounded-lg">
-          <span className="text-sm font-medium text-blue-700">{selectedIds.size} orders selected</span>
+        <div className="flex flex-wrap items-center gap-2 p-3 bg-slate-50 border border-slate-200 rounded-lg">
+          <span className="text-sm font-medium text-slate-700 whitespace-nowrap">
+            {selectedIds.size > 0
+              ? `${selectedIds.size} selected`
+              : `All${filterCarrier === 'DPD' || filterCarrier === 'FedEx' || filterCarrier === 'express' ? ` ${filterCarrier}` : ''} (${targetOrders.length})`}
+          </span>
           <Select value={selectedCarrier} onValueChange={(value) => value && setSelectedCarrier(value)}>
-            <SelectTrigger className="w-[120px]">
-              <SelectValue placeholder="Select carrier" />
-            </SelectTrigger>
+            <SelectTrigger className="w-[110px] h-8 text-xs"><SelectValue /></SelectTrigger>
             <SelectContent>
               <SelectItem value="standard">Standard</SelectItem>
               <SelectItem value="dpd">DPD</SelectItem>
@@ -863,9 +784,7 @@ export function BatchShipping() {
           </Select>
           {selectedCarrier === 'dpd' && (
             <Select value={selectedDPDService} onValueChange={(value) => value && setSelectedDPDService(value as DPDService)}>
-              <SelectTrigger className="w-[150px]">
-                <SelectValue placeholder="Select service" />
-              </SelectTrigger>
+              <SelectTrigger className="w-[140px] h-8 text-xs"><SelectValue /></SelectTrigger>
               <SelectContent>
                 <SelectItem value="next_day">NEXT DAY</SelectItem>
                 <SelectItem value="by_1030">BY 10:30</SelectItem>
@@ -878,24 +797,29 @@ export function BatchShipping() {
               </SelectContent>
             </Select>
           )}
-          <Button size="sm" onClick={handleExport}>
-            <Download className="h-3 w-3 mr-1" />
-            Download {selectedCarrier === 'standard' ? 'Batch Ship' : selectedCarrier.toUpperCase()} CSV
+          <Button size="sm" variant="outline" onClick={() => handleExport(targetOrders)} disabled={targetOrders.length === 0}>
+            <Download className="h-3 w-3 mr-1" /> Export CSV ({targetOrders.length})
           </Button>
           <Button
             size="sm"
-            variant="outline"
-            className="border-green-400 text-green-700 hover:bg-green-50"
-            disabled={bookingLabels}
-            onClick={() => handleBookLabels(exportableOrders.filter((o) => selectedIds.has(o.id)))}
+            className="bg-green-600 hover:bg-green-700 text-white"
+            disabled={bookingLabels || targetOrders.length === 0}
+            onClick={() => handleBookLabels(targetOrders)}
           >
             <Truck className="h-3 w-3 mr-1" />
-            {bookingLabels ? 'Booking...' : 'Book Labels'}
+            {bookingLabels ? 'Booking…' : `Book Labels (${targetOrders.length})`}
           </Button>
-          <Button size="sm" variant="outline" onClick={handleMarkShipped}>
-            <Truck className="h-3 w-3 mr-1" />
-            Mark All as Shipped
+          <Button size="sm" variant="outline" onClick={() => handleMarkShipped(targetOrders)} disabled={targetOrders.length === 0}>
+            <Truck className="h-3 w-3 mr-1" /> Mark Shipped ({targetOrders.length})
           </Button>
+          {(() => {
+            const { total, priced } = sumRates(targetOrders);
+            return priced > 0 ? (
+              <span className="text-xs text-slate-500 whitespace-nowrap ml-auto" title="Estimated label cost (DPD rate card / FedEx live)">
+                ~£{total.toFixed(2)} est{priced < targetOrders.length ? ` (${priced}/${targetOrders.length})` : ''}
+              </span>
+            ) : null;
+          })()}
         </div>
       )}
 
