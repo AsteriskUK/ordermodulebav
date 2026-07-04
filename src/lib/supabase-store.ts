@@ -124,10 +124,16 @@ export async function syncBatch(batch: Batch, importedBy?: string): Promise<void
 // ==================== ORDERS ====================
 
 export async function fetchOrders(): Promise<Order[]> {
+  // Only the active working set — archived orders are history (viewed via the
+  // Historical Orders page, which queries the DB directly). Loading them here
+  // just bloats the store (Supabase caps a response at 1000 rows anyway).
   const { data, error } = await supabase
     .from('orders')
-    .select('*, order_notes(*)');
-  
+    .select('*, order_notes(*)')
+    .neq('status', 'archived')
+    .order('imported_at', { ascending: false })
+    .limit(3000);
+
   if (error) {
     console.error('Error fetching orders:', error);
     return [];

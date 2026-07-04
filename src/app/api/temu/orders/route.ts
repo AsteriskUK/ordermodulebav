@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { Batch, Order } from '@/lib/types';
+import { stableUuid } from '@/lib/utils';
 import {
   isTemuConfigured,
   fetchTemuOrders,
@@ -24,7 +25,7 @@ export async function GET(req: NextRequest) {
     const createAfter = Math.floor((Date.now() - daysBack * 24 * 60 * 60 * 1000) / 1000);
     const createBefore = Math.floor(Date.now() / 1000);
 
-    const batchId = `temu-${new Date().toISOString().slice(0, 10)}-${Date.now()}`;
+    const batchId = stableUuid(`temu-${new Date().toISOString().slice(0, 10)}-${Date.now()}`);
     const allItems: TemuPageItem[] = [];
     let pageNumber = 1;
     const pageSize = 100;

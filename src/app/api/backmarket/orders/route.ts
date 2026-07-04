@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { Order, Batch } from '@/lib/types';
+import { stableUuid } from '@/lib/utils';
 import { fetchBackmarketOrders, isBackmarketConfigured, mapBackmarketOrderToOrder } from '@/lib/backmarket-api';
 
 export async function GET(req: NextRequest) {
@@ -21,7 +22,7 @@ export async function GET(req: NextRequest) {
     const allOrders: Order[] = [];
     let page = 1;
     const pageSize = 50;
-    const batchId = `backmarket-${new Date().toISOString().slice(0, 10)}-${Date.now()}`;
+    const batchId = stableUuid(`backmarket-${new Date().toISOString().slice(0, 10)}-${Date.now()}`);
 
     const batch: Batch = {
       id: batchId,

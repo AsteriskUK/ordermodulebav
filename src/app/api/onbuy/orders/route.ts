@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { Batch, Order } from '@/lib/types';
+import { stableUuid } from '@/lib/utils';
 import {
   isOnBuyConfigured,
   getOnBuyCredentials,
@@ -28,7 +29,7 @@ export async function GET(req: NextRequest) {
     const status = searchParams.get('status') || 'all';
     const modifiedSince = onbuyDate(new Date(Date.now() - daysBack * 24 * 60 * 60 * 1000));
 
-    const batchId = `onbuy-${new Date().toISOString().slice(0, 10)}-${Date.now()}`;
+    const batchId = stableUuid(`onbuy-${new Date().toISOString().slice(0, 10)}-${Date.now()}`);
     const limit = 50;
     let offset = 0;
     const allRaw: OnBuyOrder[] = [];

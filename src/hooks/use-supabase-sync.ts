@@ -27,17 +27,15 @@ export function useSupabaseSync() {
     try {
       const data = await loadAllFromSupabase();
       const currentState = useOrderStore.getState();
-      
-      // Merge strategy: keep local data, add missing items from Supabase
-      // For orders/batches - local is source of truth (CSV imports happen locally)
-      // For HR data - Supabase is source of truth (attendance/leave from other devices)
-      
+
+      // Merge strategy: keep local data, add missing items from Supabase.
+      // Orders/batches — local is source of truth (imports happen locally and
+      // may not have synced to the DB yet). NEVER drop local orders here, or a
+      // just-imported (not-yet-synced) order is lost.
       const existingOrderIds = new Set(currentState.orders.map(o => o.id));
       const existingBatchIds = new Set(currentState.batches.map(b => b.id));
       const existingReturnIds = new Set(currentState.returns.map(r => r.id));
       const existingMissingIds = new Set(currentState.missingItems.map(m => m.id));
-
-      // Add any orders/batches/returns from Supabase that don't exist locally
       const newOrders = data.orders.filter(o => !existingOrderIds.has(o.id));
       const newBatches = data.batches.filter(b => !existingBatchIds.has(b.id));
       const newReturns = data.returns.filter(r => !existingReturnIds.has(r.id));
@@ -48,7 +46,7 @@ export function useSupabaseSync() {
         users: data.users.length > 0 ? data.users : currentState.users,
         // Batches: merge local + any from Supabase
         batches: [...currentState.batches, ...newBatches],
-        // Orders: merge local + any from Supabase
+        // Orders: merge local + any from Supabase (local never dropped)
         orders: [...currentState.orders, ...newOrders],
         // Returns: merge local + any from Supabase
         returns: [...currentState.returns, ...newReturns],

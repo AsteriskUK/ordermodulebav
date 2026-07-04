@@ -1,6 +1,7 @@
 import { Order } from './types';
 import { deriveShipping } from './csv-parser';
 import { deriveCategory } from './categoriser';
+import { stableUuid } from './utils';
 
 const ONBUY_API = 'https://api.onbuy.com/v2';
 
@@ -218,7 +219,7 @@ export function mapOnBuyOrderToOrders(o: OnBuyOrder, batchId: string): Order[] {
   if (products.length === 0) {
     return [{
       ...base,
-      id: `onbuy-${o.order_id}`,
+      id: stableUuid(`onbuy-${o.order_id}`),
       itemNumber: o.onbuy_internal_reference || '',
       itemTitle: '',
       customLabel: '',
@@ -239,7 +240,7 @@ export function mapOnBuyOrderToOrders(o: OnBuyOrder, batchId: string): Order[] {
     const delivery = idx === 0 ? num(o.price_delivery) : 0;
     return {
       ...base,
-      id: `onbuy-${o.order_id}-${p.onbuy_internal_reference || p.sku || idx}`,
+      id: stableUuid(`onbuy-${o.order_id}-${p.onbuy_internal_reference || p.sku || idx}`),
       itemNumber: String(p.onbuy_internal_reference || ''),
       itemTitle,
       customLabel: p.sku || '',

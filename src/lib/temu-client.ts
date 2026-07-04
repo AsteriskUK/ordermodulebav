@@ -2,6 +2,7 @@ import crypto from 'crypto';
 import { Order } from './types';
 import { deriveShipping } from './csv-parser';
 import { deriveCategory } from './categoriser';
+import { stableUuid } from './utils';
 
 const TEMU_API_URL = 'https://openapi-b-eu.temu.com/openapi/router';
 
@@ -306,7 +307,7 @@ export function mapTemuPageItemToOrders(
 
   if (lines.length === 0) {
     return [{
-      id: `temu-${parent.parentOrderSn}`,
+      id: stableUuid(`temu-${parent.parentOrderSn}`),
       salesRecordNumber: parent.parentOrderSn,
       orderNumber: parent.parentOrderSn,
       buyerUsername: '',
@@ -349,7 +350,7 @@ export function mapTemuPageItemToOrders(
     const category = deriveCategory(itemTitle);
 
     return {
-      id: `temu-${parent.parentOrderSn}-${line.orderSn || idx}`,
+      id: stableUuid(`temu-${parent.parentOrderSn}-${line.orderSn || idx}`),
       salesRecordNumber: parent.parentOrderSn,
       orderNumber: parent.parentOrderSn,
       buyerUsername: '',

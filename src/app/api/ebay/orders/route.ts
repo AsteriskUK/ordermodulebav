@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
 import { mapEbayOrderToOrder } from '@/lib/ebay-mapper';
 import { Order, Batch } from '@/lib/types';
+import { stableUuid } from '@/lib/utils';
 
 const BASE_URL = 'https://api.ebay.com';
 const TOKEN_URL = 'https://api.ebay.com/identity/v1/oauth2/token';
@@ -88,7 +89,7 @@ export async function GET(req: NextRequest) {
   const allOrders: Order[] = [];
   let offset = 0;
   const limit = 200;
-  const batchId = `ebay-${new Date().toISOString().slice(0, 10)}-${Date.now()}`;
+  const batchId = stableUuid(`ebay-${new Date().toISOString().slice(0, 10)}-${Date.now()}`);
 
   const batch: Batch = {
     id: batchId,

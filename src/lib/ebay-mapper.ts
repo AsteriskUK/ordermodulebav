@@ -1,6 +1,7 @@
 import { Order } from './types';
 import { deriveShipping } from './csv-parser';
 import { deriveCategory } from './categoriser';
+import { stableUuid } from './utils';
 
 interface EbayAddress {
   fullName?: string;
@@ -96,7 +97,7 @@ export function mapEbayOrderToOrder(ebayOrder: EbayOrder, batchId: string): Orde
     const category = deriveCategory(item.title);
 
     return {
-      id: `ebay-${ebayOrder.orderId}-${idx}`,
+      id: stableUuid(`ebay-${ebayOrder.orderId}-${idx}`),
       salesRecordNumber: ebayOrder.salesRecordReference || ebayOrder.legacyOrderId || ebayOrder.orderId,
       orderNumber: ebayOrder.orderId,
       buyerUsername,

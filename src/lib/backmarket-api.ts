@@ -1,6 +1,7 @@
 import { Order } from './types';
 import { deriveShipping } from './csv-parser';
 import { deriveCategory } from './categoriser';
+import { stableUuid } from './utils';
 
 const DEFAULT_BASE_URL = 'https://www.backmarket.fr';
 
@@ -293,7 +294,7 @@ export async function mapBackmarketOrderToOrder(
   if (orderlines.length === 0) {
     // No orderlines available; create a single order from the order summary
     return [{
-      id: `backmarket-${order.order_id}`,
+      id: stableUuid(`backmarket-${order.order_id}`),
       salesRecordNumber: String(order.order_id),
       orderNumber: String(order.order_id),
       buyerUsername: '',
@@ -355,7 +356,7 @@ export async function mapBackmarketOrderToOrder(
     const category = deriveCategory(itemTitle);
 
     return {
-      id: `backmarket-${order.order_id}-${line.id || idx}`,
+      id: stableUuid(`backmarket-${order.order_id}-${line.id || idx}`),
       salesRecordNumber: String(order.order_id),
       orderNumber: String(order.order_id),
       buyerUsername: '',
