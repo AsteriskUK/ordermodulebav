@@ -38,11 +38,51 @@ interface EbayMessage {
   contact_reason: string | null;
   message_text: string;
   media_urls: string[] | null;
-  conversation_type: string | null;   // FROM_MEMBERS (client) | FROM_EBAY (eBay)
+  conversation_type: string | null;   // FROM_MEMBERS (client) | FROM_EBAY (eBay) | BACKMARKET
   sent_by_id: string | null;
   sent_by_name: string | null;
   sent_at: string;
   status: string;
+  source?: 'ebay' | 'backmarket';
+}
+
+// A BackMarket message row as stored in Supabase / returned by /api/backmarket/messages.
+interface BmMessageRow {
+  id: string;
+  bm_message_id: string | null;
+  group_id: string | null;
+  order_id: string | null;
+  direction: 'sent' | 'received';
+  customer_name: string | null;
+  subject: string | null;
+  message_text: string;
+  media_urls: string[] | null;
+  sent_at: string;
+  status: string;
+}
+
+function bmRowToMessage(r: BmMessageRow): EbayMessage {
+  return {
+    id: r.id,
+    ebay_message_id: r.bm_message_id,
+    conversation_id: r.group_id,
+    direction: r.direction,
+    order_id: r.order_id ?? '',
+    item_id: null,
+    buyer_username: r.customer_name || 'BackMarket customer',
+    sender_username: null,
+    buyer_name: r.customer_name,
+    item_title: r.subject,
+    contact_reason: r.subject,
+    message_text: r.message_text,
+    media_urls: r.media_urls ?? [],
+    conversation_type: 'BACKMARKET',
+    sent_by_id: null,
+    sent_by_name: null,
+    sent_at: r.sent_at,
+    status: r.status,
+    source: 'backmarket',
+  };
 }
 
 interface Conversation {
@@ -97,7 +137,9 @@ export function NotesFeed() {
   const [ebayLoading, setEbayLoading] = useState(false);
   const [ebaySyncing, setEbaySyncing] = useState(false);
   const [activeKey, setActiveKey] = useState<string | null>(null);
-  const [ebayFilter, setEbayFilter] = useState<'all' | 'unread' | 'client' | 'ebay'>('all');
+  const [ebayFilter, setEbayFilter] = useState<'all' | 'unread' | 'client' | 'ebay' | 'backmarket'>('all');
+  const [bmMessages, setBmMessages] = useState<EbayMessage[]>([]);
+  const [bmSyncing, setBmSyncing] = useState(false);
   const [replyText, setReplyText] = useState('');
   const [replyImages, setReplyImages] = useState<string[]>([]);
   const [replySending, setReplySending] = useState(false);
@@ -137,11 +179,56 @@ export function NotesFeed() {
     }
   }
 
+  // BackMarket (SAV) messages — same shape, loaded/synced alongside eBay.
+  async function loadBmMessages() {
+    try {
+      const res = await fetch('/api/backmarket/messages');
+      if (res.ok) {
+        const data = await res.json() as { messages: BmMessageRow[] };
+        setBmMessages(data.messages.map(bmRowToMessage));
+      }
+    } catch { /* silent */ }
+  }
+  async function syncBmInbox() {
+    setBmSyncing(true);
+    try {
+      const res = await fetch('/api/backmarket/messages', { method: 'POST' });
+      if (res.ok) {
+        const data = await res.json() as { synced: number };
+        if (data.synced > 0) toast.success(`${data.synced} new BackMarket message${data.synced !== 1 ? 's' : ''} synced`);
+        await loadBmMessages();
+      }
+    } catch { /* silent */ } finally {
+      setBmSyncing(false);
+    }
+  }
+  const syncAllInboxes = () => { syncEbayInbox(); syncBmInbox(); };
+
   // Load the full message history for one conversation on demand.
   async function openConversation(convo: Conversation) {
     setActiveKey(convo.key);
     markRead(convo);
     if (!convo.conversation_id) return;
+
+    if (convo.conversation_type === 'BACKMARKET') {
+      try {
+        const res = await fetch(`/api/backmarket/messages?savId=${encodeURIComponent(convo.conversation_id)}`);
+        if (res.ok) {
+          const data = await res.json() as { messages: BmMessageRow[] };
+          const fresh = data.messages.map(bmRowToMessage);
+          setBmMessages((prev) => {
+            const byId = new Map(prev.map((m) => [m.id, m]));
+            for (const m of fresh) {
+              const existing = byId.get(m.id);
+              byId.set(m.id, existing && existing.status === 'read' && m.status === 'unread' ? { ...m, status: 'read' } : m);
+            }
+            return [...byId.values()];
+          });
+        }
+      } catch { /* silent */ }
+      return;
+    }
+
     try {
       const res = await fetch(`/api/ebay/messages/inbox?conversationId=${encodeURIComponent(convo.conversation_id)}&conversationType=${convo.conversation_type}`);
       if (res.ok) {
@@ -167,6 +254,8 @@ export function NotesFeed() {
       /* eslint-disable react-hooks/set-state-in-effect */
       loadEbayMessages();
       syncEbayInbox();
+      loadBmMessages();
+      syncBmInbox();
       /* eslint-enable react-hooks/set-state-in-effect */
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -202,10 +291,13 @@ export function NotesFeed() {
     return m.direction === 'sent';                              // fallback for un-backfilled rows
   }, [sellerUsername]);
 
-  // Group messages into conversations (by eBay conversation, falling back to buyer+order)
+  // eBay + BackMarket messages share one inbox list.
+  const allMessages = useMemo(() => [...ebayMessages, ...bmMessages], [ebayMessages, bmMessages]);
+
+  // Group messages into conversations (by eBay conversation / BackMarket thread, falling back to buyer+order)
   const conversations = useMemo<Conversation[]>(() => {
     const map = new Map<string, Conversation>();
-    for (const msg of ebayMessages) {
+    for (const msg of allMessages) {
       const key = msg.conversation_id ?? `${msg.buyer_username}::${msg.order_id}`;
       if (!map.has(key)) {
         map.set(key, {
@@ -231,7 +323,7 @@ export function NotesFeed() {
     return [...map.values()]
       .map(c => ({ ...c, messages: c.messages.sort((a, b) => a.sent_at.localeCompare(b.sent_at)) }))
       .sort((a, b) => b.lastAt.localeCompare(a.lastAt));
-  }, [ebayMessages, isOurs]);
+  }, [allMessages, isOurs]);
 
   const activeConvo = useMemo(
     () => conversations.find((c) => c.key === activeKey) ?? null,
@@ -253,12 +345,25 @@ export function NotesFeed() {
     return () => { alive = false; };
   }, [activeItemId]);
 
-  // Related order in our own system (matched by listing item id + buyer, else buyer)
+  // Related order in our own system.
+  // BackMarket threads carry the real order id → match it directly. eBay matches
+  // by listing item id + buyer, falling back to buyer.
   const relatedOrder = useMemo(() => {
     if (!activeConvo) return null;
+    if (activeConvo.conversation_type === 'BACKMARKET') {
+      const oid = activeConvo.order_id;
+      if (!oid) return null;
+      return orders.find((o) => !o.deletedAt && (o.salesRecordNumber === oid || o.orderNumber === oid || o.id === `backmarket-${oid}`)) ?? null;
+    }
     return orders.find((o) => !o.deletedAt && o.itemNumber && o.itemNumber === activeConvo.item_id && o.buyerUsername === activeConvo.buyer_username)
       ?? orders.find((o) => !o.deletedAt && o.buyerUsername === activeConvo.buyer_username) ?? null;
   }, [activeConvo, orders]);
+
+  const activeIsBm = activeConvo?.conversation_type === 'BACKMARKET';
+  // For BackMarket, prefer the matched order's product title over the SAV reason.
+  const contextTitle = activeIsBm
+    ? (relatedOrder?.itemTitle || activeConvo?.item_title || 'BackMarket order')
+    : (listing?.title || activeConvo?.item_title || 'Listing');
 
   const unreadTotal = useMemo(() => conversations.reduce((s, c) => s + c.unreadCount, 0), [conversations]);
 
@@ -267,7 +372,18 @@ export function NotesFeed() {
     if (ids.length === 0) return;
     // Skip the no-op case (marking read when nothing is unread)
     if (read && !convo.messages.some(m => m.direction === 'received' && m.status === 'unread')) return;
-    setEbayMessages(prev => prev.map(m => ids.includes(m.id) ? { ...m, status: read ? 'read' : 'unread' } : m));
+
+    const isBm = convo.conversation_type === 'BACKMARKET';
+    const setter = isBm ? setBmMessages : setEbayMessages;
+    setter(prev => prev.map(m => ids.includes(m.id) ? { ...m, status: read ? 'read' : 'unread' } : m));
+
+    if (isBm) {
+      await fetch('/api/backmarket/messages', {
+        method: 'PATCH', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ids, read }),
+      });
+      return;
+    }
     await fetch('/api/ebay/messages/inbox', {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
@@ -285,6 +401,25 @@ export function NotesFeed() {
     if (!activeConvo || (!replyText.trim() && replyImages.length === 0)) return;
     setReplySending(true);
     try {
+      // BackMarket reply → SAV thread (text only; attachments not supported on send here).
+      if (activeConvo.conversation_type === 'BACKMARKET') {
+        if (!replyText.trim()) { toast.error('Enter a message'); return; }
+        const res = await fetch('/api/backmarket/messages', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ savId: activeConvo.conversation_id, message: replyText }),
+        });
+        if (!res.ok) {
+          const err = await res.json().catch(() => ({})) as { message?: string };
+          toast.error(`Send failed: ${err.message || 'Unknown error'}`);
+          return;
+        }
+        toast.success('Reply sent');
+        setReplyText('');
+        setReplyImages([]);
+        await loadBmMessages();
+        return;
+      }
+
       const lastMsg = activeConvo.messages[activeConvo.messages.length - 1];
       const res = await fetch('/api/ebay/messages', {
         method: 'POST',
@@ -375,7 +510,7 @@ export function NotesFeed() {
             <MessageSquare className="h-6 w-6 text-blue-500" />
             Messages
           </h2>
-          <p className="text-slate-500 text-sm mt-1">Team notes and eBay buyer messages</p>
+          <p className="text-slate-500 text-sm mt-1">Team notes and eBay &amp; BackMarket messages</p>
         </div>
         {tab === 'ebay' && (
           <Button onClick={() => setShowNewEbayMsg(true)} className="bg-amber-600 hover:bg-amber-700 text-white">
@@ -403,7 +538,7 @@ export function NotesFeed() {
           onClick={() => { setTab('ebay'); setSearch(''); setActiveKey(null); }}
           className={`px-5 py-2 font-medium transition-colors flex items-center gap-1.5 ${tab === 'ebay' ? 'bg-amber-600 text-white' : 'bg-white text-slate-600 hover:bg-slate-50'}`}
         >
-          <img src={PLATFORM_LOGOS.ebay} alt="eBay" className="h-4 w-auto object-contain" />
+          <Inbox className="h-4 w-4" />
           Inbox
           {unreadTotal > 0 && <span className="ml-0.5 bg-red-500 text-white text-[10px] font-bold rounded-full px-1.5 py-0.5 leading-none">{unreadTotal}</span>}
         </button>
@@ -519,21 +654,24 @@ export function NotesFeed() {
               const filtered = conversations.filter((c) => {
                 if (search && !(c.buyer_username.toLowerCase().includes(search.toLowerCase()) || c.order_id.toLowerCase().includes(search.toLowerCase()) || (c.buyer_name ?? '').toLowerCase().includes(search.toLowerCase()))) return false;
                 if (ebayFilter === 'unread') return c.unreadCount > 0;
-                if (ebayFilter === 'client') return c.conversation_type !== 'FROM_EBAY';
+                if (ebayFilter === 'client') return c.conversation_type === 'FROM_MEMBERS';
                 if (ebayFilter === 'ebay') return c.conversation_type === 'FROM_EBAY';
+                if (ebayFilter === 'backmarket') return c.conversation_type === 'BACKMARKET';
                 return true;
               });
+              const bmCount = conversations.filter((c) => c.conversation_type === 'BACKMARKET').length;
               const FILTERS: { key: typeof ebayFilter; label: string }[] = [
                 { key: 'all', label: 'All' }, { key: 'unread', label: 'Unread' },
                 { key: 'client', label: 'Client' }, { key: 'ebay', label: 'eBay' },
+                ...(bmCount > 0 ? [{ key: 'backmarket' as const, label: 'BackMarket' }] : []),
               ];
               return (
                 <>
                   <div className="border-b shrink-0">
                     <div className="flex items-center justify-between px-3 py-2">
                       <p className="text-xs text-slate-400">{filtered.length} of {conversations.length}</p>
-                      <button onClick={syncEbayInbox} disabled={ebaySyncing} className="text-xs text-slate-400 hover:text-slate-600 flex items-center gap-1 disabled:opacity-50">
-                        <RefreshCw className={`h-3 w-3 ${ebaySyncing ? 'animate-spin' : ''}`} /> {ebaySyncing ? 'Syncing…' : 'Sync'}
+                      <button onClick={syncAllInboxes} disabled={ebaySyncing || bmSyncing} className="text-xs text-slate-400 hover:text-slate-600 flex items-center gap-1 disabled:opacity-50">
+                        <RefreshCw className={`h-3 w-3 ${ebaySyncing || bmSyncing ? 'animate-spin' : ''}`} /> {ebaySyncing || bmSyncing ? 'Syncing…' : 'Sync'}
                       </button>
                     </div>
                     <div className="flex gap-1 px-2 pb-2">
@@ -563,15 +701,20 @@ export function NotesFeed() {
                           const last = convo.messages[convo.messages.length - 1];
                           const isActive = convo.key === activeKey;
                           const isEbay = convo.conversation_type === 'FROM_EBAY';
-                          const accent = isActive ? (isEbay ? 'bg-blue-50 border-blue-500' : 'bg-amber-50 border-amber-500')
-                            : convo.unreadCount > 0 ? (isEbay ? 'bg-blue-50/40 border-transparent hover:bg-slate-50' : 'bg-amber-50/40 border-transparent hover:bg-slate-50')
+                          const isBm = convo.conversation_type === 'BACKMARKET';
+                          const accent = isActive ? (isBm ? 'bg-teal-50 border-teal-500' : isEbay ? 'bg-blue-50 border-blue-500' : 'bg-amber-50 border-amber-500')
+                            : convo.unreadCount > 0 ? (isBm ? 'bg-teal-50/40 border-transparent hover:bg-slate-50' : isEbay ? 'bg-blue-50/40 border-transparent hover:bg-slate-50' : 'bg-amber-50/40 border-transparent hover:bg-slate-50')
                             : 'border-transparent hover:bg-slate-50';
+                          const badge = isBm
+                            ? { cls: 'bg-teal-100 text-teal-700', label: 'BackMarket' }
+                            : isEbay ? { cls: 'bg-blue-100 text-blue-700', label: 'eBay' }
+                            : { cls: 'bg-slate-100 text-slate-500', label: 'Client' };
                           return (
                             <div key={convo.key} onClick={() => openConversation(convo)}
                               className={`group cursor-pointer px-3 py-2.5 transition-colors border-l-2 ${accent}`}>
                               <div className="flex items-center justify-between gap-2">
                                 <span className="flex items-center gap-1.5 min-w-0">
-                                  <span className={`text-[9px] px-1 py-0.5 rounded font-bold shrink-0 ${isEbay ? 'bg-blue-100 text-blue-700' : 'bg-slate-100 text-slate-500'}`}>{isEbay ? 'eBay' : 'Client'}</span>
+                                  <span className={`text-[9px] px-1 py-0.5 rounded font-bold shrink-0 ${badge.cls}`}>{badge.label}</span>
                                   <span className={`text-sm font-mono truncate ${convo.unreadCount > 0 ? 'font-bold text-slate-900' : 'font-medium text-slate-700'}`}>{convo.buyer_username}</span>
                                 </span>
                                 <span className="flex items-center gap-1 shrink-0">
@@ -610,7 +753,7 @@ export function NotesFeed() {
                   <button onClick={() => setActiveKey(null)} className="md:hidden text-slate-400 hover:text-slate-700 shrink-0">
                     <ArrowLeft className="h-4 w-4" />
                   </button>
-                  <img src={PLATFORM_LOGOS.ebay} alt="eBay" className="h-5 w-auto object-contain shrink-0" />
+                  <img src={activeConvo.conversation_type === 'BACKMARKET' ? PLATFORM_LOGOS.backmarket : PLATFORM_LOGOS.ebay} alt="platform" className="h-5 w-auto object-contain shrink-0" />
                   <div className="min-w-0 flex-1">
                     <p className="font-medium text-slate-800 font-mono text-sm truncate">{activeConvo.buyer_username}</p>
                     <p className="text-xs text-slate-400 truncate">{activeConvo.buyer_name ? `${activeConvo.buyer_name} · ` : ''}Order #{activeConvo.order_id}{activeConvo.item_title ? ` · ${activeConvo.item_title}` : ''}</p>
@@ -639,9 +782,12 @@ export function NotesFeed() {
                       </div>
                     )}
                     <div className="min-w-0 flex-1">
-                      <p className="text-xs font-medium text-slate-700 truncate">{listing?.title || activeConvo.item_title || 'Listing'}</p>
+                      <p className="text-xs font-medium text-slate-700 truncate">{contextTitle}</p>
                       <div className="flex items-center gap-2 mt-0.5 flex-wrap">
                         {listing?.price != null && <span className="text-xs text-slate-500">{listing.currency === 'GBP' ? '£' : ''}{Number(listing.price).toFixed(2)}</span>}
+                        {activeIsBm && activeConvo.item_title && (
+                          <span className="text-[10px] px-1.5 py-0.5 rounded bg-teal-50 text-teal-700 border border-teal-200">{activeConvo.item_title}</span>
+                        )}
                         {relatedOrder ? (
                           <button onClick={() => setOpenOrderId(relatedOrder.id)} className="text-xs text-blue-600 hover:underline flex items-center gap-1">
                             Order #{relatedOrder.salesRecordNumber}

@@ -1,8 +1,10 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
+import { signEbayRequest } from '@/lib/ebay-signature';
 
 const ANALYTICS_BASE = 'https://api.ebay.com/sell/analytics/v1';
-const FINANCES_BASE = 'https://api.ebay.com/sell/finances/v1';
+// Finances is a signature-required API, served from the apiz host.
+const FINANCES_BASE = 'https://apiz.ebay.com/sell/finances/v1';
 const TOKEN_URL = 'https://api.ebay.com/identity/v1/oauth2/token';
 const ANALYTICS_SCOPE = 'https://api.ebay.com/oauth/api_scope/sell.analytics.readonly';
 const FINANCES_SCOPE = 'https://api.ebay.com/oauth/api_scope/sell.finances';
@@ -165,45 +167,85 @@ export async function GET(req: NextRequest) {
     debugRaw.analyticsToken = 'null — sell.analytics.readonly scope not granted on refresh token';
   }
 
-  // ---- eBay Finances (real fees + net payout; needs sell.finances scope) ----
+  // ---- eBay Finances (real fees + net payout) ----
+  // eBay's per-order selling fee lives on each SALE transaction (totalFeeAmount);
+  // there is no aggregate fee field. Sum totalFeeAmount over the day's SALE
+  // transactions. The Finances API requires an RFC 9421 digital signature.
   let ebayFees: number | null = null;
+  let ebayGross: number | null = null;
+  let ebayOrderCount: number | null = null;
   let financesAvailable = false;
   let financesNeedsSignature = false;
   const finToken = await getFinancesToken();
   if (finToken) {
     try {
-      const filter = `transactionDate:[${today.start}..${today.end}]`;
-      const fr = await fetch(`${FINANCES_BASE}/transaction_summary?filter=${encodeURIComponent(filter)}`, {
-        headers: { Authorization: `Bearer ${finToken}`, 'X-EBAY-C-MARKETPLACE-ID': 'EBAY_GB', 'Content-Type': 'application/json' },
-      });
-      if (fr.ok) {
+      const filter = `transactionType:{SALE},transactionDate:[${today.start}..${today.end}]`;
+      const limit = 200;
+      let offset = 0;
+      let feeSum = 0;         // sum of totalFeeAmount = selling fees
+      let grossSum = 0;       // sum of totalFeeBasisAmount = gross sale value
+      const saleOrderIds = new Set<string>();
+      let total = Infinity;
+      for (let page = 0; offset < total && page < 20; page++) {
+        const url = `${FINANCES_BASE}/transaction?filter=${encodeURIComponent(filter)}&limit=${limit}&offset=${offset}`;
+        const sig = await signEbayRequest({ method: 'GET', url });
+        const fr = await fetch(url, {
+          headers: { Authorization: `Bearer ${finToken}`, 'X-EBAY-C-MARKETPLACE-ID': 'EBAY_GB', 'Content-Type': 'application/json', ...sig },
+        });
+        if (!fr.ok) {
+          const body = await fr.text();
+          if (fr.status === 403 && /signature/i.test(body)) financesNeedsSignature = true;
+          if (debug) debugRaw.financesError = { status: fr.status, body: body.slice(0, 400) };
+          break;
+        }
         financesAvailable = true;
-        const d = await fr.json() as { totalFeeAmount?: { value?: string | number }; feeAmount?: { value?: string | number } };
-        if (debug) debugRaw.financesTransactionSummary = d;
-        const fee = d.totalFeeAmount?.value ?? d.feeAmount?.value;
-        if (fee != null) ebayFees = Number(fee);
-      } else {
-        const body = await fr.text();
-        // The Finances API mandates request signing (eBay Digital Signatures);
-        // without the x-ebay-signature-key header it returns 403 / errorId 215001.
-        if (fr.status === 403 && /signature/i.test(body)) financesNeedsSignature = true;
-        if (debug) debugRaw.financesError = { status: fr.status, body };
+        const d = await fr.json() as {
+          total?: number;
+          transactions?: { orderId?: string; totalFeeAmount?: { value?: string | number }; totalFeeBasisAmount?: { value?: string | number } }[];
+        };
+        if (debug && page === 0) debugRaw.financesSample = { total: d.total, first: d.transactions?.[0] };
+        const txns = d.transactions ?? [];
+        for (const t of txns) {
+          feeSum += Number(t.totalFeeAmount?.value ?? 0) || 0;
+          grossSum += Number(t.totalFeeBasisAmount?.value ?? 0) || 0;
+          if (t.orderId) saleOrderIds.add(t.orderId);
+        }
+        total = d.total ?? txns.length;
+        offset += limit;
+        if (txns.length < limit) break;
+      }
+      if (financesAvailable) {
+        ebayFees = Math.round(feeSum * 100) / 100;
+        ebayGross = Math.round(grossSum * 100) / 100;
+        ebayOrderCount = saleOrderIds.size;
       }
     } catch (e) { console.warn('[eBay metrics] finances fetch error', e); if (debug) debugRaw.financesException = String(e); }
   } else if (debug) {
     debugRaw.financesToken = 'null — sell.finances scope not granted on refresh token';
   }
 
-  const netPayout = ebayFees != null ? db.grossSale - db.refundsIssued - ebayFees : db.netEstimate;
+  // When Finances is connected, the Sales block is sourced from eBay's own SALE
+  // transactions (gross/fees/net) so the figures are consistent and reflect eBay
+  // even for days whose orders haven't been imported locally yet. Otherwise fall
+  // back to our orders table.
+  const displayGross = ebayGross != null ? ebayGross : db.grossSale;
+  const displayOrders = ebayOrderCount != null ? ebayOrderCount : db.totalOrders;
+  const netPayout = ebayFees != null
+    ? Math.round((displayGross - db.refundsIssued - ebayFees) * 100) / 100
+    : db.netEstimate;
+  const salesSource = financesAvailable ? 'ebay' : 'local';
 
   const hints: string[] = [];
   if (!analyticsAvailable) hints.push('Reconnect eBay (Import Orders → Connect eBay Account) to enable performance metrics.');
   if (!financesAvailable) hints.push(financesNeedsSignature
-    ? 'eBay fee & net-payout figures need the Finances API digital signature (x-ebay-signature-key) — reconnecting won’t enable it; the signing setup is required.'
+    ? 'eBay fee data is blocked on the Finances API signature — the signing key could not be created or used.'
     : 'Reconnect eBay with the finance permission to show fees & net payout.');
 
   return NextResponse.json({
     ...db,
+    grossSale: displayGross,
+    totalOrders: displayOrders,
+    salesSource,
     ebayFees,
     netPayout,
     performance,

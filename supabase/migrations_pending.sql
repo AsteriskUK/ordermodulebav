@@ -53,11 +53,36 @@ CREATE TABLE IF NOT EXISTS missing_items (
 );
 ALTER TABLE missing_items ENABLE ROW LEVEL SECURITY;
 
+-- ---- eBay live listings (synced from Trading API GetSellerList) ----
+CREATE TABLE IF NOT EXISTS ebay_live_listings (
+  sku TEXT PRIMARY KEY,
+  item_id TEXT,
+  title TEXT,
+  description TEXT,
+  image_url TEXT,
+  additional_images JSONB DEFAULT '[]'::jsonb,
+  price NUMERIC,
+  currency TEXT DEFAULT 'GBP',
+  quantity INTEGER DEFAULT 0,
+  condition TEXT,
+  listing_status TEXT DEFAULT 'active',
+  listing_type TEXT,
+  category_id TEXT,
+  category_name TEXT,
+  listing_url TEXT,
+  inventory_part_id UUID,
+  last_synced_at TIMESTAMPTZ DEFAULT NOW(),
+  created_at TIMESTAMPTZ DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_ebay_live_listings_item_id ON ebay_live_listings(item_id);
+CREATE INDEX IF NOT EXISTS idx_ebay_live_listings_status ON ebay_live_listings(listing_status);
+ALTER TABLE ebay_live_listings ENABLE ROW LEVEL SECURITY;
+
 -- ---- RLS allow-all policies for the new tables ----
 DO $$
 DECLARE t TEXT;
 BEGIN
-  FOREACH t IN ARRAY ARRAY['ebay_listings','ebay_feedback','missing_items'] LOOP
+  FOREACH t IN ARRAY ARRAY['ebay_listings','ebay_feedback','missing_items','ebay_live_listings'] LOOP
     IF NOT EXISTS (SELECT 1 FROM pg_policies WHERE schemaname='public' AND tablename=t AND policyname='Allow all') THEN
       EXECUTE format('CREATE POLICY "Allow all" ON %I FOR ALL USING (true)', t);
     END IF;

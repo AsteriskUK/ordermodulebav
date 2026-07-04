@@ -14,15 +14,19 @@ const SOURCE_LOGOS: Record<string, { src: string; label: string }> = {
 /** Renders the marketplace logo for an order's source. Returns null for manual/unknown. */
 export function OrderSourceLogo({
   source,
-  className = 'h-4 w-auto',
+  className = 'h-4 w-4',
 }: {
   source?: Batch['source'] | string;
   className?: string;
 }) {
   const cfg = source ? SOURCE_LOGOS[source] : undefined;
   if (!cfg) return null;
-  // eslint-disable-next-line @next/next/no-img-element
-  return <img src={cfg.src} alt={cfg.label} title={cfg.label} className={`${className} object-contain shrink-0`} />;
+  return (
+    <span className={`inline-flex items-center justify-center overflow-hidden ${className}`} title={cfg.label}>
+      {/* eslint-disable-next-line @next/next/no-img-element */}
+      <img src={cfg.src} alt={cfg.label} className="h-full w-full object-contain" />
+    </span>
+  );
 }
 
 /**

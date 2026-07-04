@@ -1,13 +1,14 @@
 'use client';
 
 import { useState, useRef, useEffect } from 'react';
-import { Upload, FileText, CheckCircle, AlertCircle, Printer, Download, Tag, RefreshCw, ShoppingBag, Wifi, WifiOff, Sparkles, FileDown } from 'lucide-react';
+import { Upload, FileText, CheckCircle, AlertCircle, Printer, Download, Tag, RefreshCw, Wifi, WifiOff, Sparkles, FileDown } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { parseCSV } from '@/lib/csv-parser';
 import { buildInvoicesHtml as buildInvoicesHtmlUtil, printHtml as printHtmlUtil } from '@/lib/order-utils';
 import { useOrderStore } from '@/lib/store';
 import { Batch, Order } from '@/lib/types';
+import { OrderSourceLogo } from '@/components/order-source-logo';
 import { toast } from 'sonner';
 import Papa from 'papaparse';
 
@@ -517,7 +518,7 @@ export function CSVImport() {
         <CardContent className="pt-5">
           <div className="flex items-center justify-between flex-wrap gap-3">
             <div className="flex items-center gap-3">
-              <ShoppingBag className="h-6 w-6 text-amber-600" />
+              <OrderSourceLogo source="ebay" className="h-6 w-6" />
               <div>
                 <p className="font-semibold text-slate-800">Import from eBay</p>
                 <p className="text-xs text-slate-500">Fetch unfulfilled orders directly via eBay API</p>
@@ -576,7 +577,7 @@ export function CSVImport() {
         <CardContent className="pt-5">
           <div className="flex items-center justify-between flex-wrap gap-3">
             <div className="flex items-center gap-3">
-              <ShoppingBag className="h-6 w-6 text-indigo-600" />
+              <OrderSourceLogo source="backmarket" className="h-6 w-6" />
               <div>
                 <p className="font-semibold text-slate-800">Import from Backmarket</p>
                 <p className="text-xs text-slate-500">Fetch paid orders directly via Backmarket API</p>
@@ -622,7 +623,7 @@ export function CSVImport() {
         <CardContent className="pt-5">
           <div className="flex items-center justify-between flex-wrap gap-3">
             <div className="flex items-center gap-3">
-              <ShoppingBag className="h-6 w-6 text-orange-600" />
+              <OrderSourceLogo source="temu" className="h-6 w-6" />
               <div>
                 <p className="font-semibold text-slate-800">Import from Temu</p>
                 <p className="text-xs text-slate-500">Fetch orders directly via Temu Open Platform API</p>
@@ -668,8 +669,7 @@ export function CSVImport() {
         <CardContent className="pt-5">
           <div className="flex items-center justify-between flex-wrap gap-3">
             <div className="flex items-center gap-3">
-              {/* eslint-disable-next-line @next/next/no-img-element */}
-              <img src="/onbuy.svg" alt="OnBuy" className="h-6 w-auto object-contain" />
+              <OrderSourceLogo source="onbuy" className="h-6 w-6" />
               <div>
                 <p className="font-semibold text-slate-800">Import from OnBuy</p>
                 <p className="text-xs text-slate-500">Fetch orders directly via the OnBuy v2 API</p>

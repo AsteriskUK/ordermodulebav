@@ -29,6 +29,7 @@ interface Metrics {
   analyticsAvailable: boolean;
   financesNeedsSignature: boolean;
   analyticsHint: string | null;
+  salesSource?: 'ebay' | 'local';
 }
 
 const money = (n: number) => `£${n.toLocaleString('en-GB', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
@@ -84,7 +85,10 @@ export function OverviewDashboard() {
         <>
           {/* Sales */}
           <div>
-            <h3 className="text-xs font-semibold text-slate-500 uppercase tracking-wide mb-2">Sales · {m.date}</h3>
+            <h3 className="text-xs font-semibold text-slate-500 uppercase tracking-wide mb-2">
+              Sales · {m.date}
+              {m.salesSource === 'ebay' && <span className="ml-2 font-normal text-slate-400 normal-case">· live from eBay Finances</span>}
+            </h3>
             <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-3">
               <Stat label="Gross Sale" value={money(m.grossSale)} icon={PoundSterling} tone="green" />
               <Stat label="Total Orders" value={m.totalOrders.toLocaleString()} icon={ShoppingCart} tone="blue" />

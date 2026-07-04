@@ -325,7 +325,7 @@ export function PackagingPipeline() {
             <X className="h-4 w-4" />
           </button>
           <div className="flex items-center gap-1.5 text-blue-900">
-            <OrderSourceLogo source={orderSource(activeOrder)} className="h-4 w-auto" />
+            <OrderSourceLogo source={orderSource(activeOrder)} className="h-4 w-4" />
             <Hash className="h-3.5 w-3.5 shrink-0" />
             <span className="font-mono text-sm font-bold">{activeOrder.salesRecordNumber}</span>
             <Badge variant="outline" className={`ml-1 text-xs ${ORDER_STATUS_CONFIG[activeOrder.status].color}`}>
@@ -457,7 +457,7 @@ export function PackagingPipeline() {
                         <div className="flex items-start justify-between gap-2">
                           <div className="min-w-0 flex-1">
                             <div className="flex items-center gap-1.5 flex-wrap">
-                              <OrderSourceLogo source={orderSource(order)} className="h-4 w-auto" />
+                              <OrderSourceLogo source={orderSource(order)} className="h-4 w-4" />
                               <p className="text-xs font-mono text-slate-500">
                                 #{order.salesRecordNumber}
                               </p>
