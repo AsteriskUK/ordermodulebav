@@ -513,202 +513,115 @@ export function CSVImport() {
         onChange={handleFileChange}
       />
 
-      {/* eBay Direct Import */}
-      <Card className="border-amber-200 bg-amber-50">
-        <CardContent className="pt-5">
-          <div className="flex items-center justify-between flex-wrap gap-3">
-            <div className="flex items-center gap-3">
-              <OrderSourceLogo source="ebay" className="h-6 w-6" />
-              <div>
-                <p className="font-semibold text-slate-800">Import from eBay</p>
-                <p className="text-xs text-slate-500">Fetch unfulfilled orders directly via eBay API</p>
-              </div>
-              {ebayConnected === true && (
-                <span className="flex items-center gap-1 text-xs text-green-700 bg-green-100 border border-green-300 rounded-full px-2 py-0.5">
-                  <Wifi className="h-3 w-3" /> Connected
-                </span>
-              )}
-              {ebayConnected === false && (
-                <span className="flex items-center gap-1 text-xs text-red-700 bg-red-100 border border-red-300 rounded-full px-2 py-0.5">
-                  <WifiOff className="h-3 w-3" /> Not connected
-                </span>
-              )}
-            </div>
-            <div className="flex items-center gap-2">
-              <label className="text-xs text-slate-600">Last</label>
-              <select
-                value={ebayDays}
-                onChange={(e) => setEbayDays(Number(e.target.value))}
-                className="h-8 border rounded px-2 text-xs bg-white"
-              >
-                {[1, 3, 7, 14, 30].map((d) => (
-                  <option key={d} value={d}>{d} days</option>
-                ))}
-              </select>
-              {ebayConnected ? (
-                <Button
-                  size="sm"
-                  className="bg-amber-600 hover:bg-amber-700 text-white"
-                  onClick={handleEbayImport}
-                  disabled={ebayFetching}
-                >
-                  <RefreshCw className={`h-3.5 w-3.5 mr-1.5 ${ebayFetching ? 'animate-spin' : ''}`} />
-                  {ebayFetching ? 'Fetching...' : 'Fetch Orders'}
-                </Button>
-              ) : (
-                !ebayEnvToken && (
-                  <Button
-                    size="sm"
-                    variant="outline"
-                    className="border-amber-400 text-amber-700 hover:bg-amber-100"
-                    onClick={() => { window.location.href = '/api/ebay/auth'; }}
-                  >
-                    Connect eBay Account
-                  </Button>
-                )
-              )}
-            </div>
-          </div>
-        </CardContent>
-      </Card>
+      {/* Provider flip cards */}
+      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3">
 
-      {/* Backmarket Direct Import */}
-      <Card className="border-indigo-200 bg-indigo-50">
-        <CardContent className="pt-5">
-          <div className="flex items-center justify-between flex-wrap gap-3">
-            <div className="flex items-center gap-3">
-              <OrderSourceLogo source="backmarket" className="h-6 w-6" />
-              <div>
-                <p className="font-semibold text-slate-800">Import from Backmarket</p>
-                <p className="text-xs text-slate-500">Fetch paid orders directly via Backmarket API</p>
-              </div>
-              {backmarketConnected === true && (
-                <span className="flex items-center gap-1 text-xs text-green-700 bg-green-100 border border-green-300 rounded-full px-2 py-0.5">
-                  <Wifi className="h-3 w-3" /> Connected
-                </span>
-              )}
-              {backmarketConnected === false && (
-                <span className="flex items-center gap-1 text-xs text-red-700 bg-red-100 border border-red-300 rounded-full px-2 py-0.5">
-                  <WifiOff className="h-3 w-3" /> Not configured
-                </span>
-              )}
+        {/* eBay */}
+        <div className="group [perspective:600px] h-28 cursor-pointer" onClick={() => ebayConnected ? handleEbayImport() : !ebayEnvToken ? (window.location.href = '/api/ebay/auth') : undefined}>
+          <div className="relative w-full h-full transition-transform duration-500 [transform-style:preserve-3d] group-hover:[transform:rotateY(180deg)]">
+            {/* Front */}
+            <div className="absolute inset-0 [backface-visibility:hidden] rounded-xl border border-amber-200 bg-gradient-to-br from-amber-50 to-yellow-50 flex flex-col items-center justify-center gap-2 p-3">
+              <OrderSourceLogo source="ebay" className="h-8 w-8" />
+              <span className="text-xs font-semibold text-slate-700">eBay</span>
+              {ebayConnected === true && <span className="flex items-center gap-1 text-[10px] text-green-700 bg-green-100 border border-green-200 rounded-full px-2 py-0.5"><Wifi className="h-2.5 w-2.5" /> Connected</span>}
+              {ebayConnected === false && <span className="flex items-center gap-1 text-[10px] text-red-600 bg-red-50 border border-red-200 rounded-full px-2 py-0.5"><WifiOff className="h-2.5 w-2.5" /> {ebayEnvToken ? 'Token set' : 'Not connected'}</span>}
+              {ebayConnected === null && <span className="text-[10px] text-slate-400">Checking…</span>}
             </div>
-            <div className="flex items-center gap-2">
-              <label className="text-xs text-slate-600">Last</label>
-              <select
-                value={backmarketDays}
-                onChange={(e) => setBackmarketDays(Number(e.target.value))}
-                className="h-8 border rounded px-2 text-xs bg-white"
-              >
-                {[1, 3, 7, 14, 30].map((d) => (
-                  <option key={d} value={d}>{d} days</option>
-                ))}
+            {/* Back */}
+            <div className="absolute inset-0 [backface-visibility:hidden] [transform:rotateY(180deg)] rounded-xl border border-amber-300 bg-amber-600 flex flex-col items-center justify-center gap-2 p-3">
+              <select value={ebayDays} onChange={(e) => { e.stopPropagation(); setEbayDays(Number(e.target.value)); }} onClick={(e) => e.stopPropagation()} className="h-7 w-full border-0 rounded-lg px-2 text-xs bg-white/90 text-slate-700 font-medium">
+                {[1, 3, 7, 14, 30].map((d) => <option key={d} value={d}>Last {d} days</option>)}
               </select>
-              <Button
-                size="sm"
-                className="bg-indigo-600 hover:bg-indigo-700 text-white"
-                onClick={handleBackmarketImport}
-                disabled={backmarketFetching}
-              >
-                <RefreshCw className={`h-3.5 w-3.5 mr-1.5 ${backmarketFetching ? 'animate-spin' : ''}`} />
-                {backmarketFetching ? 'Fetching...' : 'Fetch Orders'}
-              </Button>
+              <div className="flex items-center gap-1 text-white text-xs font-semibold">
+                <RefreshCw className={`h-3.5 w-3.5 ${ebayFetching ? 'animate-spin' : ''}`} />
+                {ebayFetching ? 'Fetching…' : ebayConnected ? 'Click to fetch' : 'Click to connect'}
+              </div>
             </div>
           </div>
-        </CardContent>
-      </Card>
+        </div>
 
-      {/* Temu Direct Import */}
-      <Card className="border-orange-200 bg-orange-50">
-        <CardContent className="pt-5">
-          <div className="flex items-center justify-between flex-wrap gap-3">
-            <div className="flex items-center gap-3">
-              <OrderSourceLogo source="temu" className="h-6 w-6" />
-              <div>
-                <p className="font-semibold text-slate-800">Import from Temu</p>
-                <p className="text-xs text-slate-500">Fetch orders directly via Temu Open Platform API</p>
-              </div>
-              {temuConnected === true && (
-                <span className="flex items-center gap-1 text-xs text-green-700 bg-green-100 border border-green-300 rounded-full px-2 py-0.5">
-                  <Wifi className="h-3 w-3" /> Connected
-                </span>
-              )}
-              {temuConnected === false && (
-                <span className="flex items-center gap-1 text-xs text-red-700 bg-red-100 border border-red-300 rounded-full px-2 py-0.5">
-                  <WifiOff className="h-3 w-3" /> Not configured
-                </span>
-              )}
+        {/* Back Market */}
+        <div className="group [perspective:600px] h-28 cursor-pointer" onClick={handleBackmarketImport}>
+          <div className="relative w-full h-full transition-transform duration-500 [transform-style:preserve-3d] group-hover:[transform:rotateY(180deg)]">
+            <div className="absolute inset-0 [backface-visibility:hidden] rounded-xl border border-green-200 bg-gradient-to-br from-green-50 to-emerald-50 flex flex-col items-center justify-center gap-2 p-3">
+              <OrderSourceLogo source="backmarket" className="h-8 w-8" />
+              <span className="text-xs font-semibold text-slate-700">Back Market</span>
+              {backmarketConnected === true && <span className="flex items-center gap-1 text-[10px] text-green-700 bg-green-100 border border-green-200 rounded-full px-2 py-0.5"><Wifi className="h-2.5 w-2.5" /> Connected</span>}
+              {backmarketConnected === false && <span className="flex items-center gap-1 text-[10px] text-red-600 bg-red-50 border border-red-200 rounded-full px-2 py-0.5"><WifiOff className="h-2.5 w-2.5" /> Not configured</span>}
+              {backmarketConnected === null && <span className="text-[10px] text-slate-400">Checking…</span>}
             </div>
-            <div className="flex items-center gap-2">
-              <label className="text-xs text-slate-600">Last</label>
-              <select
-                value={temuDays}
-                onChange={(e) => setTemuDays(Number(e.target.value))}
-                className="h-8 border rounded px-2 text-xs bg-white"
-              >
-                {[1, 3, 7, 14, 30].map((d) => (
-                  <option key={d} value={d}>{d} days</option>
-                ))}
+            <div className="absolute inset-0 [backface-visibility:hidden] [transform:rotateY(180deg)] rounded-xl border border-green-300 bg-green-600 flex flex-col items-center justify-center gap-2 p-3">
+              <select value={backmarketDays} onChange={(e) => { e.stopPropagation(); setBackmarketDays(Number(e.target.value)); }} onClick={(e) => e.stopPropagation()} className="h-7 w-full border-0 rounded-lg px-2 text-xs bg-white/90 text-slate-700 font-medium">
+                {[1, 3, 7, 14, 30].map((d) => <option key={d} value={d}>Last {d} days</option>)}
               </select>
-              <Button
-                size="sm"
-                className="bg-orange-600 hover:bg-orange-700 text-white"
-                onClick={handleTemuImport}
-                disabled={temuFetching || !temuConnected}
-              >
-                <RefreshCw className={`h-3.5 w-3.5 mr-1.5 ${temuFetching ? 'animate-spin' : ''}`} />
-                {temuFetching ? 'Fetching...' : 'Fetch Orders'}
-              </Button>
+              <div className="flex items-center gap-1 text-white text-xs font-semibold">
+                <RefreshCw className={`h-3.5 w-3.5 ${backmarketFetching ? 'animate-spin' : ''}`} />
+                {backmarketFetching ? 'Fetching…' : 'Click to fetch'}
+              </div>
             </div>
           </div>
-        </CardContent>
-      </Card>
+        </div>
 
-      {/* OnBuy Direct Import */}
-      <Card className="border-teal-200 bg-teal-50">
-        <CardContent className="pt-5">
-          <div className="flex items-center justify-between flex-wrap gap-3">
-            <div className="flex items-center gap-3">
-              <OrderSourceLogo source="onbuy" className="h-6 w-6" />
-              <div>
-                <p className="font-semibold text-slate-800">Import from OnBuy</p>
-                <p className="text-xs text-slate-500">Fetch orders directly via the OnBuy v2 API</p>
-              </div>
-              {onbuyConnected === true && (
-                <span className="flex items-center gap-1 text-xs text-green-700 bg-green-100 border border-green-300 rounded-full px-2 py-0.5">
-                  <Wifi className="h-3 w-3" /> Connected
-                </span>
-              )}
-              {onbuyConnected === false && (
-                <span className="flex items-center gap-1 text-xs text-red-700 bg-red-100 border border-red-300 rounded-full px-2 py-0.5">
-                  <WifiOff className="h-3 w-3" /> Not configured
-                </span>
-              )}
+        {/* Temu */}
+        <div className="group [perspective:600px] h-28 cursor-pointer" onClick={() => temuConnected ? handleTemuImport() : undefined}>
+          <div className="relative w-full h-full transition-transform duration-500 [transform-style:preserve-3d] group-hover:[transform:rotateY(180deg)]">
+            <div className="absolute inset-0 [backface-visibility:hidden] rounded-xl border border-orange-200 bg-gradient-to-br from-orange-50 to-red-50 flex flex-col items-center justify-center gap-2 p-3">
+              <OrderSourceLogo source="temu" className="h-8 w-8" />
+              <span className="text-xs font-semibold text-slate-700">Temu</span>
+              {temuConnected === true && <span className="flex items-center gap-1 text-[10px] text-green-700 bg-green-100 border border-green-200 rounded-full px-2 py-0.5"><Wifi className="h-2.5 w-2.5" /> Connected</span>}
+              {temuConnected === false && <span className="flex items-center gap-1 text-[10px] text-red-600 bg-red-50 border border-red-200 rounded-full px-2 py-0.5"><WifiOff className="h-2.5 w-2.5" /> Not configured</span>}
+              {temuConnected === null && <span className="text-[10px] text-slate-400">Checking…</span>}
             </div>
-            <div className="flex items-center gap-2">
-              <label className="text-xs text-slate-600">Last</label>
-              <select
-                value={onbuyDays}
-                onChange={(e) => setOnbuyDays(Number(e.target.value))}
-                className="h-8 border rounded px-2 text-xs bg-white"
-              >
-                {[1, 3, 7, 14, 30].map((d) => (
-                  <option key={d} value={d}>{d} days</option>
-                ))}
+            <div className="absolute inset-0 [backface-visibility:hidden] [transform:rotateY(180deg)] rounded-xl border border-orange-300 bg-orange-600 flex flex-col items-center justify-center gap-2 p-3">
+              <select value={temuDays} onChange={(e) => { e.stopPropagation(); setTemuDays(Number(e.target.value)); }} onClick={(e) => e.stopPropagation()} className="h-7 w-full border-0 rounded-lg px-2 text-xs bg-white/90 text-slate-700 font-medium">
+                {[1, 3, 7, 14, 30].map((d) => <option key={d} value={d}>Last {d} days</option>)}
               </select>
-              <Button
-                size="sm"
-                className="bg-teal-600 hover:bg-teal-700 text-white"
-                onClick={handleOnbuyImport}
-                disabled={onbuyFetching || !onbuyConnected}
-              >
-                <RefreshCw className={`h-3.5 w-3.5 mr-1.5 ${onbuyFetching ? 'animate-spin' : ''}`} />
-                {onbuyFetching ? 'Fetching...' : 'Fetch Orders'}
-              </Button>
+              <div className="flex items-center gap-1 text-white text-xs font-semibold">
+                <RefreshCw className={`h-3.5 w-3.5 ${temuFetching ? 'animate-spin' : ''}`} />
+                {temuFetching ? 'Fetching…' : temuConnected ? 'Click to fetch' : 'Not configured'}
+              </div>
             </div>
           </div>
-        </CardContent>
-      </Card>
+        </div>
+
+        {/* OnBuy */}
+        <div className="group [perspective:600px] h-28 cursor-pointer" onClick={() => onbuyConnected ? handleOnbuyImport() : undefined}>
+          <div className="relative w-full h-full transition-transform duration-500 [transform-style:preserve-3d] group-hover:[transform:rotateY(180deg)]">
+            <div className="absolute inset-0 [backface-visibility:hidden] rounded-xl border border-cyan-200 bg-gradient-to-br from-cyan-50 to-teal-50 flex flex-col items-center justify-center gap-2 p-3">
+              <OrderSourceLogo source="onbuy" className="h-8 w-8" />
+              <span className="text-xs font-semibold text-slate-700">OnBuy</span>
+              {onbuyConnected === true && <span className="flex items-center gap-1 text-[10px] text-green-700 bg-green-100 border border-green-200 rounded-full px-2 py-0.5"><Wifi className="h-2.5 w-2.5" /> Connected</span>}
+              {onbuyConnected === false && <span className="flex items-center gap-1 text-[10px] text-red-600 bg-red-50 border border-red-200 rounded-full px-2 py-0.5"><WifiOff className="h-2.5 w-2.5" /> Not configured</span>}
+              {onbuyConnected === null && <span className="text-[10px] text-slate-400">Checking…</span>}
+            </div>
+            <div className="absolute inset-0 [backface-visibility:hidden] [transform:rotateY(180deg)] rounded-xl border border-cyan-300 bg-teal-600 flex flex-col items-center justify-center gap-2 p-3">
+              <select value={onbuyDays} onChange={(e) => { e.stopPropagation(); setOnbuyDays(Number(e.target.value)); }} onClick={(e) => e.stopPropagation()} className="h-7 w-full border-0 rounded-lg px-2 text-xs bg-white/90 text-slate-700 font-medium">
+                {[1, 3, 7, 14, 30].map((d) => <option key={d} value={d}>Last {d} days</option>)}
+              </select>
+              <div className="flex items-center gap-1 text-white text-xs font-semibold">
+                <RefreshCw className={`h-3.5 w-3.5 ${onbuyFetching ? 'animate-spin' : ''}`} />
+                {onbuyFetching ? 'Fetching…' : onbuyConnected ? 'Click to fetch' : 'Not configured'}
+              </div>
+            </div>
+          </div>
+        </div>
+
+        {/* Amazon — coming soon */}
+        <div className="group [perspective:600px] h-28 opacity-60 cursor-not-allowed">
+          <div className="relative w-full h-full transition-transform duration-500 [transform-style:preserve-3d] group-hover:[transform:rotateY(180deg)]">
+            <div className="absolute inset-0 [backface-visibility:hidden] rounded-xl border border-orange-200 bg-gradient-to-br from-orange-50 to-amber-50 flex flex-col items-center justify-center gap-2 p-3">
+              <OrderSourceLogo source="amazon" className="h-8 w-8" />
+              <span className="text-xs font-semibold text-slate-700">Amazon</span>
+              <span className="text-[10px] text-slate-500 bg-slate-100 border border-slate-200 rounded-full px-2 py-0.5">Coming soon</span>
+            </div>
+            <div className="absolute inset-0 [backface-visibility:hidden] [transform:rotateY(180deg)] rounded-xl border border-orange-300 bg-orange-500 flex flex-col items-center justify-center gap-1 p-3">
+              <span className="text-white text-xs font-semibold text-center">Amazon SP-API</span>
+              <span className="text-white/70 text-[10px] text-center">Integration coming soon</span>
+            </div>
+          </div>
+        </div>
+
+      </div>
 
       {/* Drop zone */}
       <div
