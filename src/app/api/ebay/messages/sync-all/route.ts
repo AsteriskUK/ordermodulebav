@@ -93,10 +93,42 @@ function buildRow(msg: EbayMsg, convId: string, refId: string | undefined, convT
 // Safe to call multiple times — already-saved messages are upserted (no duplicates).
 // Pass { reset: true } body to clear watermarks and restart from scratch.
 export async function POST(req: Request) {
-  const body = await req.json().catch(() => ({})) as { reset?: boolean };
+  const body = await req.json().catch(() => ({})) as { reset?: boolean; repairItemIds?: boolean };
   const supabase  = getSupabase();
   const token     = await getAccessToken();
   if (!token) return NextResponse.json({ error: 'not_connected' }, { status: 401 });
+
+  // One-time repair: earlier thread-fetch upserts nulled item_id (the listing
+  // link). Walk the conversation list (which carries referenceId) and backfill
+  // item_id where it's null. Fast — no per-thread fetches. Resumable via cursor.
+  if (body.repairItemIds) {
+    const started = Date.now();
+    const REPAIR_KEY = (t: string) => `ebay_messages_repair_offset_${t}`;
+    let repaired = 0;
+    let done = true;
+    for (const convType of CONV_TYPES) {
+      const { data: cur } = await supabase.from('app_settings').select('value').eq('key', REPAIR_KEY(convType)).single();
+      let offset = Number(cur?.value ?? 0);
+      while (Date.now() - started < 8500) {
+        const listRes = await fetch(`${MSG_BASE}/conversation?conversation_type=${convType}&limit=${CONV_PAGE_SIZE}&offset=${offset}`, { headers: ebayHeaders(token) });
+        if (!listRes.ok) break;
+        const listData = await listRes.json() as { conversations?: Array<{ conversationId?: string; referenceId?: string }> };
+        const convs = listData.conversations ?? [];
+        if (convs.length === 0) { await supabase.from('app_settings').upsert({ key: REPAIR_KEY(convType), value: '0', updated_at: new Date().toISOString() }); break; }
+        for (const c of convs) {
+          if (c.conversationId && c.referenceId && /^\d+$/.test(c.referenceId)) {
+            const { count } = await supabase.from('ebay_messages').update({ item_id: c.referenceId }, { count: 'exact' }).eq('conversation_id', c.conversationId).is('item_id', null);
+            repaired += count ?? 0;
+          }
+        }
+        offset += CONV_PAGE_SIZE;
+        await supabase.from('app_settings').upsert({ key: REPAIR_KEY(convType), value: String(offset), updated_at: new Date().toISOString() });
+        if (convs.length < CONV_PAGE_SIZE) { await supabase.from('app_settings').upsert({ key: REPAIR_KEY(convType), value: '0', updated_at: new Date().toISOString() }); break; }
+        if (Date.now() - started > 8500) { done = false; break; }
+      }
+    }
+    return NextResponse.json({ repaired, done });
+  }
 
   // Watermark: track which conversations we've already fully fetched (by conversationId).
   // We store a cursor per conversation-type so we can resume after timeouts.

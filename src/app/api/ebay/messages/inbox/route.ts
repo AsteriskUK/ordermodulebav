@@ -148,8 +148,21 @@ export async function GET(req: NextRequest) {
       );
       if (res.ok) {
         const data = await res.json() as { messages?: EbayApiMessage[]; referenceId?: string };
+        // The thread endpoint usually omits referenceId (the conversation-list
+        // endpoint carries it), so fall back to the item_id we already stored —
+        // otherwise this upsert would null out the listing link on every open.
+        let refId = data.referenceId;
+        if (!refId) {
+          const { data: existing } = await supabase
+            .from('ebay_messages')
+            .select('item_id')
+            .eq('conversation_id', conversationId)
+            .not('item_id', 'is', null)
+            .limit(1);
+          refId = existing?.[0]?.item_id ?? undefined;
+        }
         const rows = (data.messages ?? [])
-          .map((m) => buildRow(m, { conversationId, referenceId: data.referenceId }, conversationType))
+          .map((m) => buildRow(m, { conversationId, referenceId: refId }, conversationType))
           .filter((r): r is MessageRow => r !== null);
         if (rows.length) {
           // Update on conflict (not ignore) so existing rows get sender_username backfilled.
