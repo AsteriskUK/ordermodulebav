@@ -190,6 +190,11 @@ export function CSVImport() {
   const [onbuyFetching, setOnbuyFetching] = useState(false);
   const [onbuyDays, setOnbuyDays] = useState(7);
 
+  // Amazon (SP-API) direct import state
+  const [amazonConnected, setAmazonConnected] = useState<boolean | null>(null);
+  const [amazonFetching, setAmazonFetching] = useState(false);
+  const [amazonDays, setAmazonDays] = useState(7);
+
   const addOrders = useOrderStore((s) => s.addOrders);
   const updateOrderCategory = useOrderStore((s) => s.updateOrderCategory);
   const [aiCategorising, setAiCategorising] = useState(false);
@@ -210,6 +215,7 @@ export function CSVImport() {
     checkBackmarketStatus();
     checkTemuStatus();
     checkOnbuyStatus();
+    checkAmazonStatus();
   }, []);
 
   async function checkBackmarketStatus() {
@@ -335,6 +341,48 @@ export function CSVImport() {
       toast.error(`Failed to fetch OnBuy orders: ${e instanceof Error ? e.message : 'Unknown error'}`);
     } finally {
       setOnbuyFetching(false);
+    }
+  }
+
+  async function checkAmazonStatus() {
+    try {
+      const res = await fetch('/api/amazon/status');
+      if (res.ok) {
+        const data = await res.json() as { connected: boolean };
+        setAmazonConnected(data.connected);
+      } else {
+        setAmazonConnected(false);
+      }
+    } catch {
+      setAmazonConnected(false);
+    }
+  }
+
+  async function handleAmazonImport() {
+    setAmazonFetching(true);
+    try {
+      const res = await fetch(`/api/amazon/orders?days=${amazonDays}`);
+      if (res.status === 401) {
+        setAmazonConnected(false);
+        toast.error('Amazon credentials not configured. Set AMAZON_LWA_CLIENT_ID, AMAZON_LWA_CLIENT_SECRET, and AMAZON_REFRESH_TOKEN.');
+        return;
+      }
+      if (!res.ok) {
+        const err = await res.json() as { message?: string };
+        toast.error(`Amazon API error: ${err.message || res.statusText}`);
+        return;
+      }
+      const data = await res.json() as { orders: Order[]; batch: Batch };
+      if (data.orders.length === 0) {
+        toast.info('No orders found in Amazon for this period.');
+        return;
+      }
+      setPreview({ orders: data.orders, format: 'amazon', fileName: data.batch.name });
+      toast.success(`Fetched ${data.orders.length} orders from Amazon`);
+    } catch (e) {
+      toast.error(`Failed to fetch Amazon orders: ${e instanceof Error ? e.message : 'Unknown error'}`);
+    } finally {
+      setAmazonFetching(false);
     }
   }
 
@@ -606,17 +654,24 @@ export function CSVImport() {
           </div>
         </div>
 
-        {/* Amazon — coming soon */}
-        <div className="group [perspective:600px] h-28 opacity-60 cursor-not-allowed">
+        {/* Amazon (SP-API) */}
+        <div className="group [perspective:600px] h-28 cursor-pointer" onClick={() => amazonConnected ? handleAmazonImport() : undefined}>
           <div className="relative w-full h-full transition-transform duration-500 [transform-style:preserve-3d] group-hover:[transform:rotateY(180deg)]">
             <div className="absolute inset-0 [backface-visibility:hidden] rounded-xl border border-orange-200 bg-gradient-to-br from-orange-50 to-amber-50 flex flex-col items-center justify-center gap-2 p-3">
               <OrderSourceLogo source="amazon" className="h-8 w-8" />
               <span className="text-xs font-semibold text-slate-700">Amazon</span>
-              <span className="text-[10px] text-slate-500 bg-slate-100 border border-slate-200 rounded-full px-2 py-0.5">Coming soon</span>
+              {amazonConnected === true && <span className="flex items-center gap-1 text-[10px] text-green-700 bg-green-100 border border-green-200 rounded-full px-2 py-0.5"><Wifi className="h-2.5 w-2.5" /> Connected</span>}
+              {amazonConnected === false && <span className="flex items-center gap-1 text-[10px] text-red-600 bg-red-50 border border-red-200 rounded-full px-2 py-0.5"><WifiOff className="h-2.5 w-2.5" /> Not configured</span>}
+              {amazonConnected === null && <span className="text-[10px] text-slate-400">Checking…</span>}
             </div>
-            <div className="absolute inset-0 [backface-visibility:hidden] [transform:rotateY(180deg)] rounded-xl border border-orange-300 bg-orange-500 flex flex-col items-center justify-center gap-1 p-3">
-              <span className="text-white text-xs font-semibold text-center">Amazon SP-API</span>
-              <span className="text-white/70 text-[10px] text-center">Integration coming soon</span>
+            <div className="absolute inset-0 [backface-visibility:hidden] [transform:rotateY(180deg)] rounded-xl border border-orange-300 bg-orange-500 flex flex-col items-center justify-center gap-2 p-3">
+              <select value={amazonDays} onChange={(e) => { e.stopPropagation(); setAmazonDays(Number(e.target.value)); }} onClick={(e) => e.stopPropagation()} className="h-7 w-full border-0 rounded-lg px-2 text-xs bg-white/90 text-slate-700 font-medium">
+                {[1, 3, 7, 14, 30].map((d) => <option key={d} value={d}>Last {d} days</option>)}
+              </select>
+              <div className="flex items-center gap-1 text-white text-xs font-semibold">
+                <RefreshCw className={`h-3.5 w-3.5 ${amazonFetching ? 'animate-spin' : ''}`} />
+                {amazonFetching ? 'Fetching…' : amazonConnected ? 'Click to fetch' : 'Not configured'}
+              </div>
             </div>
           </div>
         </div>
