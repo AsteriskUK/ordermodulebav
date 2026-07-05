@@ -85,6 +85,27 @@ function bmRowToMessage(r: BmMessageRow): EbayMessage {
   };
 }
 
+// Merge freshly-fetched messages into the cached list (dedup by id) instead of
+// replacing it wholesale, so a sync only adds newer messages rather than wiping
+// and repopulating the list. Preserves a locally-set "read" status so a
+// background refresh doesn't resurrect an "unread" flag we've already cleared.
+//
+// `keepLocalStatus` (used when opening a thread for reading) additionally keeps a
+// locally-"unread" message unread even if the fetched copy says read — so merely
+// opening a conversation never marks it read. Read status then only changes via
+// an explicit "Mark read" or a background inbox sync.
+function mergeInbox(prev: EbayMessage[], fresh: EbayMessage[], keepLocalStatus = false): EbayMessage[] {
+  const byId = new Map(prev.map((m) => [m.id, m]));
+  for (const m of fresh) {
+    const existing = byId.get(m.id);
+    if (!existing) { byId.set(m.id, m); continue; }
+    const keepRead = existing.status === 'read' && m.status === 'unread';
+    const keepUnread = keepLocalStatus && existing.status === 'unread' && m.status === 'read';
+    byId.set(m.id, keepRead || keepUnread ? { ...m, status: existing.status } : m);
+  }
+  return [...byId.values()];
+}
+
 interface Conversation {
   key: string; // conversation_id (falls back to buyer_username + order_id)
   conversation_id: string | null;
@@ -143,6 +164,14 @@ export function NotesFeed() {
   const [replyText, setReplyText] = useState('');
   const [replyImages, setReplyImages] = useState<string[]>([]);
   const [replySending, setReplySending] = useState(false);
+  // Multi-select of conversations in the list (for bulk mark read/unread).
+  const [selectedKeys, setSelectedKeys] = useState<Set<string>>(new Set());
+  const toggleSelected = (key: string) => setSelectedKeys((prev) => {
+    const next = new Set(prev);
+    if (next.has(key)) next.delete(key); else next.add(key);
+    return next;
+  });
+  const clearSelection = () => setSelectedKeys(new Set());
 
   // Fast read of already-synced messages from our Supabase (no eBay calls).
   async function loadEbayMessages() {
@@ -151,7 +180,7 @@ export function NotesFeed() {
       const res = await fetch('/api/ebay/messages/inbox');
       if (res.ok) {
         const data = await res.json() as { messages: EbayMessage[] };
-        setEbayMessages(data.messages);
+        setEbayMessages((prev) => mergeInbox(prev, data.messages));
       }
     } catch {
       // silent
@@ -185,7 +214,7 @@ export function NotesFeed() {
       const res = await fetch('/api/backmarket/messages');
       if (res.ok) {
         const data = await res.json() as { messages: BmMessageRow[] };
-        setBmMessages(data.messages.map(bmRowToMessage));
+        setBmMessages((prev) => mergeInbox(prev, data.messages.map(bmRowToMessage)));
       }
     } catch { /* silent */ }
   }
@@ -204,10 +233,10 @@ export function NotesFeed() {
   }
   const syncAllInboxes = () => { syncEbayInbox(); syncBmInbox(); };
 
-  // Load the full message history for one conversation on demand.
+  // Open a conversation for reading. Opening does NOT mark it read — that only
+  // happens when the user explicitly hits "Mark read" in the thread or list.
   async function openConversation(convo: Conversation) {
     setActiveKey(convo.key);
-    markRead(convo);
     if (!convo.conversation_id) return;
 
     if (convo.conversation_type === 'BACKMARKET') {
@@ -215,15 +244,7 @@ export function NotesFeed() {
         const res = await fetch(`/api/backmarket/messages?savId=${encodeURIComponent(convo.conversation_id)}`);
         if (res.ok) {
           const data = await res.json() as { messages: BmMessageRow[] };
-          const fresh = data.messages.map(bmRowToMessage);
-          setBmMessages((prev) => {
-            const byId = new Map(prev.map((m) => [m.id, m]));
-            for (const m of fresh) {
-              const existing = byId.get(m.id);
-              byId.set(m.id, existing && existing.status === 'read' && m.status === 'unread' ? { ...m, status: 'read' } : m);
-            }
-            return [...byId.values()];
-          });
+          setBmMessages((prev) => mergeInbox(prev, data.messages.map(bmRowToMessage), true));
         }
       } catch { /* silent */ }
       return;
@@ -233,16 +254,7 @@ export function NotesFeed() {
       const res = await fetch(`/api/ebay/messages/inbox?conversationId=${encodeURIComponent(convo.conversation_id)}&conversationType=${convo.conversation_type}`);
       if (res.ok) {
         const data = await res.json() as { messages: EbayMessage[] };
-        // Merge the freshly-fetched thread into the cached list (dedup by id).
-        // Keep a locally-read status so the re-fetch doesn't resurrect "unread".
-        setEbayMessages((prev) => {
-          const byId = new Map(prev.map((m) => [m.id, m]));
-          for (const m of data.messages) {
-            const existing = byId.get(m.id);
-            byId.set(m.id, existing && existing.status === 'read' && m.status === 'unread' ? { ...m, status: 'read' } : m);
-          }
-          return [...byId.values()];
-        });
+        setEbayMessages((prev) => mergeInbox(prev, data.messages, true));
       }
     } catch {
       // silent — the cached latest message is still shown
@@ -397,6 +409,13 @@ export function NotesFeed() {
   }
   const markRead = (convo: Conversation) => setConversationRead(convo, true);
   const markUnread = (convo: Conversation) => setConversationRead(convo, false);
+
+  // Bulk mark the currently-selected conversations, then clear the selection.
+  async function bulkSetRead(read: boolean) {
+    const convos = conversations.filter((c) => selectedKeys.has(c.key));
+    clearSelection();
+    await Promise.all(convos.map((c) => setConversationRead(c, read)));
+  }
 
   async function handleReply() {
     if (!activeConvo || (!replyText.trim() && replyImages.length === 0)) return;
@@ -669,12 +688,30 @@ export function NotesFeed() {
               return (
                 <>
                   <div className="border-b shrink-0">
+                    {selectedKeys.size > 0 ? (
+                      <div className="flex items-center gap-2 px-3 py-2 bg-slate-800 text-white">
+                        <span className="text-xs font-medium">{selectedKeys.size} selected</span>
+                        <div className="ml-auto flex items-center gap-1">
+                          <button onClick={() => bulkSetRead(true)} title="Mark selected as read"
+                            className="flex items-center gap-1 text-xs px-2 py-1 rounded hover:bg-white/15">
+                            <MailOpen className="h-3.5 w-3.5" /> Read
+                          </button>
+                          <button onClick={() => bulkSetRead(false)} title="Mark selected as unread"
+                            className="flex items-center gap-1 text-xs px-2 py-1 rounded hover:bg-white/15">
+                            <Mail className="h-3.5 w-3.5" /> Unread
+                          </button>
+                          <button onClick={clearSelection} title="Clear selection"
+                            className="text-xs px-2 py-1 rounded hover:bg-white/15">✕</button>
+                        </div>
+                      </div>
+                    ) : (
                     <div className="flex items-center justify-between px-3 py-2">
                       <p className="text-xs text-slate-400">{filtered.length} of {conversations.length}</p>
                       <button onClick={syncAllInboxes} disabled={ebaySyncing || bmSyncing} className="text-xs text-slate-400 hover:text-slate-600 flex items-center gap-1 disabled:opacity-50">
                         <RefreshCw className={`h-3 w-3 ${ebaySyncing || bmSyncing ? 'animate-spin' : ''}`} /> {ebaySyncing || bmSyncing ? 'Syncing…' : 'Sync'}
                       </button>
                     </div>
+                    )}
                     <div className="flex gap-1 px-2 pb-2">
                       {FILTERS.map((f) => (
                         <button key={f.key} onClick={() => setEbayFilter(f.key)}
@@ -685,7 +722,7 @@ export function NotesFeed() {
                     </div>
                   </div>
                   <div className="flex-1 overflow-y-auto">
-                    {ebayLoading || (ebaySyncing && ebayMessages.length === 0) ? (
+                    {(ebayLoading || ebaySyncing) && conversations.length === 0 ? (
                       <div className="text-center py-16 text-slate-400">
                         <RefreshCw className="h-8 w-8 mx-auto mb-3 animate-spin text-slate-200" />
                         <p className="text-sm">Syncing…</p>
@@ -710,9 +747,19 @@ export function NotesFeed() {
                             ? { cls: 'bg-teal-100 text-teal-700', label: 'BackMarket' }
                             : isEbay ? { cls: 'bg-blue-100 text-blue-700', label: 'eBay' }
                             : { cls: 'bg-slate-100 text-slate-500', label: 'Client' };
+                          const isSelected = selectedKeys.has(convo.key);
                           return (
-                            <div key={convo.key} onClick={() => openConversation(convo)}
-                              className={`group cursor-pointer px-3 py-2.5 transition-colors border-l-2 ${accent}`}>
+                            <div key={convo.key}
+                              className={`group flex items-start gap-2 px-3 py-2.5 transition-colors border-l-2 ${isSelected ? 'bg-slate-100 border-slate-400' : accent}`}>
+                              <input
+                                type="checkbox"
+                                checked={isSelected}
+                                onChange={() => toggleSelected(convo.key)}
+                                onClick={(e) => e.stopPropagation()}
+                                title="Select conversation"
+                                className={`mt-1 h-3.5 w-3.5 shrink-0 cursor-pointer accent-slate-700 ${isSelected ? '' : 'opacity-0 group-hover:opacity-100'}`}
+                              />
+                              <div onClick={() => openConversation(convo)} className="min-w-0 flex-1 cursor-pointer">
                               <div className="flex items-center justify-between gap-2">
                                 <span className="flex items-center gap-1.5 min-w-0">
                                   <span className={`text-[9px] px-1 py-0.5 rounded font-bold shrink-0 ${badge.cls}`}>{badge.label}</span>
@@ -733,6 +780,7 @@ export function NotesFeed() {
                                 <p className={`text-xs truncate ${convo.unreadCount > 0 ? 'text-slate-700' : 'text-slate-500'}`}>
                                   {last && isOurs(last, convo.buyer_username) ? '↑ ' : '↓ '}{last?.message_text}{(last?.media_urls?.length ?? 0) > 0 ? ' 📎' : ''}
                                 </p>
+                              </div>
                               </div>
                             </div>
                           );
