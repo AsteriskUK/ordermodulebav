@@ -34,6 +34,14 @@ function ensureMinLength(value: string, minLength: number, fallback: string): st
   return fallback;
 }
 
+// FedEx rates are weight-driven, but orders don't carry a parcel weight — only a
+// box count. Use a per-box default weight (KG) that can be tuned via env without a
+// code change, e.g. FEDEX_DEFAULT_PARCEL_KG=2.5. Falls back to 1 KG.
+function defaultParcelWeightKg(): number {
+  const raw = Number(process.env.FEDEX_DEFAULT_PARCEL_KG);
+  return Number.isFinite(raw) && raw > 0 ? raw : 1;
+}
+
 function sanitizePostcode(postcode: string): string {
   return (postcode || '').trim().toUpperCase();
 }
@@ -119,7 +127,7 @@ export function buildFedExShipmentPayload(order: Order, shipDate: string): FedEx
       labelStockType: 'PAPER_4X6',
     },
     requestedPackageLineItems: Array.from({ length: numberOfBoxes }, () => ({
-      weight: { units: 'KG' as const, value: 1 },
+      weight: { units: 'KG' as const, value: defaultParcelWeightKg() },
       customerReferences: [
         { customerReferenceType: 'CUSTOMER_REFERENCE' as const, value: sanitizeFedExString(order.salesRecordNumber, 30) },
       ],

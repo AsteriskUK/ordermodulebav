@@ -275,14 +275,16 @@ export async function getFedExRate(
   const accountNumber = process.env.FEDEX_ACCOUNT_NUMBER;
   if (!accountNumber) throw new Error('FEDEX_ACCOUNT_NUMBER not set');
 
-  // The Rate API accepts the same requestedShipment shape as Ship, minus the
-  // label spec. Send the order's service so the quote matches what we'd book.
-  const { labelSpecification: _label, ...rateShipment } = payload;
+  // The Rate API's requestedShipment is close to Ship's but differs in two ways:
+  // it has no label spec, and it expects a single `recipient` object rather than
+  // Ship's `recipients` array. Convert both so the quote matches what we'd book.
+  const { labelSpecification: _label, recipients, ...rateShipment } = payload;
   void _label;
   const body = {
     accountNumber: { value: accountNumber },
     requestedShipment: {
       ...rateShipment,
+      recipient: recipients[0],
       rateRequestType: ['ACCOUNT', 'LIST'],
     },
   };
@@ -298,7 +300,7 @@ export async function getFedExRate(
   });
 
   const text = await res.text();
-  if (!res.ok) throw new Error(`FedEx rate error ${res.status}: ${text.slice(0, 200)}`);
+  if (!res.ok) throw new Error(`FedEx rate error ${res.status}: ${text.slice(0, 800)}`);
 
   const data = JSON.parse(text) as FedExRateResponse;
   const details = data.output?.rateReplyDetails ?? [];
