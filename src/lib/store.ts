@@ -1,8 +1,8 @@
 import { create } from 'zustand';
 import { persist, createJSONStorage } from 'zustand/middleware';
 import { get, set as idbSet, del } from 'idb-keyval';
-import { Order, OrderNote, OrderStatus, Batch, DeliveryCarrier, DeliveryType, AppUser, EodEvent, ReturnRecord, ReplacementItem, MissingItemRecord, Department, AttendanceRecord, LeaveRequest, LeaveBalance, TicketRecord, TicketActivity, InventoryPart, StockUnit, StockLevel, GoodsReceipt, Build } from './types';
-import { syncAttendance, syncLeaveRequest, syncLeaveBalance, syncOrder, syncBatch, syncUser, deleteUserFromSupabase, syncReturn, syncTicket, deleteTicketFromSupabase, syncMissingItem, syncInventoryPart, syncStockUnit, syncStockLevel, syncGoodsReceipt, syncBuild } from './supabase-store';
+import { Order, OrderNote, OrderStatus, Batch, DeliveryCarrier, DeliveryType, AppUser, EodEvent, ReturnRecord, ReplacementItem, MissingItemRecord, Department, AttendanceRecord, LeaveRequest, LeaveBalance, TicketRecord, TicketActivity, InventoryPart, StockUnit, StockLevel, GoodsReceipt, Build, AccessConfig } from './types';
+import { syncAttendance, syncLeaveRequest, syncLeaveBalance, syncOrder, syncBatch, syncUser, deleteUserFromSupabase, syncReturn, syncTicket, deleteTicketFromSupabase, syncMissingItem, syncInventoryPart, syncStockUnit, syncStockLevel, syncGoodsReceipt, syncBuild, softDeleteOrderInSupabase, hardDeleteOrderFromSupabase } from './supabase-store';
 import { buildSku, INVENTORY_CATEGORY_MAP } from './inventory-config';
 
 // Generate proper UUID v4 for PostgreSQL compatibility
@@ -49,6 +49,8 @@ interface OrderStore {
   users: AppUser[];
   currentUserId: string | null;
   emailConfig: EmailConfig;
+  accessControl: AccessConfig | null;
+  setAccessControl: (config: AccessConfig | null) => void;
   addOrders: (orders: Order[], batch: Batch) => void;
   updateOrderStatus: (orderId: string, status: OrderStatus) => void;
   updateOrderComment: (orderId: string, comment: string) => void;
@@ -141,6 +143,7 @@ export const useOrderStore = create<OrderStore>()(
         { id: 'admin-1', name: 'Admin', role: 'admin', roles: ['admin'], department: 'management', departments: ['management'], pin: '1234' },
       ] as AppUser[],
       currentUserId: null as string | null,
+      accessControl: null as AccessConfig | null,
       emailConfig: {
         enabled: false,
         recipientEmail: '',
@@ -401,12 +404,15 @@ export const useOrderStore = create<OrderStore>()(
           }
           return { orders: Array.from(seen.values()) };
         }),
-      deleteOrder: (orderId) =>
+      deleteOrder: (orderId) => {
+        const deletedAt = new Date().toISOString();
         set((state) => ({
           orders: state.orders.map((o) =>
-            o.id === orderId ? { ...o, deletedAt: new Date().toISOString() } : o
+            o.id === orderId ? { ...o, deletedAt } : o
           ),
-        })),
+        }));
+        softDeleteOrderInSupabase(orderId, deletedAt).catch(console.error);
+      },
       restoreOrder: (orderId) =>
         set((state) => ({
           orders: state.orders.map((o) =>
@@ -419,10 +425,12 @@ export const useOrderStore = create<OrderStore>()(
           new Date(b.deletedAt!).getTime() - new Date(a.deletedAt!).getTime()
         );
       },
-      permanentDeleteOrder: (orderId) =>
+      permanentDeleteOrder: (orderId) => {
         set((state) => ({
           orders: state.orders.filter((o) => o.id !== orderId),
-        })),
+        }));
+        hardDeleteOrderFromSupabase(orderId).catch(console.error);
+      },
       deleteBatch: (batchId) =>
         set((state) => ({
           orders: state.orders.filter((o) => o.batchId !== batchId),
@@ -447,6 +455,7 @@ export const useOrderStore = create<OrderStore>()(
       setCurrentUser: (userId) => set({ currentUserId: userId }),
       setEmailConfig: (config) =>
         set((state) => ({ emailConfig: { ...state.emailConfig, ...config } })),
+      setAccessControl: (config) => set({ accessControl: config }),
       clearEodEvents: () => set({ eodEvents: [] }),
       addReturn: (ret) => {
         set((state) => ({

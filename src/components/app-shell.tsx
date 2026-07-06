@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useEffect, useRef, useMemo } from 'react';
-import { useRouter } from 'next/navigation';
+import { useRouter, usePathname } from 'next/navigation';
 import { Sidebar } from './sidebar';
 import { EodScheduler } from './eod-scheduler';
 import { PanelLeftClose, PanelLeftOpen, LogOut, ChevronDown, Check, Bell, MessageSquare, ChevronRight, ThumbsDown, ThumbsUp } from 'lucide-react';
@@ -15,6 +15,7 @@ import { useOrderStore } from '@/lib/store';
 import { SignIn } from './sign-in';
 import { TicketDialog } from './ticket-dialog';
 import { TICKET_PRIORITY_CONFIG, TICKET_STATUS_CONFIG, DEPARTMENT_CONFIG, TicketRecord, TicketStatus, Department } from '@/lib/types';
+import { can, resourceIdForPath, landingPathFor } from '@/lib/access';
 
 const SIDEBAR_KEY = 'sidebar-collapsed';
 
@@ -39,6 +40,22 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   const users = useOrderStore((s) => s.users);
   const currentUserId = useOrderStore((s) => s.currentUserId);
   const currentUser = users.find((u) => u.id === currentUserId);
+  const accessControl = useOrderStore((s) => s.accessControl);
+  // Buyer messages (Inbox / email) visibility — governed by the access rules.
+  const canInbox = can(currentUser, 'feature:buyer-inbox', accessControl);
+
+  // Direct-URL guard: if the current page maps to a resource this user can't
+  // access, bounce them to their landing page. Covers deep links without gating
+  // every page component individually.
+  const pathname = usePathname();
+  useEffect(() => {
+    if (!currentUser) return;
+    const resourceId = resourceIdForPath(pathname);
+    if (!resourceId || can(currentUser, resourceId, accessControl)) return;
+    const target = landingPathFor(currentUser, accessControl);
+    // Guard against redirecting to the same (still-inaccessible) page — no loops.
+    if (target !== resourceId && target !== pathname) router.replace(target);
+  }, [pathname, currentUser, accessControl, router]);
   const setCurrentUser = useOrderStore((s) => s.setCurrentUser);
 
   const [menuOpen, setMenuOpen] = useState(false);
@@ -88,6 +105,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   interface MsgRow { id: string; direction: string; status: string; message_text: string; buyer_username: string; sent_at: string; item_title?: string; }
   const [unreadMsgs, setUnreadMsgs] = useState<MsgRow[]>([]);
   useEffect(() => {
+    if (!canInbox) return;   // only Comms + Admin may read buyer messages
     async function loadMsgs() {
       try {
         const res = await fetch('/api/ebay/messages/inbox');
@@ -97,7 +115,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
       } catch { /* silent */ }
     }
     loadMsgs();
-  }, []);
+  }, [canInbox]);
 
   // Wait for the persisted store to rehydrate so an already-signed-in user
   // doesn't briefly flash the sign-in screen on reload.
@@ -140,7 +158,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
       <FeedbackMonitor />
       <div className="flex-1 flex flex-col overflow-hidden">
         {/* Top header bar */}
-        <header className="h-12 bg-white border-b border-slate-200 flex items-center justify-between px-4 shrink-0">
+        <header className="h-12 bg-white border-b border-slate-200 flex items-center justify-between px-4 shrink-0 sticky top-0 z-30">
           <Button variant="ghost" size="sm" onClick={toggleSidebar} className="h-8 w-8 p-0 text-slate-500" title={sidebarCollapsed ? 'Show sidebar' : 'Hide sidebar'}>
             {sidebarCollapsed ? <PanelLeftOpen className="h-4 w-4" /> : <PanelLeftClose className="h-4 w-4" />}
           </Button>
@@ -252,7 +270,8 @@ export function AppShell({ children }: { children: React.ReactNode }) {
               )}
             </div>
 
-            {/* Messages */}
+            {/* Messages — buyer Inbox, Comms + Admin only */}
+            {canInbox && (
             <div className="relative" ref={msgRef}>
               <button onClick={() => { setMsgOpen((o) => !o); setBellOpen(false); setMenuOpen(false); setFbOpen(false); }}
                 className="relative h-8 w-8 flex items-center justify-center rounded-lg hover:bg-slate-100 transition-colors text-slate-500">
@@ -289,6 +308,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
                 </div>
               )}
             </div>
+            )}
 
             {/* User menu */}
             <div className="relative ml-1" ref={menuRef}>
@@ -337,7 +357,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
           </div>
         </header>
         {openTicket && <TicketDialog ticket={openTicket} onClose={() => setOpenTicket(null)} />}
-        <main className="flex-1 bg-slate-50 overflow-y-auto">
+        <main className="flex-1 bg-slate-50 overflow-auto">
           <div className="p-6">
             {children}
           </div>

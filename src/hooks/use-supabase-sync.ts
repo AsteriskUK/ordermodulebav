@@ -70,6 +70,8 @@ export function useSupabaseSync() {
         stockLevels: data.stockLevels.length > 0 ? data.stockLevels : currentState.stockLevels,
         goodsReceipts: data.goodsReceipts.length > 0 ? data.goodsReceipts : currentState.goodsReceipts,
         builds: data.builds.length > 0 ? data.builds : currentState.builds,
+        // Access control: Supabase is source of truth (null until an admin saves one).
+        accessControl: data.accessControl ?? currentState.accessControl,
       });
 
       setLastSync(new Date());

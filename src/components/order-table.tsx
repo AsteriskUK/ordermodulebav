@@ -286,7 +286,7 @@ export function OrderTable() {
   };
 
   return (
-    <div className="space-y-4">
+    <div className="space-y-4 min-w-max">
       <div>
         <h2 className="text-2xl font-bold text-slate-900">Order Sheet</h2>
         <p className="text-slate-500 text-sm mt-1">
@@ -479,11 +479,11 @@ export function OrderTable() {
       )}
 
       {/* Table */}
-      <div className="border rounded-lg overflow-x-auto bg-white w-full" style={{ maxHeight: 'calc(100vh - 280px)', overflowY: 'auto' }}>
+      <div className="border rounded-lg bg-white w-full">
         <Table>
           <TableHeader className="sticky top-0 z-10">
             <TableRow className="bg-slate-50">
-              <TableHead className="w-10">
+              <TableHead className="w-10 bg-slate-50">
                 <button onClick={toggleAll} className="p-1">
                   {selectedIds.size === pageOrders.length && pageOrders.length > 0 ? (
                     <CheckSquare className="h-4 w-4 text-blue-600" />
@@ -495,7 +495,7 @@ export function OrderTable() {
                 </button>
               </TableHead>
               <TableHead 
-                className="text-xs cursor-pointer hover:bg-slate-100 transition-colors"
+                className="text-xs cursor-pointer hover:bg-slate-100 transition-colors bg-slate-50"
                 onClick={() => handleSort('salesRecordNumber')}
               >
                 <div className="flex items-center gap-1">
@@ -506,7 +506,7 @@ export function OrderTable() {
                 </div>
               </TableHead>
               <TableHead 
-                className="text-xs cursor-pointer hover:bg-slate-100 transition-colors"
+                className="text-xs cursor-pointer hover:bg-slate-100 transition-colors bg-slate-50"
                 onClick={() => handleSort('postByDate')}
               >
                 <div className="flex items-center gap-1">
@@ -517,7 +517,7 @@ export function OrderTable() {
                 </div>
               </TableHead>
               <TableHead 
-                className="text-xs cursor-pointer hover:bg-slate-100 transition-colors"
+                className="text-xs cursor-pointer hover:bg-slate-100 transition-colors bg-slate-50"
                 onClick={() => handleSort('postToName')}
               >
                 <div className="flex items-center gap-1">
@@ -528,7 +528,7 @@ export function OrderTable() {
                 </div>
               </TableHead>
               <TableHead 
-                className="text-xs cursor-pointer hover:bg-slate-100 transition-colors"
+                className="text-xs cursor-pointer hover:bg-slate-100 transition-colors bg-slate-50"
                 onClick={() => handleSort('itemTitle')}
               >
                 <div className="flex items-center gap-1">
@@ -539,7 +539,7 @@ export function OrderTable() {
                 </div>
               </TableHead>
               <TableHead 
-                className="text-xs cursor-pointer hover:bg-slate-100 transition-colors"
+                className="text-xs cursor-pointer hover:bg-slate-100 transition-colors bg-slate-50"
                 onClick={() => handleSort('buyerNote')}
               >
                 <div className="flex items-center gap-1">
@@ -550,7 +550,7 @@ export function OrderTable() {
                 </div>
               </TableHead>
               <TableHead 
-                className="text-xs cursor-pointer hover:bg-slate-100 transition-colors"
+                className="text-xs cursor-pointer hover:bg-slate-100 transition-colors bg-slate-50"
                 onClick={() => handleSort('quantity')}
               >
                 <div className="flex items-center gap-1">
@@ -561,7 +561,7 @@ export function OrderTable() {
                 </div>
               </TableHead>
               <TableHead 
-                className="text-xs cursor-pointer hover:bg-slate-100 transition-colors"
+                className="text-xs cursor-pointer hover:bg-slate-100 transition-colors bg-slate-50"
                 onClick={() => handleSort('priority')}
               >
                 <div className="flex items-center gap-1">
@@ -572,7 +572,7 @@ export function OrderTable() {
                 </div>
               </TableHead>
               <TableHead 
-                className="text-xs cursor-pointer hover:bg-slate-100 transition-colors"
+                className="text-xs cursor-pointer hover:bg-slate-100 transition-colors bg-slate-50"
                 onClick={() => handleSort('category')}
               >
                 <div className="flex items-center gap-1">
@@ -583,7 +583,7 @@ export function OrderTable() {
                 </div>
               </TableHead>
               <TableHead 
-                className="text-xs cursor-pointer hover:bg-slate-100 transition-colors"
+                className="text-xs cursor-pointer hover:bg-slate-100 transition-colors bg-slate-50"
                 onClick={() => handleSort('status')}
               >
                 <div className="flex items-center gap-1">
@@ -593,7 +593,7 @@ export function OrderTable() {
                   )}
                 </div>
               </TableHead>
-              <TableHead className="text-xs w-10"></TableHead>
+              <TableHead className="text-xs w-10 bg-slate-50"></TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>

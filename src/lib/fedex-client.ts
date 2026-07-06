@@ -289,18 +289,39 @@ export async function getFedExRate(
     },
   };
 
-  const res = await fetch(`${base}/rate/v1/rates/quotes`, {
-    method: 'POST',
-    headers: {
-      Authorization: `Bearer ${token}`,
-      'Content-Type': 'application/json',
-      'X-locale': 'en_GB',
-    },
-    body: JSON.stringify(body),
-  });
+  // Retry transient failures: 429/502/503, and Akamai/WAF "Access Denied" HTML
+  // 403s that FedEx's edge returns when too many rate calls hit it at once.
+  const url = `${base}/rate/v1/rates/quotes`;
+  const maxRetries = 3;
+  let text = '';
+  let status = 0;
+  for (let attempt = 0; attempt <= maxRetries; attempt++) {
+    const res = await fetch(url, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${token}`,
+        'Content-Type': 'application/json',
+        'X-locale': 'en_GB',
+      },
+      body: JSON.stringify(body),
+    });
+    status = res.status;
+    text = await res.text();
+    if (res.ok) break;
 
-  const text = await res.text();
-  if (!res.ok) throw new Error(`FedEx rate error ${res.status}: ${text.slice(0, 800)}`);
+    const isHtml = text.trimStart().startsWith('<');
+    const wafBlock = status === 403 && /access denied|edgesuite/i.test(text);
+    const isTransient = status === 429 || status === 502 || status === 503 || wafBlock;
+    if (isTransient && attempt < maxRetries) {
+      await new Promise((r) => setTimeout(r, 800 * Math.pow(2, attempt) + Math.random() * 400));
+      continue;
+    }
+    // Don't dump the whole Akamai HTML page into the error/tooltip.
+    const detail = isHtml
+      ? `edge blocked the request (HTTP ${status} — likely rate limited, retry shortly)`
+      : text.slice(0, 400);
+    throw new Error(`FedEx rate error ${status}: ${detail}`);
+  }
 
   const data = JSON.parse(text) as FedExRateResponse;
   const details = data.output?.rateReplyDetails ?? [];

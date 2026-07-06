@@ -70,6 +70,35 @@ export interface AppUser {
   targets?: UserTarget[];
 }
 
+/**
+ * Buyer Inbox / email access is restricted to Comms and Admin only — not staff,
+ * and not managers. Checks both the multi-role list and the legacy single role.
+ */
+export function canAccessInbox(
+  user?: Pick<AppUser, 'role' | 'roles' | 'department' | 'departments'> | null,
+): boolean {
+  if (!user) return false;
+  const roles = user.roles?.length ? user.roles : [user.role];
+  if (roles.includes('admin') || roles.includes('comms')) return true;
+  // Also honour anyone assigned to the Comms department, whatever their role.
+  const depts = user.departments?.length ? user.departments : (user.department ? [user.department] : []);
+  return depts.includes('comms');
+}
+
+// ── Access control (admin-configurable, see src/lib/access.ts) ──
+// Per-resource rule. A user is granted if their role or department is listed, or
+// they're in allowUsers; denyUsers is a hard revoke that overrides everything.
+export interface ResourceRule {
+  roles: UserRole[];
+  departments: Department[];
+  allowUsers: string[];
+  denyUsers: string[];
+}
+export interface AccessConfig {
+  version: number;
+  resources: Record<string, ResourceRule>;
+}
+
 export interface EodEvent {
   orderId: string;
   salesRecordNumber: string;

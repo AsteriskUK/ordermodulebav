@@ -19,6 +19,24 @@ export interface RateResult {
   error?: string;
 }
 
+// Cap concurrent FedEx rate calls. Firing a whole batch at once bursts FedEx's
+// edge (Akamai 403 / 429), which is why most quotes came back N/A; a small pool
+// keeps every order priced.
+const FEDEX_CONCURRENCY = 4;
+
+async function mapWithConcurrency<T, R>(items: T[], limit: number, fn: (item: T) => Promise<R>): Promise<R[]> {
+  const results = new Array<R>(items.length);
+  let next = 0;
+  async function worker() {
+    while (next < items.length) {
+      const i = next++;
+      results[i] = await fn(items[i]);
+    }
+  }
+  await Promise.all(Array.from({ length: Math.min(limit, items.length) }, worker));
+  return results;
+}
+
 export async function POST(req: NextRequest) {
   const { orders } = (await req.json()) as { orders: Order[] };
   if (!orders?.length) {
@@ -28,8 +46,8 @@ export async function POST(req: NextRequest) {
   const shipDate = new Date().toISOString().slice(0, 10);
   const fedexConfigured = !!process.env.FEDEX_CLIENT_ID && !!process.env.FEDEX_CLIENT_SECRET && !!process.env.FEDEX_ACCOUNT_NUMBER;
 
-  const rates: RateResult[] = await Promise.all(
-    orders.map(async (order): Promise<RateResult> => {
+  const rates: RateResult[] = await mapWithConcurrency(orders, FEDEX_CONCURRENCY,
+    async (order): Promise<RateResult> => {
       const carrier = order.deliveryCarrier || 'FedEx';
 
       if (carrier === 'DPD') {
@@ -65,7 +83,7 @@ export async function POST(req: NextRequest) {
 
       // Other carriers (Royal Mail, Parcelforce, Other) have no rate source here.
       return { orderId: order.id, carrier, amount: null, currency: 'GBP', source: 'dpd_card', estimated: true, error: 'No rate source for carrier' };
-    })
+    }
   );
 
   return NextResponse.json({ rates });

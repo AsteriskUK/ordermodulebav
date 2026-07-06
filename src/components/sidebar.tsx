@@ -27,10 +27,12 @@ import {
   History,
   MessageSquareWarning,
   BarChart3,
+  Settings,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useOrderStore } from '@/lib/store';
 import { DEPARTMENT_CONFIG, Department } from '@/lib/types';
+import { can } from '@/lib/access';
 import { GlobalSearch } from './global-search';
 
 const ALL_NAV = [
@@ -56,6 +58,7 @@ const ALL_NAV = [
   { name: 'EOD Report', href: '/eod', icon: FileBarChart2, staffVisible: false, commsVisible: false },
   { name: 'HR Module', href: '/hr', icon: UsersRound, staffVisible: true, commsVisible: false },
   { name: 'Users & Roles', href: '/users', icon: Users, staffVisible: false, commsVisible: false },
+  { name: 'Settings', href: '/settings', icon: Settings, staffVisible: false, commsVisible: false },
 ];
 
 export function Sidebar({ collapsed, onToggle, onNavigate }: { collapsed: boolean; onToggle: () => void; onNavigate?: () => void }) {
@@ -68,10 +71,11 @@ export function Sidebar({ collapsed, onToggle, onNavigate }: { collapsed: boolea
   const missingItemsPending = useOrderStore((s) => s.missingItems.filter((m) => m.status === 'pending').length);
 
   const setCurrentUser = useOrderStore((s) => s.setCurrentUser);
+  const accessControl = useOrderStore((s) => s.accessControl);
   const isAdminOrManager = currentUser?.role === 'admin' || currentUser?.role === 'manager';
-  const navigation = isAdminOrManager
-    ? ALL_NAV
-    : ALL_NAV.filter((item) => item.staffVisible);
+  // Nav visibility is governed by the admin-configurable access rules (falls back
+  // to per-resource defaults when no config has been saved yet).
+  const navigation = ALL_NAV.filter((item) => can(currentUser, item.href, accessControl));
   const userDepts: Department[] = currentUser
     ? (currentUser.departments?.length ? currentUser.departments : [currentUser.department ?? 'management'])
     : [];

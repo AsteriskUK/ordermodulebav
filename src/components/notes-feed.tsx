@@ -3,6 +3,7 @@
 import { useMemo, useState, useEffect, useCallback } from 'react';
 import { useOrderStore } from '@/lib/store';
 import { OrderNote, ORDER_STATUS_CONFIG } from '@/lib/types';
+import { can } from '@/lib/access';
 import { MessageSquare, Search, Trash2, Plus, ShoppingBag, Send, RefreshCw, Inbox, ArrowLeft, Mail, MailOpen, ExternalLink } from 'lucide-react';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
@@ -140,6 +141,10 @@ const REASON_LABELS: Record<string, string> = {
 export function NotesFeed() {
   const orders = useOrderStore((s) => s.orders);
   const currentUser = useOrderStore((s) => s.users.find((u) => u.id === s.currentUserId));
+  const accessControl = useOrderStore((s) => s.accessControl);
+  // Buyer Inbox / email access is governed by the admin-configurable rules
+  // (default: Comms + Admin).
+  const canInbox = can(currentUser, 'feature:buyer-inbox', accessControl);
   const deleteOrderNote = useOrderStore((s) => s.deleteOrderNote);
   const addOrderNote = useOrderStore((s) => s.addOrderNote);
   const tickets = useOrderStore((s) => s.tickets);
@@ -262,7 +267,7 @@ export function NotesFeed() {
   }
 
   useEffect(() => {
-    if (tab === 'ebay') {
+    if (tab === 'ebay' && canInbox) {
       /* eslint-disable react-hooks/set-state-in-effect */
       loadEbayMessages();
       syncEbayInbox();
@@ -271,7 +276,7 @@ export function NotesFeed() {
       /* eslint-enable react-hooks/set-state-in-effect */
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [tab]);
+  }, [tab, canInbox]);
 
   // Our seller username = the sender that appears across the most conversations
   // (each buyer is unique to ~1 thread, so the seller is the clear mode).
@@ -532,7 +537,7 @@ export function NotesFeed() {
           </h2>
           <p className="text-slate-500 text-sm mt-1">Team notes and eBay &amp; BackMarket messages</p>
         </div>
-        {tab === 'ebay' && (
+        {tab === 'ebay' && canInbox && (
           <Button onClick={() => setShowNewEbayMsg(true)} className="bg-amber-600 hover:bg-amber-700 text-white">
             <img src={PLATFORM_LOGOS.ebay} alt="eBay" className="h-4 w-auto object-contain mr-1.5 brightness-0 invert" />
             New eBay Message
@@ -554,6 +559,7 @@ export function NotesFeed() {
         >
           Team Notes {feed.length > 0 && <span className="ml-1 text-xs opacity-75">({feed.length})</span>}
         </button>
+        {canInbox && (
         <button
           onClick={() => { setTab('ebay'); setSearch(''); setActiveKey(null); }}
           className={`px-5 py-2 font-medium transition-colors flex items-center gap-1.5 ${tab === 'ebay' ? 'bg-amber-600 text-white' : 'bg-white text-slate-600 hover:bg-slate-50'}`}
@@ -562,6 +568,7 @@ export function NotesFeed() {
           Inbox
           {unreadTotal > 0 && <span className="ml-0.5 bg-red-500 text-white text-[10px] font-bold rounded-full px-1.5 py-0.5 leading-none">{unreadTotal}</span>}
         </button>
+        )}
         <button
           onClick={() => { setTab('tickets'); setSearch(''); setActiveKey(null); }}
           className={`px-5 py-2 font-medium transition-colors flex items-center gap-1.5 ${tab === 'tickets' ? 'bg-blue-600 text-white' : 'bg-white text-slate-600 hover:bg-slate-50'}`}
@@ -665,8 +672,8 @@ export function NotesFeed() {
         </>
       )}
 
-      {/* ── EBAY INBOX TAB — Gmail-style two panes ── */}
-      {tab === 'ebay' && (
+      {/* ── EBAY INBOX TAB — Gmail-style two panes (Comms + Admin only) ── */}
+      {tab === 'ebay' && canInbox && (
         <div className="flex gap-3 h-[calc(100vh-12rem)] min-h-[420px]">
           {/* LEFT PANE — conversation list (full width on mobile until one is opened) */}
           <div className={`${activeConvo ? 'hidden md:flex' : 'flex'} w-full md:w-[320px] shrink-0 flex-col border border-slate-200 rounded-xl overflow-hidden bg-white`}>

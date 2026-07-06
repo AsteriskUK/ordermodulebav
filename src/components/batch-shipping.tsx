@@ -236,6 +236,8 @@ export function BatchShipping() {
   // Estimated label costs keyed by order id (DPD from rate card, FedEx live).
   const [rates, setRates] = useState<Map<string, RateResult>>(new Map());
   const [fetchingRates, setFetchingRates] = useState(false);
+  const [page, setPage] = useState(1);
+  const PAGE_SIZE = 100;
 
   const handleSort = (field: typeof sortField) => {
     if (sortField === field) {
@@ -456,6 +458,24 @@ export function BatchShipping() {
     return shipmentGroups.filter((g) => g.primary.deliveryCarrier === filterCarrier);
   }, [shipmentGroups, filterCarrier, multiOrderBuyerKeys]);
 
+  // Paginate the individual-mode table (max PAGE_SIZE rows per page). currentPage
+  // is clamped so a shrinking list never leaves us on an out-of-range page.
+  const pageCount = Math.max(1, Math.ceil(filteredShipmentGroups.length / PAGE_SIZE));
+  const currentPage = Math.min(page, pageCount);
+  const pagedShipmentGroups = useMemo(
+    () => filteredShipmentGroups.slice((currentPage - 1) * PAGE_SIZE, currentPage * PAGE_SIZE),
+    [filteredShipmentGroups, currentPage],
+  );
+  // Jump back to the first page whenever the filter or sort changes. Done during
+  // render (React's recommended pattern) rather than in an effect, so it applies
+  // before paint without an extra render pass.
+  const filterKey = `${filterCarrier}|${sortField}|${sortDir}`;
+  const [prevFilterKey, setPrevFilterKey] = useState(filterKey);
+  if (filterKey !== prevFilterKey) {
+    setPrevFilterKey(filterKey);
+    setPage(1);
+  }
+
   const filteredBundleGroups = useMemo(() => {
     if (filterCarrier === 'all') return bundleGroups;
     if (filterCarrier === 'collection') return bundleGroups.filter((g) => g.orders.every((o) => o.deliveryType === 'collection'));
@@ -622,7 +642,7 @@ export function BatchShipping() {
   };
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-6 min-w-max">
       <div className="flex items-start justify-between gap-4 flex-wrap">
         <div>
           <h2 className="text-2xl font-bold text-slate-900">Batch Shipping</h2>
@@ -898,9 +918,9 @@ export function BatchShipping() {
                 <p>No orders pending shipment</p>
               </div>
             ) : (
-              <div className="overflow-x-auto" style={{ maxHeight: 'calc(100vh - 340px)', overflowY: 'auto' }}>
+              <div className="max-h-[70vh] overflow-auto rounded-md border">
               <Table>
-                <TableHeader className="sticky top-0 z-10 bg-white">
+                <TableHeader className="sticky top-0 z-20 bg-slate-50 [&_th]:bg-slate-50">
                   <TableRow className="bg-slate-50">
                     <TableHead className="w-10 bg-slate-50">
                       <button onClick={toggleAll} className="p-1">
@@ -931,7 +951,7 @@ export function BatchShipping() {
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {filteredShipmentGroups.map((group) => {
+                  {pagedShipmentGroups.map((group) => {
                     const { primary, combinedTitle, totalPrice, deliveryCarrier, deliveryType, isMultiItem, ids } = group;
                     const groupKey = primary.salesRecordNumber || primary.id;
                     const isSelected = ids.some((id) => selectedIds.has(id));
@@ -1106,6 +1126,22 @@ export function BatchShipping() {
                   })}
                 </TableBody>
               </Table>
+              </div>
+            )}
+            {filteredShipmentGroups.length > PAGE_SIZE && (
+              <div className="flex items-center justify-between gap-3 pt-3 text-sm text-slate-600">
+                <span>
+                  Showing {(currentPage - 1) * PAGE_SIZE + 1}&ndash;{Math.min(currentPage * PAGE_SIZE, filteredShipmentGroups.length)} of {filteredShipmentGroups.length}
+                </span>
+                <div className="flex items-center gap-2">
+                  <Button variant="outline" size="sm" disabled={currentPage <= 1} onClick={() => setPage((p) => Math.max(1, p - 1))}>
+                    Previous
+                  </Button>
+                  <span className="text-xs text-slate-500">Page {currentPage} of {pageCount}</span>
+                  <Button variant="outline" size="sm" disabled={currentPage >= pageCount} onClick={() => setPage((p) => Math.min(pageCount, p + 1))}>
+                    Next
+                  </Button>
+                </div>
               </div>
             )}
           </CardContent>

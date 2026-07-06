@@ -46,6 +46,27 @@ function sanitizePostcode(postcode: string): string {
   return (postcode || '').trim().toUpperCase();
 }
 
+// FedEx needs ISO-2 country codes. Orders store non-GB countries as ISO codes
+// already (eBay/Amazon), but manual/CSV orders can carry full names ("Germany")
+// or "United Kingdom" — normalise all of these so international quotes don't fail
+// with DESTINATION.COUNTRY.INVALID.
+const COUNTRY_NAME_TO_ISO: Record<string, string> = {
+  'UNITED KINGDOM': 'GB', 'GREAT BRITAIN': 'GB', UK: 'GB', 'U.K.': 'GB', ENGLAND: 'GB', SCOTLAND: 'GB', WALES: 'GB',
+  IRELAND: 'IE', 'REPUBLIC OF IRELAND': 'IE',
+  GERMANY: 'DE', FRANCE: 'FR', SPAIN: 'ES', ITALY: 'IT', NETHERLANDS: 'NL', BELGIUM: 'BE', LUXEMBOURG: 'LU',
+  PORTUGAL: 'PT', AUSTRIA: 'AT', DENMARK: 'DK', SWEDEN: 'SE', FINLAND: 'FI', POLAND: 'PL', 'CZECH REPUBLIC': 'CZ',
+  SWITZERLAND: 'CH', NORWAY: 'NO', GREECE: 'GR', HUNGARY: 'HU', ROMANIA: 'RO', BULGARIA: 'BG', CROATIA: 'HR',
+  SLOVAKIA: 'SK', SLOVENIA: 'SI', ESTONIA: 'EE', LATVIA: 'LV', LITHUANIA: 'LT', 'UNITED STATES': 'US',
+  'UNITED STATES OF AMERICA': 'US', USA: 'US', CANADA: 'CA', AUSTRALIA: 'AU', 'NEW ZEALAND': 'NZ',
+};
+
+function toCountryCode(value: string | undefined): string {
+  const v = (value || '').trim();
+  if (!v) return 'GB';
+  if (/^[A-Za-z]{2}$/.test(v)) return v.toUpperCase();      // already an ISO-2 code
+  return COUNTRY_NAME_TO_ISO[v.toUpperCase()] || v.toUpperCase();
+}
+
 function normalizeUKPostcode(postcode: string): string | null {
   const cleaned = postcode.replace(/\s+/g, '').toUpperCase();
   const match = cleaned.match(/^([A-Z]{1,2})([0-9][A-Z0-9]?)([0-9][A-Z]{2})$/);
@@ -55,7 +76,8 @@ function normalizeUKPostcode(postcode: string): string | null {
 }
 
 export function buildFedExShipmentPayload(order: Order, shipDate: string): FedExShipmentRequest {
-  const isInternational = order.postToCountry !== 'United Kingdom' && order.postToCountry !== 'GB';
+  const countryCode = toCountryCode(order.postToCountry);
+  const isInternational = countryCode !== 'GB';
   const isNextDay = order.deliveryType === 'next_day' || order.deliveryType === 'express';
   const serviceType = isInternational
     ? 'INTERNATIONAL_ECONOMY'
@@ -63,8 +85,6 @@ export function buildFedExShipmentPayload(order: Order, shipDate: string): FedEx
     ? 'FEDEX_PRIORITY_EXPRESS'
     : 'FEDEX_PRIORITY';
   const numberOfBoxes = order.numberOfBoxes ?? 1;
-
-  const countryCode = order.postToCountry === 'United Kingdom' ? 'GB' : (order.postToCountry || 'GB');
   const rawRecipientPostcode = sanitizePostcode(order.postToPostcode || '');
   const normalizedUKPostcode = countryCode === 'GB' ? normalizeUKPostcode(rawRecipientPostcode) : null;
   const recipientPostcode = countryCode === 'GB'

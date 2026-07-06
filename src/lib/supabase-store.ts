@@ -1,5 +1,5 @@
 import { supabase } from './supabase-client';
-import { Order, Batch, AppUser, AttendanceRecord, LeaveRequest, LeaveBalance, EodEvent, ReturnRecord, TicketRecord, Department, TicketStatus, TicketPriority, TicketContactMethod, TicketActivity, MissingItemRecord, MissingPart, InventoryPart, StockUnit, StockLevel, GoodsReceipt, GoodsReceiptLine, GoodsReceiptStatus, Build, BuildLine } from './types';
+import { Order, Batch, AppUser, AttendanceRecord, LeaveRequest, LeaveBalance, EodEvent, ReturnRecord, TicketRecord, Department, TicketStatus, TicketPriority, TicketContactMethod, TicketActivity, MissingItemRecord, MissingPart, InventoryPart, StockUnit, StockLevel, GoodsReceipt, GoodsReceiptLine, GoodsReceiptStatus, Build, BuildLine, AccessConfig } from './types';
 import { StockTracking, StockUnitStatus, BuildStatus } from './inventory-config';
 
 // Helper to check if string is valid UUID
@@ -135,10 +135,17 @@ export async function fetchOrders(): Promise<Order[]> {
     .limit(3000);
 
   if (error) {
-    console.error('Error fetching orders:', error);
+    // Supabase error fields are non-enumerable, so logging the object prints "{}".
+    // Pull them out explicitly so the real cause (timeout, RLS, network) is visible.
+    console.error('Error fetching orders:', {
+      message: error.message,
+      code: error.code,
+      details: error.details,
+      hint: error.hint,
+    });
     return [];
   }
-  
+
   return data?.map(o => ({
     id: o.id,
     salesRecordNumber: o.sales_record_number,
@@ -260,6 +267,7 @@ export async function syncOrder(order: Order): Promise<void> {
       dispatched_on_date: order.dispatchedOnDate,
       imported_at: order.importedAt,
       return_id: order.returnId,
+      // deleted_at: order.deletedAt ?? null, // requires migration: ALTER TABLE orders ADD COLUMN IF NOT EXISTS deleted_at timestamptz;
       metadata: {
         is_replacement: order.isReplacement,
         original_order_id: order.originalOrderId,
@@ -305,6 +313,20 @@ export async function syncOrder(order: Order): Promise<void> {
       console.error('Error syncing order notes:', JSON.stringify(notesError, null, 2));
     }
   }
+}
+
+export async function softDeleteOrderInSupabase(orderId: string, _deletedAt: string): Promise<void> {
+  // No-op until migration is run: ALTER TABLE orders ADD COLUMN IF NOT EXISTS deleted_at timestamptz;
+  // Once added, replace with: await supabase.from('orders').update({ deleted_at: _deletedAt }).eq('id', orderId);
+  void orderId;
+}
+
+export async function hardDeleteOrderFromSupabase(orderId: string): Promise<void> {
+  const { error } = await supabase
+    .from('orders')
+    .delete()
+    .eq('id', orderId);
+  if (error) console.error('Error hard-deleting order:', error);
 }
 
 // ==================== ATTENDANCE ====================
@@ -796,11 +818,40 @@ export async function fetchBuilds(): Promise<Build[]> {
   })) || [];
 }
 
+// ==================== ACCESS CONTROL ====================
+// Admin-configured permissions, stored as a JSON blob in app_settings so every
+// device/user shares the same config. See src/lib/access.ts.
+
+export async function fetchAccessControl(): Promise<AccessConfig | null> {
+  const { data, error } = await supabase
+    .from('app_settings')
+    .select('value')
+    .eq('key', 'access_control')
+    .maybeSingle();
+  if (error) {
+    console.error('Error fetching access control:', { message: error.message, code: error.code });
+    return null;
+  }
+  if (!data?.value) return null;
+  try {
+    return typeof data.value === 'string' ? (JSON.parse(data.value) as AccessConfig) : (data.value as AccessConfig);
+  } catch {
+    return null;
+  }
+}
+
+export async function saveAccessControl(config: AccessConfig): Promise<void> {
+  const { error } = await supabase
+    .from('app_settings')
+    .upsert({ key: 'access_control', value: JSON.stringify(config), updated_at: new Date().toISOString() });
+  if (error) console.error('Error saving access control:', { message: error.message, code: error.code });
+}
+
 // ==================== FULL SYNC ====================
 
 export async function loadAllFromSupabase() {
   const [users, batches, orders, returns, attendanceRecords, leaveRequests, leaveBalances, tickets, missingItems,
-         inventoryParts, stockUnits, stockLevels, goodsReceipts, builds] = await Promise.all([
+         inventoryParts, stockUnits, stockLevels, goodsReceipts, builds, accessControl] = await Promise.all([
     fetchUsers(),
     fetchBatches(),
     fetchOrders(),
@@ -815,6 +866,7 @@ export async function loadAllFromSupabase() {
     fetchStockLevels(),
     fetchGoodsReceipts(),
     fetchBuilds(),
+    fetchAccessControl(),
   ]);
 
   return {
@@ -832,5 +884,6 @@ export async function loadAllFromSupabase() {
     stockLevels,
     goodsReceipts,
     builds,
+    accessControl,
   };
 }
