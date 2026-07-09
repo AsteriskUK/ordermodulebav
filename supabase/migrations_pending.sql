@@ -136,3 +136,6 @@ ALTER TABLE amazon_messages ALTER COLUMN action DROP NOT NULL;
 
 -- ---- eBay messages: keep raw HTML of "From eBay" emails for invoice preview ----
 ALTER TABLE ebay_messages ADD COLUMN IF NOT EXISTS message_html TEXT;
+
+-- ---- Builds: record component swaps (parts pulled out / put in during assembly) ----
+ALTER TABLE builds ADD COLUMN IF NOT EXISTS swaps JSONB DEFAULT '[]'::jsonb;

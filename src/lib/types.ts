@@ -271,6 +271,25 @@ export interface BuildLine {
 }
 
 /**
+ * A component swap recorded during assembly: parts pulled OUT of a unit (returned
+ * to stock) and the replacement put IN (consumed from stock). E.g. 2×8GB out,
+ * 1×16GB in. Inventory is adjusted when the swap is recorded.
+ */
+export interface BuildSwap {
+  id: string;
+  category: string;                                 // INVENTORY_CATEGORIES key
+  outLabel: string;                                 // e.g. "8GB"
+  outAttributes: Record<string, string | number>;
+  outQty: number;
+  inLabel: string;                                  // e.g. "16GB"
+  inAttributes: Record<string, string | number>;
+  inQty: number;
+  at: string;
+  byId?: string;
+  byName?: string;
+}
+
+/**
  * A build links an order to the parts allocated to it. While `reserved` the parts
  * are on hold (assembling); when the order reaches packed the build is `consumed`
  * and stock is deducted (negative allowed).
@@ -280,6 +299,7 @@ export interface Build {
   orderId: string;
   status: BuildStatus;
   lines: BuildLine[];
+  swaps?: BuildSwap[];          // component swaps recorded during assembly
   notes?: string;
   createdById?: string;
   createdByName?: string;

@@ -70,6 +70,7 @@ export function BuildPanel({ order, onClose }: { order: Order; onClose: () => vo
       id: existing?.id ?? uuid(),
       orderId: order.id,
       status: 'reserved',
+      swaps: existing?.swaps,   // preserve swaps recorded in the assembly builder
       lines: cleaned.map((l) => {
         const part = parts.find((p) => p.id === l.partId);
         return { ...l, category: part?.category ?? l.category, description: part ? describeAttributes(part.category, part.attributes) || part.name : l.description };

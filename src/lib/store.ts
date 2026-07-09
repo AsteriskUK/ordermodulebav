@@ -1,7 +1,7 @@
 import { create } from 'zustand';
 import { persist, createJSONStorage } from 'zustand/middleware';
 import { get, set as idbSet, del } from 'idb-keyval';
-import { Order, OrderNote, OrderStatus, Batch, DeliveryCarrier, DeliveryType, AppUser, EodEvent, ReturnRecord, ReplacementItem, MissingItemRecord, Department, AttendanceRecord, LeaveRequest, LeaveBalance, TicketRecord, TicketActivity, InventoryPart, StockUnit, StockLevel, GoodsReceipt, Build, AccessConfig } from './types';
+import { Order, OrderNote, OrderStatus, Batch, DeliveryCarrier, DeliveryType, AppUser, EodEvent, ReturnRecord, ReplacementItem, MissingItemRecord, Department, AttendanceRecord, LeaveRequest, LeaveBalance, TicketRecord, TicketActivity, InventoryPart, StockUnit, StockLevel, GoodsReceipt, Build, BuildSwap, AccessConfig } from './types';
 import { syncAttendance, syncLeaveRequest, syncLeaveBalance, syncOrder, syncBatch, syncUser, deleteUserFromSupabase, syncReturn, syncTicket, deleteTicketFromSupabase, syncMissingItem, syncInventoryPart, syncStockUnit, syncStockLevel, syncGoodsReceipt, syncBuild, softDeleteOrderInSupabase, hardDeleteOrderFromSupabase } from './supabase-store';
 import { buildSku, INVENTORY_CATEGORY_MAP } from './inventory-config';
 
@@ -108,6 +108,8 @@ interface OrderStore {
   saveBuild: (build: Build) => void;          // create/update + reserve serialized units
   cancelBuild: (buildId: string) => void;     // release the hold
   consumeBuild: (buildId: string) => void;    // deduct from stock (negative allowed)
+  recordBuildSwap: (orderId: string, swap: BuildSwap) => void;   // out→stock, in→consumed
+  removeBuildSwap: (orderId: string, swapId: string) => void;    // reverse a recorded swap
   // HR Actions
   attendanceRecords: AttendanceRecord[];
   leaveRequests: LeaveRequest[];
@@ -752,6 +754,93 @@ export const useOrderStore = create<OrderStore>()(
         syncBuild(build).catch(console.error);
         get().stockUnits.filter((u) => newUnitIds.includes(u.id) || releaseIds.includes(u.id))
           .forEach((u) => syncStockUnit(u).catch(console.error));
+      },
+      // ── Component swaps (assembly) ──
+      // Adjust a bulk part's on-hand quantity by `delta`, creating the part +
+      // stock level if needed. Returns the touched part/level so callers persist.
+      recordBuildSwap: (orderId, swap) => {
+        const state = get();
+        const now = new Date().toISOString();
+        const user = state.users.find((u) => u.id === state.currentUserId);
+
+        const parts = [...state.inventoryParts];
+        const levels = [...state.stockLevels];
+        const touchedParts: InventoryPart[] = [];
+        const touchedLevels: StockLevel[] = [];
+
+        const adjust = (category: string, attributes: Record<string, string | number>, delta: number) => {
+          if (!delta) return;
+          const sku = buildSku(category, attributes);
+          let part = parts.find((p) => p.sku === sku && p.category === category);
+          if (!part) {
+            const cat = INVENTORY_CATEGORY_MAP[category];
+            part = {
+              id: generateUUID(), sku, category, tracking: 'bulk',
+              name: `${cat?.label ?? category} ${sku.replace(`${category.toUpperCase()}-`, '').replace(/-/g, ' ')}`.trim(),
+              attributes, createdAt: now, updatedAt: now,
+            };
+            parts.push(part);
+            touchedParts.push(part);
+          }
+          // Harvested/consumed stock is tracked at the default (no grade/location) level.
+          let level = levels.find((l) => l.partId === part!.id && !l.grade && !l.location);
+          if (!level) {
+            level = { id: generateUUID(), partId: part.id, quantity: 0, updatedAt: now };
+            levels.push(level);
+          }
+          level.quantity += delta;   // negative allowed (consumed beyond on-hand)
+          level.updatedAt = now;
+          if (!touchedLevels.includes(level)) touchedLevels.push(level);
+        };
+
+        // Removed parts go back to stock (+); the installed replacement is consumed (−).
+        adjust(swap.category, swap.outAttributes, swap.outQty);
+        adjust(swap.category, swap.inAttributes, -swap.inQty);
+
+        const fullSwap: BuildSwap = { ...swap, at: swap.at || now, byId: swap.byId ?? user?.id, byName: swap.byName ?? user?.name };
+
+        set((s) => {
+          const existing = s.builds.find((b) => b.orderId === orderId && b.status !== 'cancelled');
+          const build: Build = existing
+            ? { ...existing, swaps: [...(existing.swaps ?? []), fullSwap], updatedAt: now }
+            : { id: generateUUID(), orderId, status: 'reserved', lines: [], swaps: [fullSwap], createdById: user?.id, createdByName: user?.name, reservedAt: now, createdAt: now, updatedAt: now };
+          const builds = existing ? s.builds.map((b) => (b.id === build.id ? build : b)) : [build, ...s.builds];
+          syncBuild(build).catch(console.error);
+          return { builds, inventoryParts: parts, stockLevels: levels };
+        });
+
+        touchedParts.forEach((p) => syncInventoryPart(p).catch(console.error));
+        touchedLevels.forEach((l) => syncStockLevel(l).catch(console.error));
+      },
+      removeBuildSwap: (orderId, swapId) => {
+        const state = get();
+        const build = state.builds.find((b) => b.orderId === orderId && b.status !== 'cancelled');
+        const swap = build?.swaps?.find((sw) => sw.id === swapId);
+        if (!build || !swap) return;
+        const now = new Date().toISOString();
+        const parts = [...state.inventoryParts];
+        const levels = [...state.stockLevels];
+        const touchedLevels: StockLevel[] = [];
+
+        const adjust = (attributes: Record<string, string | number>, delta: number) => {
+          if (!delta) return;
+          const sku = buildSku(swap.category, attributes);
+          const part = parts.find((p) => p.sku === sku && p.category === swap.category);
+          if (!part) return;
+          const level = levels.find((l) => l.partId === part.id && !l.grade && !l.location);
+          if (!level) return;
+          level.quantity += delta;
+          level.updatedAt = now;
+          if (!touchedLevels.includes(level)) touchedLevels.push(level);
+        };
+        // Reverse the original adjustment: pull the returned parts back out, restore the consumed one.
+        adjust(swap.outAttributes, -swap.outQty);
+        adjust(swap.inAttributes, swap.inQty);
+
+        const updated: Build = { ...build, swaps: (build.swaps ?? []).filter((sw) => sw.id !== swapId), updatedAt: now };
+        set((s) => ({ builds: s.builds.map((b) => (b.id === build.id ? updated : b)), stockLevels: levels }));
+        syncBuild(updated).catch(console.error);
+        touchedLevels.forEach((l) => syncStockLevel(l).catch(console.error));
       },
       cancelBuild: (buildId) => {
         const state = get();

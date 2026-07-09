@@ -248,6 +248,65 @@ export function describeAttributes(categoryKey: string, attributes: Record<strin
     .join(' · ');
 }
 
+// ─── Component swaps (assembly) ──────────────────────────────────────────────
+// During assembly a worker may pull a part out of a unit and put a different one
+// in (e.g. 2×8GB out, 1×16GB in). Each category has a "swap dimension" — the one
+// spec that varies in a swap — with predefined preset values shown as chips. Any
+// category not listed falls back to its first identifying attribute; a free-text
+// custom value is always allowed.
+const SWAP_DIMENSION: Record<string, { key: string; values: (string | number)[] }> = {
+  ram:         { key: 'capacity', values: [4, 8, 16, 32, 64] },
+  storage:     { key: 'capacity', values: ['128GB', '256GB', '512GB', '1TB', '2TB', '4TB'] },
+  cpu:         { key: 'family',   values: ['Core i3', 'Core i5', 'Core i7', 'Core i9', 'Ryzen 3', 'Ryzen 5', 'Ryzen 7', 'Ryzen 9'] },
+  gpu:         { key: 'memory',   values: [2, 4, 6, 8, 12, 16] },
+  charger:     { key: 'wattage',  values: [45, 65, 90, 120, 150] },
+  psu:         { key: 'wattage',  values: [450, 550, 650, 750, 850] },
+  motherboard: { key: 'socket',   values: ['LGA1151', 'LGA1200', 'LGA1700', 'AM4', 'AM5'] },
+  case:        { key: 'form_factor', values: ['ATX', 'Micro-ATX', 'Mini-ITX', 'Mid Tower', 'Full Tower', 'SFF'] },
+  cooler:      { key: 'type',     values: ['Air', 'AIO Liquid'] },
+  battery:     { key: 'compatible', values: [] }, // free-text only
+  monitor:     { key: 'size',     values: [22, 24, 27, 32] },
+  laptop:      { key: 'ram',      values: [4, 8, 16, 32] },
+  desktop:     { key: 'ram',      values: [4, 8, 16, 32, 64] },
+  misc:        { key: 'description', values: [] },
+};
+
+export interface SwapPreset {
+  label: string;                                   // chip text, e.g. "8GB"
+  attributes: Record<string, string | number>;     // partial attrs, e.g. { capacity: 8 }
+}
+
+export interface SwapConfig {
+  dimensionKey: string;      // the attribute that varies (e.g. "capacity")
+  dimensionLabel: string;    // human label (e.g. "Capacity")
+  unit: string;              // e.g. "GB", "W", ""
+  presets: SwapPreset[];     // predefined chips (may be empty → custom only)
+}
+
+/** Predefined swap options for a category's swap dimension (+ free-text always allowed). */
+export function swapConfigForCategory(categoryKey: string): SwapConfig {
+  const cat = INVENTORY_CATEGORY_MAP[categoryKey];
+  const dim = SWAP_DIMENSION[categoryKey];
+  // Fall back to the first identifying attribute for uncurated categories.
+  const attrKey = dim?.key ?? cat?.attributes.find((a) => a.identifying)?.key ?? 'spec';
+  const attr = cat?.attributes.find((a) => a.key === attrKey);
+  const unit = attr?.unit ?? '';
+  // Curated values, else the attribute's own select options, else free-text only.
+  const values = dim?.values.length ? dim.values : (attr?.options ?? []);
+  const presets: SwapPreset[] = values.map((v) => ({
+    label: `${v}${unit}`,
+    attributes: { [attrKey]: v },
+  }));
+  return { dimensionKey: attrKey, dimensionLabel: attr?.label ?? 'Spec', unit, presets };
+}
+
+/** Build the label + attributes for a custom (free-text) swap value. */
+export function customSwapPreset(categoryKey: string, value: string): SwapPreset {
+  const { dimensionKey, unit } = swapConfigForCategory(categoryKey);
+  const trimmed = value.trim();
+  return { label: unit && /^\d+$/.test(trimmed) ? `${trimmed}${unit}` : trimmed, attributes: { [dimensionKey]: trimmed } };
+}
+
 /** Stable SKU from category + identifying attributes, so identical parts match. */
 export function buildSku(categoryKey: string, attributes: Record<string, string | number>): string {
   const cat = INVENTORY_CATEGORY_MAP[categoryKey];

@@ -2,17 +2,17 @@
 
 import { useEffect, useMemo, useState } from 'react';
 import { useOrderStore } from '@/lib/store';
-import { Order, Build, BuildLine, CatalogProduct } from '@/lib/types';
+import { Order, Build, BuildLine, BuildSwap, CatalogProduct } from '@/lib/types';
 import {
   INVENTORY_CATEGORIES, INVENTORY_CATEGORY_MAP, describeAttributes, buildSku,
-  requiredSlotsForCategory, BUILD_STATUS_CONFIG,
+  requiredSlotsForCategory, BUILD_STATUS_CONFIG, swapConfigForCategory, customSwapPreset, SwapPreset,
 } from '@/lib/inventory-config';
 import { computeAvailability } from '@/lib/inventory-utils';
 import { suggestBuildLines } from '@/lib/inventory-build';
 import { fetchCatalogPage, catalogToAttributes, INVENTORY_TO_CATALOG_CATEGORY } from '@/lib/catalog';
 import { Button } from '@/components/ui/button';
 import { toast } from 'sonner';
-import { X, Check, ChevronLeft, Plus, CircleAlert, Cpu, Boxes, ArrowRight, Minus, Library, Search, Loader2 } from 'lucide-react';
+import { X, Check, ChevronLeft, Plus, CircleAlert, Cpu, Boxes, ArrowRight, Minus, Library, Search, Loader2, Repeat, Trash2, ArrowRightLeft } from 'lucide-react';
 
 function uuid(): string {
   return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, (c) => {
@@ -32,6 +32,8 @@ export function AssemblyBuilder({ order, onClose }: { order: Order; onClose: () 
   const saveBuild = useOrderStore((s) => s.saveBuild);
   const updateOrderStatus = useOrderStore((s) => s.updateOrderStatus);
   const upsertInventoryPart = useOrderStore((s) => s.upsertInventoryPart);
+  const recordBuildSwap = useOrderStore((s) => s.recordBuildSwap);
+  const removeBuildSwap = useOrderStore((s) => s.removeBuildSwap);
 
   const existing = useMemo(() => builds.find((b) => b.orderId === order.id && b.status !== 'cancelled'), [builds, order.id]);
 
@@ -98,6 +100,7 @@ export function AssemblyBuilder({ order, onClose }: { order: Order; onClose: () 
     const now = new Date().toISOString();
     const build: Build = {
       id: existing?.id ?? uuid(), orderId: order.id, status: 'reserved', lines,
+      swaps: existing?.swaps,   // preserve any swaps recorded during assembly
       createdById: existing?.createdById ?? currentUser?.id, createdByName: existing?.createdByName ?? currentUser?.name,
       reservedAt: existing?.reservedAt ?? now, createdAt: existing?.createdAt ?? now, updatedAt: now,
     };
@@ -137,6 +140,10 @@ export function AssemblyBuilder({ order, onClose }: { order: Order; onClose: () 
             filters={filters} setFilters={setFilters}
             onPick={(sel) => pick(openSlot, sel)}
             onPickCatalog={(cp, qty) => pickCatalog(openSlot, cp, qty)}
+            swaps={(existing?.swaps ?? []).filter((sw) => sw.category === openSlot)}
+            readOnly={readOnly}
+            onRecordSwap={(sw) => recordBuildSwap(order.id, sw)}
+            onRemoveSwap={(id) => removeBuildSwap(order.id, id)}
           />
         ) : (
           <div className="max-w-4xl mx-auto grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
@@ -209,7 +216,7 @@ function AddSlotButton({ onAdd, existing }: { onAdd: (cat: string) => void; exis
   );
 }
 
-function SlotPicker({ slot, parts, stockUnits, stockLevels, builds, filters, setFilters, onPick, onPickCatalog }: {
+function SlotPicker({ slot, parts, stockUnits, stockLevels, builds, filters, setFilters, onPick, onPickCatalog, swaps, readOnly, onRecordSwap, onRemoveSwap }: {
   slot: string;
   parts: ReturnType<typeof useOrderStore.getState>['inventoryParts'];
   stockUnits: ReturnType<typeof useOrderStore.getState>['stockUnits'];
@@ -219,6 +226,10 @@ function SlotPicker({ slot, parts, stockUnits, stockLevels, builds, filters, set
   setFilters: (f: Record<string, string>) => void;
   onPick: (sel: Selection) => void;
   onPickCatalog: (cp: CatalogProduct, qty: number) => void;
+  swaps: BuildSwap[];
+  readOnly: boolean;
+  onRecordSwap: (swap: BuildSwap) => void;
+  onRemoveSwap: (swapId: string) => void;
 }) {
   const cat = INVENTORY_CATEGORY_MAP[slot];
   const serialized = cat?.tracking === 'serialized';
@@ -235,6 +246,8 @@ function SlotPicker({ slot, parts, stockUnits, stockLevels, builds, filters, set
 
   return (
     <div className="max-w-3xl mx-auto space-y-4">
+      <SwapSection slot={slot} swaps={swaps} readOnly={readOnly} onRecordSwap={onRecordSwap} onRemoveSwap={onRemoveSwap} />
+
       {catParts.length === 0 && (
         <div className="text-center py-8 text-slate-400">
           <CircleAlert className="h-8 w-8 mx-auto mb-2 text-slate-200" />
@@ -297,6 +310,122 @@ function SlotPicker({ slot, parts, stockUnits, stockLevels, builds, filters, set
       </div>
 
       {catalogCat && <CatalogSlotPicker catalogCat={catalogCat} onPickCatalog={onPickCatalog} />}
+    </div>
+  );
+}
+
+/** Record a component swap for this slot: parts pulled OUT (back to stock) + the
+ *  replacement put IN (consumed). E.g. 2×8GB out, 1×16GB in. */
+function SwapSection({ slot, swaps, readOnly, onRecordSwap, onRemoveSwap }: {
+  slot: string;
+  swaps: BuildSwap[];
+  readOnly: boolean;
+  onRecordSwap: (swap: BuildSwap) => void;
+  onRemoveSwap: (swapId: string) => void;
+}) {
+  const cfg = swapConfigForCategory(slot);
+  const label = INVENTORY_CATEGORY_MAP[slot]?.label ?? slot;
+  const [open, setOpen] = useState(false);
+  const [outSel, setOutSel] = useState<SwapPreset | null>(null);
+  const [inSel, setInSel] = useState<SwapPreset | null>(null);
+  const [outCustom, setOutCustom] = useState('');
+  const [inCustom, setInCustom] = useState('');
+  const [outQty, setOutQty] = useState(1);
+  const [inQty, setInQty] = useState(1);
+
+  function reset() { setOutSel(null); setInSel(null); setOutCustom(''); setInCustom(''); setOutQty(1); setInQty(1); }
+
+  function record() {
+    const out = outSel ?? (outCustom.trim() ? customSwapPreset(slot, outCustom) : null);
+    const inp = inSel ?? (inCustom.trim() ? customSwapPreset(slot, inCustom) : null);
+    if (!out || !inp) { toast.error('Choose both the removed part and the installed part'); return; }
+    onRecordSwap({
+      id: uuid(), category: slot,
+      outLabel: out.label, outAttributes: out.attributes, outQty,
+      inLabel: inp.label, inAttributes: inp.attributes, inQty,
+      at: new Date().toISOString(),
+    });
+    toast.success(`Swap recorded · ${outQty}× ${out.label} out → ${inQty}× ${inp.label} in`);
+    reset();
+    setOpen(false);
+  }
+
+  // Renders the preset chips + custom input + qty stepper for one side of the swap.
+  function side(
+    title: string, tone: 'out' | 'in',
+    sel: SwapPreset | null, setSel: (p: SwapPreset | null) => void,
+    custom: string, setCustom: (v: string) => void,
+    qty: number, setQty: (n: number) => void,
+  ) {
+    const accent = tone === 'out' ? 'text-red-600' : 'text-green-600';
+    return (
+      <div className="space-y-2">
+        <p className={`text-xs font-semibold ${accent}`}>{title}</p>
+        {cfg.presets.length > 0 && (
+          <div className="flex flex-wrap gap-1.5">
+            {cfg.presets.map((p) => {
+              const selected = !custom && sel?.label === p.label;
+              return (
+                <button key={p.label} onClick={() => { setSel(p); setCustom(''); }}
+                  className={`text-xs px-2.5 py-1 rounded-full border font-medium ${selected ? 'bg-slate-800 text-white border-slate-800' : 'bg-white text-slate-600 border-slate-300 hover:bg-slate-50'}`}>
+                  {p.label}
+                </button>
+              );
+            })}
+          </div>
+        )}
+        <div className="flex items-center gap-2">
+          <input
+            value={custom}
+            onChange={(e) => { setCustom(e.target.value); setSel(null); }}
+            placeholder={`Custom ${cfg.dimensionLabel.toLowerCase()}…`}
+            className="flex-1 min-w-0 px-2 py-1.5 border border-slate-300 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+          />
+          <div className="flex items-center gap-1 shrink-0">
+            <button onClick={() => setQty(Math.max(1, qty - 1))} className="p-1 rounded hover:bg-slate-100 text-slate-500"><Minus className="h-4 w-4" /></button>
+            <span className="w-6 text-center text-sm font-bold">{qty}</span>
+            <button onClick={() => setQty(qty + 1)} className="p-1 rounded hover:bg-slate-100 text-slate-500"><Plus className="h-4 w-4" /></button>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="rounded-xl border border-amber-200 bg-amber-50/60">
+      <button onClick={() => setOpen((o) => !o)} className="w-full flex items-center justify-between px-4 py-2.5">
+        <span className="flex items-center gap-2 text-sm font-semibold text-amber-800">
+          <Repeat className="h-4 w-4" /> Swap {label} — parts in / out{swaps.length ? ` · ${swaps.length} recorded` : ''}
+        </span>
+        <span className="text-xs text-amber-600">{open ? 'Hide' : readOnly ? 'View' : 'Record'}</span>
+      </button>
+
+      {open && !readOnly && (
+        <div className="px-4 pb-4 space-y-3">
+          {side('Removed (out) — returns to stock', 'out', outSel, setOutSel, outCustom, setOutCustom, outQty, setOutQty)}
+          <div className="flex items-center justify-center text-amber-500"><ArrowRightLeft className="h-4 w-4" /></div>
+          {side('Installed (in) — consumed from stock', 'in', inSel, setInSel, inCustom, setInCustom, inQty, setInQty)}
+          <Button size="sm" onClick={record} className="w-full bg-amber-600 hover:bg-amber-700 text-white">Record swap</Button>
+        </div>
+      )}
+
+      {swaps.length > 0 && (
+        <div className="px-4 pb-3 space-y-1.5">
+          {swaps.map((sw) => (
+            <div key={sw.id} className="flex items-center gap-2 text-xs bg-white border border-slate-200 rounded-lg px-2.5 py-1.5">
+              <span className="text-red-600 font-medium shrink-0">{sw.outQty}× {sw.outLabel}</span>
+              <ArrowRight className="h-3 w-3 text-slate-400 shrink-0" />
+              <span className="text-green-600 font-medium shrink-0">{sw.inQty}× {sw.inLabel}</span>
+              {sw.byName && <span className="text-slate-400 truncate ml-1">· {sw.byName}</span>}
+              {!readOnly && (
+                <button onClick={() => onRemoveSwap(sw.id)} className="ml-auto text-slate-300 hover:text-red-500 shrink-0" title="Undo swap">
+                  <Trash2 className="h-3.5 w-3.5" />
+                </button>
+              )}
+            </div>
+          ))}
+        </div>
+      )}
     </div>
   );
 }

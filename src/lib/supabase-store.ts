@@ -1,5 +1,5 @@
 import { supabase } from './supabase-client';
-import { Order, Batch, AppUser, AttendanceRecord, LeaveRequest, LeaveBalance, EodEvent, ReturnRecord, TicketRecord, Department, TicketStatus, TicketPriority, TicketContactMethod, TicketActivity, MissingItemRecord, MissingPart, InventoryPart, StockUnit, StockLevel, GoodsReceipt, GoodsReceiptLine, GoodsReceiptStatus, Build, BuildLine, AccessConfig } from './types';
+import { Order, Batch, AppUser, AttendanceRecord, LeaveRequest, LeaveBalance, EodEvent, ReturnRecord, TicketRecord, Department, TicketStatus, TicketPriority, TicketContactMethod, TicketActivity, MissingItemRecord, MissingPart, InventoryPart, StockUnit, StockLevel, GoodsReceipt, GoodsReceiptLine, GoodsReceiptStatus, Build, BuildLine, BuildSwap, AccessConfig } from './types';
 import { StockTracking, StockUnitStatus, BuildStatus } from './inventory-config';
 
 // Helper to check if string is valid UUID
@@ -798,11 +798,17 @@ export async function fetchGoodsReceipts(): Promise<GoodsReceipt[]> {
 
 export async function syncBuild(b: Build): Promise<void> {
   if (!isValidUUID(b.id)) return;
-  const { error } = await supabase.from('builds').upsert({
-    id: b.id, order_id: b.orderId, status: b.status, lines: b.lines ?? [], notes: b.notes,
+  const row: Record<string, unknown> = {
+    id: b.id, order_id: b.orderId, status: b.status, lines: b.lines ?? [], swaps: b.swaps ?? [], notes: b.notes,
     created_by_id: b.createdById, created_by_name: b.createdByName,
     reserved_at: b.reservedAt, consumed_at: b.consumedAt, created_at: b.createdAt,
-  });
+  };
+  let { error } = await supabase.from('builds').upsert(row);
+  // Tolerate the swaps column not existing yet (its migration may be unapplied).
+  if (error && error.code === '42703' && /swaps/.test(error.message)) {
+    delete row.swaps;
+    ({ error } = await supabase.from('builds').upsert(row));
+  }
   if (error) console.error('Error syncing build:', JSON.stringify(error, null, 2));
 }
 
@@ -811,7 +817,7 @@ export async function fetchBuilds(): Promise<Build[]> {
   if (error) { console.warn('[inventory] table not ready yet (run migration) — fetching builds:', error?.message || error); return []; }
   return data?.map((b) => ({
     id: b.id, orderId: b.order_id, status: (b.status ?? 'reserved') as BuildStatus,
-    lines: (b.lines ?? []) as BuildLine[], notes: b.notes ?? undefined,
+    lines: (b.lines ?? []) as BuildLine[], swaps: (b.swaps ?? []) as BuildSwap[], notes: b.notes ?? undefined,
     createdById: b.created_by_id ?? undefined, createdByName: b.created_by_name ?? undefined,
     reservedAt: b.reserved_at ?? undefined, consumedAt: b.consumed_at ?? undefined,
     createdAt: b.created_at, updatedAt: b.updated_at ?? b.created_at,
