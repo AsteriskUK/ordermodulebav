@@ -69,7 +69,49 @@ export function OrderDetailDialog({ order, onClose }: Props) {
   const [ebayMsgText, setEbayMsgText] = useState('');
   const [ebayMsgReason, setEbayMsgReason] = useState('SHIPPING');
   const [ebayMsgSending, setEbayMsgSending] = useState(false);
-  const isEbayOrder = order.batchId?.startsWith('ebay-') || liveOrder.salesRecordNumber?.includes('-');
+  // Amazon order ids are 3-7-7 digits; they also contain '-', so check Amazon
+  // first or the eBay section would claim Amazon orders too.
+  const amazonOrderId = [order.amazonOrderId, order.orderNumber, order.salesRecordNumber]
+    .find((v) => v && /^\d{3}-\d{7}-\d{7}$/.test(v));
+  const isAmazonOrder = !!amazonOrderId;
+  const isEbayOrder = !isAmazonOrder && (order.batchId?.startsWith('ebay-') || liveOrder.salesRecordNumber?.includes('-'));
+
+  // Amazon messaging — SP-API only permits templated message types, and only
+  // the ones it returns as allowed for this specific order.
+  const [amazonActions, setAmazonActions] = useState<string[] | null>(null);
+  const [amazonActionsError, setAmazonActionsError] = useState(false);
+  const [amazonAction, setAmazonAction] = useState('');
+  const [amazonMsgText, setAmazonMsgText] = useState('');
+  const [amazonMsgSending, setAmazonMsgSending] = useState(false);
+
+  const AMAZON_ACTION_LABELS: Record<string, string> = {
+    confirmCustomizationDetails: 'Confirm customisation details',
+    confirmDeliveryDetails: 'Confirm delivery details',
+    confirmOrderDetails: 'Confirm order details',
+    confirmServiceDetails: 'Confirm service details',
+    digitalAccessKey: 'Send digital access key',
+    unexpectedProblem: 'Unexpected problem with order',
+    negativeFeedbackRemoval: 'Request feedback removal (no text)',
+  };
+  const amazonActionNeedsText = amazonAction !== 'negativeFeedbackRemoval';
+
+  useEffect(() => {
+    if (!isAmazonOrder) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await fetch(`/api/amazon/messages?orderId=${encodeURIComponent(amazonOrderId!)}&actions=1`);
+        if (!res.ok) throw new Error();
+        const data = await res.json() as { actions: string[] };
+        if (cancelled) return;
+        setAmazonActions(data.actions);
+        setAmazonAction(data.actions[0] ?? '');
+      } catch {
+        if (!cancelled) { setAmazonActions([]); setAmazonActionsError(true); }
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [isAmazonOrder, amazonOrderId]);
 
   const QUICK_MESSAGES = {
     SHIPPING: [
@@ -112,6 +154,37 @@ export function OrderDetailDialog({ order, onClose }: Props) {
       toast.error('Failed to send message');
     } finally {
       setEbayMsgSending(false);
+    }
+  }
+
+  async function handleSendAmazonMessage() {
+    if (!amazonAction || (amazonActionNeedsText && !amazonMsgText.trim())) return;
+    setAmazonMsgSending(true);
+    try {
+      const res = await fetch('/api/amazon/messages', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          orderId: amazonOrderId,
+          action: amazonAction,
+          text: amazonMsgText,
+          buyerName: order.buyerName,
+          itemTitle: order.itemTitle,
+          sentById: currentUser?.id,
+          sentByName: currentUser?.name,
+        }),
+      });
+      if (!res.ok) {
+        const err = await res.json() as { message?: string; error?: string };
+        toast.error(`Failed to send: ${err.message || err.error || 'Unknown error'}`);
+        return;
+      }
+      toast.success('Message sent to buyer via Amazon');
+      setAmazonMsgText('');
+    } catch {
+      toast.error('Failed to send message');
+    } finally {
+      setAmazonMsgSending(false);
     }
   }
 
@@ -631,6 +704,65 @@ export function OrderDetailDialog({ order, onClose }: Props) {
                   </button>
                 </div>
               </div>
+            </div>
+          )}
+
+          {/* Amazon Buyer Messaging */}
+          {isAmazonOrder && (
+            <div>
+              <h4 className="text-sm font-semibold text-slate-700 flex items-center gap-2 mb-2">
+                <ShoppingBag className="h-4 w-4 text-orange-500" /> Message Buyer via Amazon
+              </h4>
+              {amazonActions === null ? (
+                <p className="text-xs text-slate-400">Checking which message types Amazon allows for this order…</p>
+              ) : amazonActions.length === 0 ? (
+                <p className="text-xs text-amber-600 bg-amber-50 border border-amber-200 rounded p-2">
+                  {amazonActionsError
+                    ? 'Could not reach Amazon to check messaging permissions. Check the Amazon connection in Settings.'
+                    : 'Amazon does not currently allow contacting this buyer (messaging window closed or the buyer opted out).'}
+                </p>
+              ) : (
+                <div className="space-y-2">
+                  <div className="flex items-center gap-2">
+                    <label className="text-xs text-slate-500 w-16 shrink-0">Type:</label>
+                    <Select value={amazonAction} onValueChange={(v) => v && setAmazonAction(v)}>
+                      <SelectTrigger className="h-8 text-xs">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {amazonActions.map((a) => (
+                          <SelectItem key={a} value={a}>{AMAZON_ACTION_LABELS[a] ?? a}</SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  {amazonActionNeedsText ? (
+                    <textarea
+                      className="w-full border rounded-lg p-2 text-sm min-h-[80px] resize-none focus:ring-2 focus:ring-orange-400 focus:border-transparent"
+                      placeholder="Type your message to the buyer..."
+                      value={amazonMsgText}
+                      onChange={(e) => setAmazonMsgText(e.target.value)}
+                    />
+                  ) : (
+                    <p className="text-xs text-slate-500 bg-slate-50 border rounded p-2">
+                      Sends Amazon&apos;s standard feedback-removal request — no custom text is allowed.
+                    </p>
+                  )}
+                  <div className="flex items-center justify-between">
+                    <span className="text-xs text-slate-400">
+                      {amazonActionNeedsText ? `${amazonMsgText.length}/2000 chars — Amazon only permits these templated contact reasons` : ''}
+                    </span>
+                    <button
+                      onClick={handleSendAmazonMessage}
+                      disabled={amazonMsgSending || (amazonActionNeedsText && !amazonMsgText.trim())}
+                      className="px-3 py-1.5 bg-orange-500 text-white rounded-lg text-sm hover:bg-orange-600 disabled:opacity-40 disabled:cursor-not-allowed flex items-center gap-1.5"
+                    >
+                      <Send className="h-3.5 w-3.5" />
+                      {amazonMsgSending ? 'Sending…' : 'Send via Amazon'}
+                    </button>
+                  </div>
+                </div>
+              )}
             </div>
           )}
 

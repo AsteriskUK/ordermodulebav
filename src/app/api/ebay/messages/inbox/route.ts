@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
+import { htmlEmailToText, looksLikeHtmlEmail } from '@/lib/html-text';
 
 const TOKEN_URL = 'https://api.ebay.com/identity/v1/oauth2/token';
 const MSG_BASE = 'https://api.ebay.com/commerce/message/v1';
@@ -59,6 +60,22 @@ async function getAccessToken(): Promise<string | null> {
   return data.access_token;
 }
 
+// Upsert messages, tolerating the message_html column not yet existing (its
+// migration may not have been applied). On the "column does not exist" error we
+// retry once without message_html so the eBay inbox keeps syncing regardless.
+async function upsertMessages(
+  supabase: ReturnType<typeof getSupabase>,
+  rows: MessageRow[],
+  opts: { onConflict: string; ignoreDuplicates?: boolean },
+): Promise<{ error: { message: string } | null }> {
+  const { error } = await supabase.from('ebay_messages').upsert(rows, opts);
+  if (error && error.code === '42703' && /message_html/.test(error.message)) {
+    const stripped = rows.map(({ message_html: _omit, ...rest }) => rest);
+    return supabase.from('ebay_messages').upsert(stripped, opts);
+  }
+  return { error };
+}
+
 function ebayHeaders(token: string) {
   return {
     'Authorization': `Bearer ${token}`,
@@ -88,6 +105,7 @@ interface MessageRow {
   sender_username?: string | null;
   contact_reason?: string;
   message_text: string;
+  message_html?: string | null;   // original HTML for "From eBay" emails (invoices, notices)
   media_urls?: string[];
   conversation_type: string;   // FROM_MEMBERS (client) | FROM_EBAY (eBay)
   sent_at: string;
@@ -123,7 +141,10 @@ function buildRow(
     buyer_username: buyerUsername,
     sender_username: msg.senderUsername ?? null,
     contact_reason: msg.subject ?? (conversationType === 'FROM_EBAY' ? 'EBAY_MESSAGE' : 'BUYER_MESSAGE'),
-    message_text: msg.messageBody ?? '',
+    message_text: htmlEmailToText(msg.messageBody ?? ''),
+    // Keep the raw HTML for eBay system emails so they can be previewed as the
+    // original (rendered) email; buyer messages are plain text, so leave null.
+    message_html: looksLikeHtmlEmail(msg.messageBody ?? '') ? msg.messageBody : null,
     media_urls: (msg.messageMedia ?? []).map((m) => m.mediaUrl).filter((u): u is string => !!u),
     conversation_type: conversationType,
     sent_at: msg.createdDate ?? new Date().toISOString(),
@@ -166,7 +187,7 @@ export async function GET(req: NextRequest) {
           .filter((r): r is MessageRow => r !== null);
         if (rows.length) {
           // Update on conflict (not ignore) so existing rows get sender_username backfilled.
-          await supabase.from('ebay_messages').upsert(rows, { onConflict: 'ebay_message_id' });
+          await upsertMessages(supabase, rows, { onConflict: 'ebay_message_id' });
         }
       } else {
         console.warn('[eBay inbox] thread fetch failed', conversationId, res.status);
@@ -247,7 +268,7 @@ async function syncConversationType(
     }
 
     if (rows.length) {
-      const { error } = await supabase.from('ebay_messages').upsert(rows, { onConflict: 'ebay_message_id', ignoreDuplicates: true });
+      const { error } = await upsertMessages(supabase, rows, { onConflict: 'ebay_message_id', ignoreDuplicates: true });
       if (error) { console.error('[eBay inbox] upsert error:', error.message); break; }
       synced += rows.length;
     }

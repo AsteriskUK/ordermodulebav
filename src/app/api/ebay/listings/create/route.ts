@@ -14,6 +14,54 @@ function makeHeaders(token: string): AuthHeaders {
   };
 }
 
+// PUT /inventory_item/{sku} fully replaces the item, so reusing the SKU of a
+// live listing would overwrite its title/images/quantity in place. Refuse to
+// touch any SKU that already has a published offer on this marketplace.
+async function findPublishedOffer(
+  token: string,
+  sku: string
+): Promise<{ offerId: string; listingId?: string } | null> {
+  const res = await fetch(
+    `${INVENTORY_BASE}/offer?sku=${encodeURIComponent(sku)}&marketplace_id=${EBAY_MARKETPLACE_ID}`,
+    { headers: makeHeaders(token) }
+  );
+  if (res.status === 404) return null; // no offers for this SKU
+  if (!res.ok) {
+    // Can't verify — fail closed rather than risk clobbering a live listing.
+    throw new Error(`offer lookup for SKU ${sku} failed ${res.status}: ${(await res.text()).slice(0, 200)}`);
+  }
+  const data = (await res.json()) as {
+    offers?: { offerId: string; status?: string; listing?: { listingId?: string } }[];
+  };
+  const published = (data.offers ?? []).find((o) => o.status === 'PUBLISHED');
+  return published ? { offerId: published.offerId, listingId: published.listing?.listingId } : null;
+}
+
+async function guardSkus(token: string, skus: string[]) {
+  for (const sku of skus) {
+    let published;
+    try {
+      published = await findPublishedOffer(token, sku);
+    } catch (e) {
+      return {
+        error: 'sku_check_failed',
+        message: e instanceof Error ? e.message : String(e),
+        step: `sku_guard:${sku}`,
+        status: 502,
+      };
+    }
+    if (published) {
+      return {
+        error: 'sku_already_listed',
+        message: `SKU "${sku}" is already on live eBay listing ${published.listingId ?? published.offerId}. Creating this listing would overwrite it — use a different SKU, or end the existing listing on eBay first.`,
+        step: `sku_guard:${sku}`,
+        status: 409,
+      };
+    }
+  }
+  return null;
+}
+
 async function createInventoryItem(
   token: string,
   sku: string,
@@ -73,6 +121,9 @@ async function createOffer(
 
 // --- Single-SKU flow ---
 async function createSingleListing(token: string, payload: CreateListingPayload) {
+  const conflict = await guardSkus(token, [payload.sku]);
+  if (conflict) return conflict;
+
   const itemRes = await fetch(
     `${INVENTORY_BASE}/inventory_item/${encodeURIComponent(payload.sku)}`,
     {
@@ -145,6 +196,11 @@ async function createVariationListing(
   variations: VariationPayload[],
   varyingAspects: string[]
 ) {
+  // All variation SKUs are checked up front so a conflict on the third SKU
+  // can't leave the first two already overwritten.
+  const conflict = await guardSkus(token, variations.map((v) => v.sku));
+  if (conflict) return conflict;
+
   // Step 1: Create one inventory item per variation (only the pivoting aspects on each item)
   for (const variation of variations) {
     const uniqueAspects: Record<string, string[]> = {};

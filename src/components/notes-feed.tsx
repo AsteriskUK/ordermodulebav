@@ -4,7 +4,7 @@ import { useMemo, useState, useEffect, useCallback } from 'react';
 import { useOrderStore } from '@/lib/store';
 import { OrderNote, ORDER_STATUS_CONFIG } from '@/lib/types';
 import { can } from '@/lib/access';
-import { MessageSquare, Search, Trash2, Plus, ShoppingBag, Send, RefreshCw, Inbox, ArrowLeft, Mail, MailOpen, ExternalLink } from 'lucide-react';
+import { MessageSquare, Search, Trash2, Plus, ShoppingBag, Send, RefreshCw, Inbox, ArrowLeft, Mail, MailOpen, ExternalLink, FileText, X } from 'lucide-react';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 import { OrderDetailDialog } from './order-detail-dialog';
@@ -12,6 +12,7 @@ import { EbayNewMessageDialog } from './ebay-new-message-dialog';
 import { TicketsPanel } from './tickets-panel';
 import { ImageUpload } from './image-upload';
 import { MESSAGE_IMAGE_BUCKET } from '@/lib/image-upload';
+import { htmlEmailToText } from '@/lib/html-text';
 import { QuickActions } from './quick-actions';
 import { Ticket as TicketIcon } from 'lucide-react';
 import { toast } from 'sonner';
@@ -38,13 +39,16 @@ interface EbayMessage {
   item_title: string | null;
   contact_reason: string | null;
   message_text: string;
+  message_html?: string | null;        // raw HTML for "From eBay" emails (invoices, notices)
   media_urls: string[] | null;
   conversation_type: string | null;   // FROM_MEMBERS (client) | FROM_EBAY (eBay) | BACKMARKET
   sent_by_id: string | null;
   sent_by_name: string | null;
   sent_at: string;
   status: string;
-  source?: 'ebay' | 'backmarket';
+  source?: 'ebay' | 'backmarket' | 'amazon';
+  reply_to_email?: string | null;  // Amazon relay address (email-bridge replies)
+  subject?: string | null;
 }
 
 // A BackMarket message row as stored in Supabase / returned by /api/backmarket/messages.
@@ -83,6 +87,69 @@ function bmRowToMessage(r: BmMessageRow): EbayMessage {
     sent_at: r.sent_at,
     status: r.status,
     source: 'backmarket',
+  };
+}
+
+// An Amazon message row as stored in Supabase / returned by /api/amazon/messages.
+// Sent rows come from the SP-API templated send or an email-bridge reply;
+// received rows are buyer emails ingested from the marketplace relay mailbox.
+interface AmazonMessageRow {
+  id: string;
+  amazon_order_id: string;
+  action: string | null;
+  message_text: string;
+  direction: 'sent' | 'received';
+  status: string;
+  subject: string | null;
+  reply_to_email: string | null;
+  buyer_name: string | null;
+  item_title: string | null;
+  sent_by_id: string | null;
+  sent_by_name: string | null;
+  sent_at: string;
+}
+
+// Human labels for the SP-API templated message types (used as contact reason
+// in threads and as the type picker in the Amazon reply bar).
+const AMAZON_ACTION_LABELS: Record<string, string> = {
+  confirmCustomizationDetails: 'Confirm customisation details',
+  confirmDeliveryDetails: 'Confirm delivery details',
+  confirmOrderDetails: 'Confirm order details',
+  confirmServiceDetails: 'Confirm service details',
+  digitalAccessKey: 'Send digital access key',
+  unexpectedProblem: 'Unexpected problem with order',
+  negativeFeedbackRemoval: 'Request feedback removal',
+};
+// Only these carry free text; the rest can't be sent from the reply bar.
+const AMAZON_TEXT_ACTIONS = new Set([
+  'confirmCustomizationDetails', 'confirmDeliveryDetails', 'confirmOrderDetails',
+  'confirmServiceDetails', 'digitalAccessKey', 'unexpectedProblem',
+]);
+
+function amazonRowToMessage(r: AmazonMessageRow): EbayMessage {
+  return {
+    id: r.id,
+    ebay_message_id: null,
+    // Thread by order; orderless buyer emails thread by their relay address.
+    conversation_id: r.amazon_order_id ? `amz-${r.amazon_order_id}` : `amz-email-${r.reply_to_email ?? r.id}`,
+    direction: r.direction,
+    order_id: r.amazon_order_id,
+    item_id: null,
+    buyer_username: r.buyer_name || 'Amazon buyer',
+    sender_username: null,
+    buyer_name: r.buyer_name,
+    item_title: r.item_title,
+    contact_reason: r.action ? (AMAZON_ACTION_LABELS[r.action] ?? r.action) : r.subject,
+    message_text: r.message_text,
+    media_urls: [],
+    conversation_type: 'AMAZON',
+    sent_by_id: r.sent_by_id,
+    sent_by_name: r.sent_by_name,
+    sent_at: r.sent_at,
+    status: r.status,
+    source: 'amazon',
+    reply_to_email: r.reply_to_email,
+    subject: r.subject,
   };
 }
 
@@ -163,11 +230,19 @@ export function NotesFeed() {
   const [ebayLoading, setEbayLoading] = useState(false);
   const [ebaySyncing, setEbaySyncing] = useState(false);
   const [activeKey, setActiveKey] = useState<string | null>(null);
-  const [ebayFilter, setEbayFilter] = useState<'all' | 'unread' | 'client' | 'ebay' | 'backmarket'>('all');
+  const [ebayFilter, setEbayFilter] = useState<'all' | 'unread' | 'client' | 'ebay' | 'backmarket' | 'amazon'>('all');
   const [bmMessages, setBmMessages] = useState<EbayMessage[]>([]);
   const [bmSyncing, setBmSyncing] = useState(false);
+  const [amazonMessages, setAmazonMessages] = useState<EbayMessage[]>([]);
+  const [amazonSyncing, setAmazonSyncing] = useState(false);
+  // Message types Amazon currently allows for the open Amazon thread's order
+  // (null = still checking). Amazon only permits templated types per order.
+  const [amazonReplyActions, setAmazonReplyActions] = useState<string[] | null>(null);
+  const [amazonReplyAction, setAmazonReplyAction] = useState('');
   const [replyText, setReplyText] = useState('');
   const [replyImages, setReplyImages] = useState<string[]>([]);
+  // Original HTML of an eBay system email (invoice/notice) to render in a modal.
+  const [previewHtml, setPreviewHtml] = useState<{ html: string; title: string } | null>(null);
   const [replySending, setReplySending] = useState(false);
   // Multi-select of conversations in the list (for bulk mark read/unread).
   const [selectedKeys, setSelectedKeys] = useState<Set<string>>(new Set());
@@ -236,13 +311,59 @@ export function NotesFeed() {
       setBmSyncing(false);
     }
   }
-  const syncAllInboxes = () => { syncEbayInbox(); syncBmInbox(); };
+  // Amazon messages — sent history plus buyer emails ingested from the
+  // marketplace relay mailbox (SP-API has no buyer-message read API).
+  async function loadAmazonMessages() {
+    try {
+      const res = await fetch('/api/amazon/messages');
+      if (res.ok) {
+        const data = await res.json() as { messages: AmazonMessageRow[] };
+        setAmazonMessages((prev) => mergeInbox(prev, data.messages.map(amazonRowToMessage)));
+      }
+    } catch { /* silent */ }
+  }
+  async function syncAmazonInbox() {
+    setAmazonSyncing(true);
+    try {
+      const res = await fetch('/api/amazon/messages', { method: 'POST' });
+      if (res.ok) {
+        const data = await res.json() as { synced: number };
+        if (data.synced > 0) toast.success(`${data.synced} new Amazon message${data.synced !== 1 ? 's' : ''} synced`);
+        await loadAmazonMessages();
+      } else if (res.status !== 401) {
+        // 401 = relay mailbox not configured — quietly skip, like BackMarket.
+        const err = await res.json().catch(() => ({})) as { message?: string };
+        console.warn('[Amazon inbox] sync failed:', err.message);
+      }
+    } catch { /* silent */ } finally {
+      setAmazonSyncing(false);
+    }
+  }
+
+  const syncAllInboxes = () => { syncEbayInbox(); syncBmInbox(); syncAmazonInbox(); };
 
   // Open a conversation for reading. Opening does NOT mark it read — that only
   // happens when the user explicitly hits "Mark read" in the thread or list.
   async function openConversation(convo: Conversation) {
     setActiveKey(convo.key);
     if (!convo.conversation_id) return;
+
+    if (convo.conversation_type === 'AMAZON') {
+      // Nothing to refetch (send-only history), but ask Amazon which message
+      // types it currently allows so the reply bar knows what it can send.
+      setAmazonReplyActions(null);
+      setAmazonReplyAction('');
+      try {
+        const res = await fetch(`/api/amazon/messages?orderId=${encodeURIComponent(convo.order_id)}&actions=1`);
+        const data = res.ok ? await res.json() as { actions: string[] } : { actions: [] };
+        const textActions = data.actions.filter((a) => AMAZON_TEXT_ACTIONS.has(a));
+        setAmazonReplyActions(textActions);
+        setAmazonReplyAction(textActions[0] ?? '');
+      } catch {
+        setAmazonReplyActions([]);
+      }
+      return;
+    }
 
     if (convo.conversation_type === 'BACKMARKET') {
       try {
@@ -273,6 +394,8 @@ export function NotesFeed() {
       syncEbayInbox();
       loadBmMessages();
       syncBmInbox();
+      loadAmazonMessages();
+      syncAmazonInbox();
       /* eslint-enable react-hooks/set-state-in-effect */
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -308,8 +431,8 @@ export function NotesFeed() {
     return m.direction === 'sent';                              // fallback for un-backfilled rows
   }, [sellerUsername]);
 
-  // eBay + BackMarket messages share one inbox list.
-  const allMessages = useMemo(() => [...ebayMessages, ...bmMessages], [ebayMessages, bmMessages]);
+  // eBay + BackMarket + Amazon messages share one inbox list.
+  const allMessages = useMemo(() => [...ebayMessages, ...bmMessages, ...amazonMessages], [ebayMessages, bmMessages, amazonMessages]);
 
   // Group messages into conversations (by eBay conversation / BackMarket thread, falling back to buyer+order)
   const conversations = useMemo<Conversation[]>(() => {
@@ -367,6 +490,10 @@ export function NotesFeed() {
   // by listing item id + buyer, falling back to buyer.
   const relatedOrder = useMemo(() => {
     if (!activeConvo) return null;
+    if (activeConvo.conversation_type === 'AMAZON') {
+      const oid = activeConvo.order_id;
+      return orders.find((o) => !o.deletedAt && (o.salesRecordNumber === oid || o.orderNumber === oid)) ?? null;
+    }
     if (activeConvo.conversation_type === 'BACKMARKET') {
       const oid = activeConvo.order_id;
       if (!oid) return null;
@@ -377,10 +504,20 @@ export function NotesFeed() {
   }, [activeConvo, orders]);
 
   const activeIsBm = activeConvo?.conversation_type === 'BACKMARKET';
-  // For BackMarket, prefer the matched order's product title over the SAV reason.
+  const activeIsAmazon = activeConvo?.conversation_type === 'AMAZON';
+  // Latest relay address in the thread. Replying by email lands in the buyer's
+  // Amazon thread and allows free text — always preferred over the templated
+  // SP-API send when the buyer has written to us.
+  const amazonReplyEmail = activeIsAmazon
+    ? [...(activeConvo?.messages ?? [])].reverse().find((m) => m.direction === 'received' && m.reply_to_email)?.reply_to_email ?? null
+    : null;
+  const amazonReplySubject = activeIsAmazon
+    ? [...(activeConvo?.messages ?? [])].reverse().find((m) => m.direction === 'received' && m.subject)?.subject ?? null
+    : null;
+  // For BackMarket/Amazon, prefer the matched order's product title.
   // For eBay, fall back to the matched order's product when eBay gives no listing.
-  const contextTitle = activeIsBm
-    ? (relatedOrder?.itemTitle || activeConvo?.item_title || 'BackMarket order')
+  const contextTitle = activeIsBm || activeIsAmazon
+    ? (relatedOrder?.itemTitle || activeConvo?.item_title || (activeIsAmazon ? 'Amazon order' : 'BackMarket order'))
     : (listing?.title || activeConvo?.item_title || relatedOrder?.itemTitle || 'Listing');
 
   const unreadTotal = useMemo(() => conversations.reduce((s, c) => s + c.unreadCount, 0), [conversations]);
@@ -392,9 +529,17 @@ export function NotesFeed() {
     if (read && !convo.messages.some(m => m.direction === 'received' && m.status === 'unread')) return;
 
     const isBm = convo.conversation_type === 'BACKMARKET';
-    const setter = isBm ? setBmMessages : setEbayMessages;
+    const isAmazon = convo.conversation_type === 'AMAZON';
+    const setter = isAmazon ? setAmazonMessages : isBm ? setBmMessages : setEbayMessages;
     setter(prev => prev.map(m => ids.includes(m.id) ? { ...m, status: read ? 'read' : 'unread' } : m));
 
+    if (isAmazon) {
+      await fetch('/api/amazon/messages', {
+        method: 'PATCH', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ids, read }),
+      });
+      return;
+    }
     if (isBm) {
       await fetch('/api/backmarket/messages', {
         method: 'PATCH', headers: { 'Content-Type': 'application/json' },
@@ -426,6 +571,47 @@ export function NotesFeed() {
     if (!activeConvo || (!replyText.trim() && replyImages.length === 0)) return;
     setReplySending(true);
     try {
+      // Amazon reply — via the email relay when the buyer has written to us
+      // (free text, threads into their Amazon inbox), otherwise the templated
+      // SP-API message (only if Amazon returned an allowed type for the order).
+      if (activeConvo.conversation_type === 'AMAZON') {
+        if (!replyText.trim()) { toast.error('Enter a message'); return; }
+        if (!amazonReplyEmail && !amazonReplyAction) { toast.error('Amazon does not allow contacting this buyer right now'); return; }
+        const payload = amazonReplyEmail
+          ? {
+              replyToEmail: amazonReplyEmail,
+              subject: amazonReplySubject ? (amazonReplySubject.startsWith('Re:') ? amazonReplySubject : `Re: ${amazonReplySubject}`) : undefined,
+              orderId: activeConvo.order_id,
+              text: replyText,
+              buyerName: activeConvo.buyer_name,
+              itemTitle: activeConvo.item_title,
+              sentById: currentUser?.id,
+              sentByName: currentUser?.name,
+            }
+          : {
+              orderId: activeConvo.order_id,
+              action: amazonReplyAction,
+              text: replyText,
+              buyerName: activeConvo.buyer_name,
+              itemTitle: activeConvo.item_title,
+              sentById: currentUser?.id,
+              sentByName: currentUser?.name,
+            };
+        const res = await fetch('/api/amazon/messages', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload),
+        });
+        if (!res.ok) {
+          const err = await res.json().catch(() => ({})) as { message?: string; error?: string };
+          toast.error(`Send failed: ${err.message || err.error || 'Unknown error'}`);
+          return;
+        }
+        toast.success('Message sent via Amazon');
+        setReplyText('');
+        await loadAmazonMessages();
+        return;
+      }
+
       // BackMarket reply → SAV thread (text only; attachments not supported on send here).
       if (activeConvo.conversation_type === 'BACKMARKET') {
         if (!replyText.trim()) { toast.error('Enter a message'); return; }
@@ -535,7 +721,7 @@ export function NotesFeed() {
             <MessageSquare className="h-6 w-6 text-blue-500" />
             Messages
           </h2>
-          <p className="text-slate-500 text-sm mt-1">Team notes and eBay &amp; BackMarket messages</p>
+          <p className="text-slate-500 text-sm mt-1">Team notes and eBay, BackMarket &amp; Amazon messages</p>
         </div>
         {tab === 'ebay' && canInbox && (
           <Button onClick={() => setShowNewEbayMsg(true)} className="bg-amber-600 hover:bg-amber-700 text-white">
@@ -684,13 +870,16 @@ export function NotesFeed() {
                 if (ebayFilter === 'client') return c.conversation_type === 'FROM_MEMBERS';
                 if (ebayFilter === 'ebay') return c.conversation_type === 'FROM_EBAY';
                 if (ebayFilter === 'backmarket') return c.conversation_type === 'BACKMARKET';
+                if (ebayFilter === 'amazon') return c.conversation_type === 'AMAZON';
                 return true;
               });
               const bmCount = conversations.filter((c) => c.conversation_type === 'BACKMARKET').length;
+              const amazonCount = conversations.filter((c) => c.conversation_type === 'AMAZON').length;
               const FILTERS: { key: typeof ebayFilter; label: string }[] = [
                 { key: 'all', label: 'All' }, { key: 'unread', label: 'Unread' },
                 { key: 'client', label: 'Client' }, { key: 'ebay', label: 'eBay' },
                 ...(bmCount > 0 ? [{ key: 'backmarket' as const, label: 'BackMarket' }] : []),
+                ...(amazonCount > 0 ? [{ key: 'amazon' as const, label: 'Amazon' }] : []),
               ];
               return (
                 <>
@@ -714,8 +903,8 @@ export function NotesFeed() {
                     ) : (
                     <div className="flex items-center justify-between px-3 py-2">
                       <p className="text-xs text-slate-400">{filtered.length} of {conversations.length}</p>
-                      <button onClick={syncAllInboxes} disabled={ebaySyncing || bmSyncing} className="text-xs text-slate-400 hover:text-slate-600 flex items-center gap-1 disabled:opacity-50">
-                        <RefreshCw className={`h-3 w-3 ${ebaySyncing || bmSyncing ? 'animate-spin' : ''}`} /> {ebaySyncing || bmSyncing ? 'Syncing…' : 'Sync'}
+                      <button onClick={syncAllInboxes} disabled={ebaySyncing || bmSyncing || amazonSyncing} className="text-xs text-slate-400 hover:text-slate-600 flex items-center gap-1 disabled:opacity-50">
+                        <RefreshCw className={`h-3 w-3 ${ebaySyncing || bmSyncing || amazonSyncing ? 'animate-spin' : ''}`} /> {ebaySyncing || bmSyncing || amazonSyncing ? 'Syncing…' : 'Sync'}
                       </button>
                     </div>
                     )}
@@ -747,11 +936,13 @@ export function NotesFeed() {
                           const isActive = convo.key === activeKey;
                           const isEbay = convo.conversation_type === 'FROM_EBAY';
                           const isBm = convo.conversation_type === 'BACKMARKET';
-                          const accent = isActive ? (isBm ? 'bg-teal-50 border-teal-500' : isEbay ? 'bg-blue-50 border-blue-500' : 'bg-amber-50 border-amber-500')
+                          const isAmazon = convo.conversation_type === 'AMAZON';
+                          const accent = isActive ? (isAmazon ? 'bg-orange-50 border-orange-500' : isBm ? 'bg-teal-50 border-teal-500' : isEbay ? 'bg-blue-50 border-blue-500' : 'bg-amber-50 border-amber-500')
                             : convo.unreadCount > 0 ? (isBm ? 'bg-teal-50/40 border-transparent hover:bg-slate-50' : isEbay ? 'bg-blue-50/40 border-transparent hover:bg-slate-50' : 'bg-amber-50/40 border-transparent hover:bg-slate-50')
                             : 'border-transparent hover:bg-slate-50';
-                          const badge = isBm
-                            ? { cls: 'bg-teal-100 text-teal-700', label: 'BackMarket' }
+                          const badge = isAmazon
+                            ? { cls: 'bg-orange-100 text-orange-700', label: 'Amazon' }
+                            : isBm ? { cls: 'bg-teal-100 text-teal-700', label: 'BackMarket' }
                             : isEbay ? { cls: 'bg-blue-100 text-blue-700', label: 'eBay' }
                             : { cls: 'bg-slate-100 text-slate-500', label: 'Client' };
                           const isSelected = selectedKeys.has(convo.key);
@@ -781,11 +972,11 @@ export function NotesFeed() {
                                   <span className="text-[10px] text-slate-400">{new Date(convo.lastAt).toLocaleDateString('en-GB', { day: '2-digit', month: 'short' })}</span>
                                 </span>
                               </div>
-                              <p className="text-[11px] text-slate-400 truncate">Order #{convo.order_id}{convo.item_title ? ` · ${convo.item_title.slice(0, 40)}` : ''}</p>
+                              <p className="text-[11px] text-slate-400 truncate">{convo.order_id ? `Order #${convo.order_id}` : 'No order reference'}{convo.item_title ? ` · ${convo.item_title.slice(0, 40)}` : ''}</p>
                               <div className="flex items-center gap-1.5 mt-0.5">
                                 {convo.unreadCount > 0 && <span className="bg-red-500 text-white text-[9px] font-bold rounded-full px-1.5 leading-tight py-0.5 shrink-0">{convo.unreadCount}</span>}
                                 <p className={`text-xs truncate ${convo.unreadCount > 0 ? 'text-slate-700' : 'text-slate-500'}`}>
-                                  {last && isOurs(last, convo.buyer_username) ? '↑ ' : '↓ '}{last?.message_text}{(last?.media_urls?.length ?? 0) > 0 ? ' 📎' : ''}
+                                  {last && isOurs(last, convo.buyer_username) ? '↑ ' : '↓ '}{htmlEmailToText(last?.message_text ?? '')}{(last?.media_urls?.length ?? 0) > 0 ? ' 📎' : ''}
                                 </p>
                               </div>
                               </div>
@@ -809,7 +1000,7 @@ export function NotesFeed() {
                   <button onClick={() => setActiveKey(null)} className="md:hidden text-slate-400 hover:text-slate-700 shrink-0">
                     <ArrowLeft className="h-4 w-4" />
                   </button>
-                  <img src={activeConvo.conversation_type === 'BACKMARKET' ? PLATFORM_LOGOS.backmarket : PLATFORM_LOGOS.ebay} alt="platform" className="h-5 w-auto object-contain shrink-0" />
+                  <img src={activeIsAmazon ? PLATFORM_LOGOS.amazon : activeIsBm ? PLATFORM_LOGOS.backmarket : PLATFORM_LOGOS.ebay} alt="platform" className="h-5 w-auto object-contain shrink-0" />
                   <div className="min-w-0 flex-1">
                     <p className="font-medium text-slate-800 font-mono text-sm truncate">{activeConvo.buyer_username}</p>
                     <p className="text-xs text-slate-400 truncate">{activeConvo.buyer_name ? `${activeConvo.buyer_name} · ` : ''}Order #{activeConvo.order_id}{activeConvo.item_title ? ` · ${activeConvo.item_title}` : ''}</p>
@@ -874,7 +1065,19 @@ export function NotesFeed() {
                         : ours ? 'bg-blue-600 text-white rounded-br-sm'
                         : 'bg-white border border-slate-200 text-slate-800 rounded-bl-sm'
                       }`}>
-                        {msg.message_text && <p className="whitespace-pre-wrap leading-relaxed">{msg.message_text}</p>}
+                        {msg.message_text && <p className="whitespace-pre-wrap leading-relaxed">{htmlEmailToText(msg.message_text)}</p>}
+                        {msg.message_html && (() => {
+                          const isInvoice = /invoice/i.test(`${msg.contact_reason ?? ''} ${msg.message_text}`);
+                          return (
+                            <button
+                              onClick={() => setPreviewHtml({ html: msg.message_html!, title: msg.contact_reason || 'eBay message' })}
+                              className="mt-2 inline-flex items-center gap-1.5 text-xs font-medium px-2.5 py-1 rounded-lg border border-slate-300 bg-slate-50 text-slate-700 hover:bg-slate-100 transition-colors"
+                            >
+                              <FileText className="h-3.5 w-3.5" />
+                              {isInvoice ? 'Preview invoice' : 'View full message'}
+                            </button>
+                          );
+                        })()}
                         {(msg.media_urls?.length ?? 0) > 0 && (
                           <div className="flex flex-wrap gap-1.5 mt-1.5">
                             {msg.media_urls!.map((url) => (
@@ -920,6 +1123,73 @@ export function NotesFeed() {
                 })()}
 
                 {/* Reply bar — inline: attach · type · send */}
+                {activeIsAmazon ? (
+                  <div className="border-t p-2 shrink-0 space-y-2">
+                    {amazonReplyEmail ? (
+                      <div className="flex items-end gap-2">
+                        <textarea
+                          className="flex-1 border rounded-xl px-3 py-2 text-sm min-h-[40px] max-h-32 resize-none focus:ring-2 focus:ring-orange-400 focus:border-transparent"
+                          placeholder="Type your reply…"
+                          value={replyText}
+                          onChange={(e) => setReplyText(e.target.value)}
+                          onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleReply(); } }}
+                          rows={1}
+                          maxLength={4000}
+                        />
+                        <Button
+                          onClick={handleReply}
+                          disabled={!replyText.trim() || replySending}
+                          className="bg-orange-500 hover:bg-orange-600 text-white shrink-0"
+                          size="sm"
+                        >
+                          <Send className="h-3.5 w-3.5 sm:mr-1.5" />
+                          <span className="hidden sm:inline">{replySending ? 'Sending…' : 'Reply'}</span>
+                        </Button>
+                      </div>
+                    ) : amazonReplyActions === null ? (
+                      <p className="text-xs text-slate-400 px-1 py-2">Checking which message types Amazon allows for this order…</p>
+                    ) : amazonReplyActions.length === 0 ? (
+                      <p className="text-xs text-amber-600 bg-amber-50 border border-amber-200 rounded-lg p-2">
+                        Amazon does not currently allow contacting this buyer (messaging window closed or the buyer opted out).
+                      </p>
+                    ) : (
+                      <>
+                        <div className="flex items-center gap-2 px-1">
+                          <span className="text-xs text-slate-400 shrink-0">Type:</span>
+                          <select
+                            value={amazonReplyAction}
+                            onChange={(e) => setAmazonReplyAction(e.target.value)}
+                            className="text-xs border rounded-md px-2 py-1 bg-white text-slate-600"
+                          >
+                            {amazonReplyActions.map((a) => (
+                              <option key={a} value={a}>{AMAZON_ACTION_LABELS[a] ?? a}</option>
+                            ))}
+                          </select>
+                        </div>
+                        <div className="flex items-end gap-2">
+                          <textarea
+                            className="flex-1 border rounded-xl px-3 py-2 text-sm min-h-[40px] max-h-32 resize-none focus:ring-2 focus:ring-orange-400 focus:border-transparent"
+                            placeholder="Type your message to the buyer…"
+                            value={replyText}
+                            onChange={(e) => setReplyText(e.target.value)}
+                            onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleReply(); } }}
+                            rows={1}
+                            maxLength={2000}
+                          />
+                          <Button
+                            onClick={handleReply}
+                            disabled={!replyText.trim() || replySending}
+                            className="bg-orange-500 hover:bg-orange-600 text-white shrink-0"
+                            size="sm"
+                          >
+                            <Send className="h-3.5 w-3.5 sm:mr-1.5" />
+                            <span className="hidden sm:inline">{replySending ? 'Sending…' : 'Send'}</span>
+                          </Button>
+                        </div>
+                      </>
+                    )}
+                  </div>
+                ) : (
                 <div className="border-t p-2 shrink-0 space-y-2">
                   {replyImages.length > 0 && (
                     <ImageUpload bucket={MESSAGE_IMAGE_BUCKET} recordId={activeConvo.conversation_id ?? activeConvo.order_id} images={replyImages} onChange={setReplyImages} maxFiles={5} compact />
@@ -948,6 +1218,7 @@ export function NotesFeed() {
                     </Button>
                   </div>
                 </div>
+                )}
               </>
             ) : (
               <div className="flex-1 flex flex-col items-center justify-center text-slate-300">
@@ -964,6 +1235,30 @@ export function NotesFeed() {
 
       {openOrder && <OrderDetailDialog order={openOrder} onClose={() => setOpenOrderId(null)} />}
       {showNewEbayMsg && <EbayNewMessageDialog onClose={() => { setShowNewEbayMsg(false); loadEbayMessages(); }} />}
+
+      {/* eBay email preview — original HTML rendered in a sandboxed iframe */}
+      {previewHtml && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4" onClick={() => setPreviewHtml(null)}>
+          <div className="bg-white rounded-xl shadow-2xl w-full max-w-2xl h-[80vh] flex flex-col overflow-hidden" onClick={(e) => e.stopPropagation()}>
+            <div className="flex items-center justify-between px-4 py-3 border-b shrink-0">
+              <div className="flex items-center gap-2 min-w-0">
+                <img src={PLATFORM_LOGOS.ebay} alt="eBay" className="h-4 w-auto object-contain shrink-0" />
+                <span className="text-sm font-medium text-slate-700 truncate">{previewHtml.title}</span>
+              </div>
+              <button onClick={() => setPreviewHtml(null)} className="text-slate-400 hover:text-slate-700 shrink-0" title="Close">
+                <X className="h-5 w-5" />
+              </button>
+            </div>
+            {/* sandbox without allow-scripts: the email's markup renders but can't run code or navigate our app */}
+            <iframe
+              srcDoc={previewHtml.html}
+              sandbox=""
+              title="Email preview"
+              className="flex-1 w-full bg-white"
+            />
+          </div>
+        </div>
+      )}
     </div>
   );
 }

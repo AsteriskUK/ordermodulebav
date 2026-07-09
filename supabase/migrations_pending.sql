@@ -102,3 +102,37 @@ BEGIN
     CREATE POLICY "Allow all message image uploads" ON storage.objects FOR ALL USING (bucket_id = 'message-images') WITH CHECK (bucket_id = 'message-images');
   END IF;
 END $$;
+
+-- ---- Amazon buyer messages (sent-only; SP-API has no inbox) ----
+CREATE TABLE IF NOT EXISTS amazon_messages (
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  amazon_order_id TEXT NOT NULL,
+  action TEXT NOT NULL,
+  message_text TEXT NOT NULL DEFAULT '',
+  direction TEXT DEFAULT 'sent',
+  status TEXT DEFAULT 'sent',
+  buyer_name TEXT,
+  item_title TEXT,
+  sent_by_id TEXT,
+  sent_by_name TEXT,
+  sent_at TIMESTAMPTZ DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_amazon_messages_order_id ON amazon_messages(amazon_order_id);
+CREATE INDEX IF NOT EXISTS idx_amazon_messages_sent_at ON amazon_messages(sent_at DESC);
+ALTER TABLE amazon_messages ENABLE ROW LEVEL SECURITY;
+DO $$
+BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_policies WHERE schemaname = 'public' AND tablename = 'amazon_messages' AND policyname = 'Allow all') THEN
+    CREATE POLICY "Allow all" ON amazon_messages FOR ALL USING (true);
+  END IF;
+END $$;
+
+-- ---- Amazon inbound messages via email relay bridge ----
+ALTER TABLE amazon_messages ADD COLUMN IF NOT EXISTS subject TEXT;
+ALTER TABLE amazon_messages ADD COLUMN IF NOT EXISTS reply_to_email TEXT;
+ALTER TABLE amazon_messages ADD COLUMN IF NOT EXISTS email_message_id TEXT;
+CREATE UNIQUE INDEX IF NOT EXISTS idx_amazon_messages_email_id ON amazon_messages(email_message_id);
+ALTER TABLE amazon_messages ALTER COLUMN action DROP NOT NULL;
+
+-- ---- eBay messages: keep raw HTML of "From eBay" emails for invoice preview ----
+ALTER TABLE ebay_messages ADD COLUMN IF NOT EXISTS message_html TEXT;

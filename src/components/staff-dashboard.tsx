@@ -15,20 +15,13 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { MyTicketsWidget } from './my-tickets-widget';
-import { BuildPanel } from './build-panel';
 import { DeliveryBadge } from './delivery-badge';
-import { BUILD_STATUS_CONFIG } from '@/lib/inventory-config';
 import {
-  Clock,
   Wrench,
-  ClipboardCheck,
-  BoxSelect,
   Package,
-  PauseCircle,
-  PackageX,
+  BoxSelect,
   CheckCircle,
   ArrowRight,
-  Layers,
   User,
   TrendingUp,
   MessageSquare,
@@ -36,16 +29,6 @@ import {
   LogOut,
   Coffee,
 } from 'lucide-react';
-
-const PIPELINE_STATUSES: { status: OrderStatus; icon: React.ElementType }[] = [
-  { status: 'pending',    icon: Clock },
-  { status: 'assembling', icon: Wrench },
-  { status: 'checking',   icon: ClipboardCheck },
-  { status: 'packing',    icon: BoxSelect },
-  { status: 'packed',     icon: Package },
-  { status: 'no-stock',   icon: PackageX },
-  { status: 'held',       icon: PauseCircle },
-];
 
 function getAllowedCategories(depts: Department[]): string[] | null {
   const cats: string[] = [];
@@ -65,9 +48,7 @@ export function StaffDashboard() {
   const eodEvents = useOrderStore((s) => s.eodEvents);
   const users = useOrderStore((s) => s.users);
   const currentUserId = useOrderStore((s) => s.currentUserId);
-  const builds = useOrderStore((s) => s.builds);
   const updateOrderStatus = useOrderStore((s) => s.updateOrderStatus);
-  const [buildOrder, setBuildOrder] = useState<Order | null>(null);
 
   const currentUser = users.find((u) => u.id === currentUserId);
   const userDepts: Department[] = currentUser
@@ -101,9 +82,6 @@ export function StaffDashboard() {
   const todayShipped = myTodayEvents.filter((e) => e.toStatus === 'shipped').length;
   const todayPacked  = myTodayEvents.filter((e) => e.toStatus === 'packed').length;
   const todayAssembled = myTodayEvents.filter((e) => e.toStatus === 'assembling').length;
-
-  const urgentCount = (statusCounts['pending'] || 0) + (statusCounts['no-stock'] || 0) + (statusCounts['held'] || 0);
-  const inProgressCount = (statusCounts['assembling'] || 0) + (statusCounts['checking'] || 0) + (statusCounts['packing'] || 0);
 
   const allOrders = useOrderStore((s) => s.orders);
   const totalNotes = allOrders.reduce((sum, o) => sum + (o.notes?.length ?? 0), 0);
@@ -179,81 +157,79 @@ export function StaffDashboard() {
         </div>
       </div>
 
-      {/* Big Clock In/Out Card */}
+      {/* Compact Clock In/Out Card */}
       <Card className={cn(
-        "border-2 transition-all",
+        "border transition-all",
         !myTodayAttendance?.clockIn ? "border-slate-200 bg-slate-50" :
         !myTodayAttendance?.clockOut ? "border-green-200 bg-green-50" :
         "border-blue-200 bg-blue-50"
       )}>
-        <CardContent className="p-6">
-          <div className="flex flex-col md:flex-row items-center justify-between gap-6">
-            {/* Time Display */}
-            <div className="text-center md:text-left">
-              <div className="text-5xl md:text-6xl font-bold text-slate-800 tracking-tight">
+        <CardContent className="p-3">
+          <div className="flex flex-row items-center justify-between gap-3">
+            <div className="flex items-center gap-3">
+              <div className="text-2xl font-bold text-slate-800 tracking-tight tabular-nums">
                 {currentTime.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' })}
               </div>
-              <div className="text-sm text-slate-500 mt-1">
-                {currentTime.toLocaleDateString('en-GB', { weekday: 'long', day: 'numeric', month: 'long' })}
+              <div className="text-xs text-slate-500 leading-tight">
+                <div>{currentTime.toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short' })}</div>
+                {myTodayAttendance?.clockIn && (
+                  <div className="text-slate-400">
+                    In {new Date(myTodayAttendance.clockIn).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' })}
+                    {myTodayAttendance.clockOut && (
+                      <span> · Out {new Date(myTodayAttendance.clockOut).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' })}</span>
+                    )}
+                  </div>
+                )}
               </div>
-              {myTodayAttendance?.clockIn && (
-                <div className="text-xs text-slate-500 mt-2">
-                  Clocked in: {new Date(myTodayAttendance.clockIn).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' })}
-                  {myTodayAttendance.clockOut && (
-                    <span> • Out: {new Date(myTodayAttendance.clockOut).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' })}</span>
-                  )}
-                </div>
-              )}
             </div>
 
-            {/* Action Buttons */}
-            <div className="flex items-center gap-3">
+            <div className="flex items-center gap-2">
               {!myTodayAttendance?.clockIn ? (
                 <Button 
-                  size="lg" 
-                  className="h-16 px-8 text-lg bg-green-600 hover:bg-green-700"
+                  size="sm" 
+                  className="h-8 px-4 bg-green-600 hover:bg-green-700"
                   onClick={handleClockIn}
                 >
-                  <LogIn className="h-6 w-6 mr-3" />
+                  <LogIn className="h-4 w-4 mr-1.5" />
                   Clock In
                 </Button>
               ) : !myTodayAttendance?.clockOut ? (
                 <>
                   <Button 
-                    size="lg" 
+                    size="sm" 
                     variant="outline"
                     className={cn(
-                      "h-16 px-6 text-base",
+                      "h-8 px-3 text-xs",
                       myTodayAttendance.status === 'half-day' && "bg-yellow-100 border-yellow-300 text-yellow-700"
                     )}
                     onClick={handleBreak}
                   >
-                    <Coffee className="h-5 w-5 mr-2" />
+                    <Coffee className="h-3.5 w-3.5 mr-1" />
                     {myTodayAttendance.status === 'half-day' ? 'End Break' : 'Break'}
                   </Button>
                   <Button 
-                    size="lg" 
+                    size="sm" 
                     variant="default"
-                    className="h-16 px-8 text-lg bg-red-600 hover:bg-red-700"
+                    className="h-8 px-4 bg-red-600 hover:bg-red-700"
                     onClick={handleClockOut}
                   >
-                    <LogOut className="h-6 w-6 mr-3" />
+                    <LogOut className="h-4 w-4 mr-1.5" />
                     Clock Out
                   </Button>
                 </>
               ) : (
-                <div className="flex items-center gap-3">
-                  <CheckCircle className="h-8 w-8 text-green-500" />
-                  <div>
-                    <div className="font-semibold text-slate-700">Done for today!</div>
-                    <div className="text-sm text-slate-500">
+                <div className="flex items-center gap-2 text-xs">
+                  <CheckCircle className="h-4 w-4 text-green-500" />
+                  <div className="text-right">
+                    <div className="font-medium text-slate-700">Done</div>
+                    <div className="text-slate-500">
                       {(() => {
                         const start = new Date(myTodayAttendance.clockIn!).getTime();
                         const end = new Date(myTodayAttendance.clockOut!).getTime();
                         const diff = end - start;
                         const hours = Math.floor(diff / 3600000);
                         const mins = Math.floor((diff % 3600000) / 60000);
-                        return `${hours}h ${mins}m worked`;
+                        return `${hours}h ${mins}m`;
                       })()}
                     </div>
                   </div>
@@ -332,57 +308,8 @@ export function StaffDashboard() {
         </Card>
       </div>
 
-      {/* Pipeline status counts */}
-      <Card>
-        <CardHeader className="pb-2 flex flex-row items-center justify-between">
-          <CardTitle className="text-sm flex items-center gap-2">
-            <Layers className="h-4 w-4" />
-            My Queue
-          </CardTitle>
-          <Button size="sm" variant="outline" className="h-7 text-xs" onClick={() => router.push('/packaging')}>
-            Open Queue
-            <ArrowRight className="h-3 w-3 ml-1" />
-          </Button>
-        </CardHeader>
-        <CardContent>
-          <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-7 gap-2">
-            {PIPELINE_STATUSES.map(({ status, icon: Icon }) => {
-              const cfg = ORDER_STATUS_CONFIG[status];
-              const count = statusCounts[status] || 0;
-              const isUrgent = status === 'no-stock' || status === 'held';
-              return (
-                <button
-                  key={status}
-                  onClick={() => router.push('/packaging')}
-                  className={`flex flex-col items-center p-3 rounded-lg border transition-all hover:shadow-md hover:scale-105 ${cfg.color} ${
-                    count > 0 && isUrgent ? 'ring-2 ring-offset-1 ring-orange-400 animate-pulse' : ''
-                  }`}
-                >
-                  <Icon className="h-5 w-5 mb-1" />
-                  <span className="text-xl font-bold">{count}</span>
-                  <span className="text-xs text-center leading-tight mt-0.5">{cfg.label}</span>
-                </button>
-              );
-            })}
-          </div>
-
-          {/* Summary bar */}
-          <div className="flex items-center gap-4 mt-4 pt-4 border-t text-xs text-slate-500 flex-wrap">
-            <span className={`font-medium ${urgentCount > 0 ? 'text-red-600' : 'text-slate-400'}`}>
-              ⚠ {urgentCount} need attention
-            </span>
-            <span className="text-amber-600 font-medium">
-              ⚙ {inProgressCount} in progress
-            </span>
-            <span className="text-green-600 font-medium">
-              ✓ {statusCounts['packed'] || 0} packed &amp; ready
-            </span>
-          </div>
-        </CardContent>
-      </Card>
-
-      {/* Packers → Orders to Pack; assemblers → Orders to Assemble */}
-      {isPacker ? (() => {
+      {/* Packers → Orders to Pack */}
+      {isPacker && (() => {
         const toPack = myOrders
           .filter((o) => !o.deletedAt && (o.status === 'packing' || o.status === 'checking'))
           .sort((a, b) => (a.priority ?? 5) - (b.priority ?? 5))
@@ -419,52 +346,10 @@ export function StaffDashboard() {
             </CardContent>
           </Card>
         );
-      })() : (() => {
-        const toAssemble = myOrders
-          .filter((o) => !o.deletedAt && (o.status === 'assembling' || o.status === 'pending'))
-          .sort((a, b) => (a.priority ?? 5) - (b.priority ?? 5))
-          .slice(0, 12);
-        if (toAssemble.length === 0) return null;
-        return (
-          <Card>
-            <CardHeader className="pb-2">
-              <CardTitle className="text-sm flex items-center gap-2">
-                <Wrench className="h-4 w-4 text-blue-500" /> Orders to Assemble
-                <span className="bg-blue-100 text-blue-700 text-[10px] font-bold rounded-full px-1.5 py-0.5">{toAssemble.length}</span>
-              </CardTitle>
-            </CardHeader>
-            <CardContent>
-              <div className="space-y-1.5">
-                {toAssemble.map((o) => {
-                  const build = builds.find((b) => b.orderId === o.id && b.status !== 'cancelled');
-                  return (
-                    <div key={o.id} className="flex items-center gap-2 px-3 py-2 rounded-lg border border-slate-200 hover:border-blue-300">
-                      <Badge variant="outline" className={`text-[10px] ${ORDER_STATUS_CONFIG[o.status].color}`}>{ORDER_STATUS_CONFIG[o.status].label}</Badge>
-                      <div className="min-w-0 flex-1">
-                        <p className="text-xs font-medium text-slate-700 truncate">{o.itemTitle}</p>
-                        <p className="text-[10px] text-slate-400 font-mono">#{o.salesRecordNumber}</p>
-                      </div>
-                      {build && (
-                        <span className={`text-[10px] font-medium px-1.5 py-0.5 rounded border ${BUILD_STATUS_CONFIG[build.status].color}`}>
-                          {BUILD_STATUS_CONFIG[build.status].label}
-                        </span>
-                      )}
-                      <Button size="sm" variant="outline" onClick={() => setBuildOrder(o)}>
-                        <Wrench className="h-3.5 w-3.5 mr-1" /> {build ? 'Parts' : 'Build'}
-                      </Button>
-                    </div>
-                  );
-                })}
-              </div>
-            </CardContent>
-          </Card>
-        );
       })()}
 
       {/* Tickets assigned to my department / me */}
       <MyTicketsWidget />
-
-      {buildOrder && <BuildPanel order={buildOrder} onClose={() => setBuildOrder(null)} />}
 
       {/* Recent activity — orders I've touched today */}
       {myTodayEvents.length > 0 && (

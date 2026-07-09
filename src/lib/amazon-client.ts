@@ -202,6 +202,63 @@ export async function fetchAmazonOrderItems(orderId: string): Promise<AmazonOrde
   return items;
 }
 
+// ─── Messaging ───────────────────────────────────────────────────────────────
+// SP-API Messaging v1. Amazon has no buyer-message inbox API — sellers can only
+// *send*, and only the templated message types Amazon permits for a given order
+// (returned by getMessagingActions). Requires the "Messaging" role on the app.
+
+// Actions whose request body carries free text. The rest are attachment-only
+// (legalDisclosure, sendInvoice, sendAmazonMotors, warranty) or body-less
+// (negativeFeedbackRemoval).
+export const AMAZON_TEXT_ACTIONS = new Set([
+  'confirmCustomizationDetails',
+  'confirmDeliveryDetails',
+  'confirmOrderDetails',
+  'confirmServiceDetails',
+  'digitalAccessKey',
+  'unexpectedProblem',
+]);
+
+/** Message types Amazon currently allows for this order (may be empty). */
+export async function getAmazonMessagingActions(amazonOrderId: string): Promise<string[]> {
+  const creds = getAmazonCredentials()!;
+  const token = await getAmazonAccessToken();
+  const data = await spGet<{ _links?: { actions?: { name?: string }[] } }>(
+    `/messaging/v1/orders/${encodeURIComponent(amazonOrderId)}`,
+    { marketplaceIds: creds.marketplaceId },
+    token,
+    creds.endpoint,
+  );
+  return (data._links?.actions ?? [])
+    .map((a) => a.name)
+    .filter((n): n is string => !!n);
+}
+
+export async function sendAmazonMessage(amazonOrderId: string, action: string, text?: string): Promise<void> {
+  const creds = getAmazonCredentials()!;
+  const token = await getAmazonAccessToken();
+  const url = `${creds.endpoint}/messaging/v1/orders/${encodeURIComponent(amazonOrderId)}/messages/${encodeURIComponent(action)}?marketplaceIds=${creds.marketplaceId}`;
+  const body = AMAZON_TEXT_ACTIONS.has(action) ? JSON.stringify({ text }) : JSON.stringify({});
+
+  for (let attempt = 0; attempt < 4; attempt++) {
+    const res = await fetch(url, {
+      method: 'POST',
+      headers: { 'x-amz-access-token': token, 'Content-Type': 'application/json' },
+      body,
+    });
+    if (res.status === 429 && attempt < 3) {
+      await new Promise((r) => setTimeout(r, 1000 * Math.pow(2, attempt)));
+      continue;
+    }
+    if (!res.ok) {
+      const errText = await res.text();
+      throw new Error(`Amazon send ${action} failed ${res.status}: ${errText.slice(0, 300)}`);
+    }
+    return;
+  }
+  throw new Error(`Amazon send ${action} throttled after retries`);
+}
+
 // ─── Mapper ──────────────────────────────────────────────────────────────────
 
 const num = (v: unknown): number => {
