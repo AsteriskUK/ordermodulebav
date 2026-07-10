@@ -276,11 +276,14 @@ export interface SwapPreset {
   attributes: Record<string, string | number>;     // partial attrs, e.g. { capacity: 8 }
 }
 
+export interface SwapConfigOption { key: string; label: string; options: string[] }
+
 export interface SwapConfig {
   dimensionKey: string;      // the attribute that varies (e.g. "capacity")
   dimensionLabel: string;    // human label (e.g. "Capacity")
   unit: string;              // e.g. "GB", "W", ""
   presets: SwapPreset[];     // predefined chips (may be empty → custom only)
+  configs: SwapConfigOption[]; // secondary spec tiles, e.g. RAM type DDR3/DDR4/DDR5
 }
 
 /** Predefined swap options for a category's swap dimension (+ free-text always allowed). */
@@ -297,7 +300,13 @@ export function swapConfigForCategory(categoryKey: string): SwapConfig {
     label: `${v}${unit}`,
     attributes: { [attrKey]: v },
   }));
-  return { dimensionKey: attrKey, dimensionLabel: attr?.label ?? 'Spec', unit, presets };
+  // Secondary config tiles: the category's other identifying select attributes
+  // (e.g. RAM type DDR3/DDR4/DDR5, storage type SSD/HDD/NVMe).
+  const configs: SwapConfigOption[] = (cat?.attributes ?? [])
+    .filter((a) => a.identifying && a.type === 'select' && a.key !== attrKey && Array.isArray(a.options) && a.options.length)
+    .slice(0, 2)
+    .map((a) => ({ key: a.key, label: a.label, options: a.options as string[] }));
+  return { dimensionKey: attrKey, dimensionLabel: attr?.label ?? 'Spec', unit, presets, configs };
 }
 
 /** Build the label + attributes for a custom (free-text) swap value. */

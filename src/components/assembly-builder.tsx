@@ -43,6 +43,9 @@ export function AssemblyBuilder({ order, onClose }: { order: Order; onClose: () 
   useEffect(() => () => releaseAssemblyLock(order.id), [order.id, releaseAssemblyLock]);
   // Security barcode scanned onto the finished build (used at packing to find it).
   const [barcode, setBarcode] = useState(liveOrder.securityBarcode ?? '');
+  // Items that need no parts/config (e.g. a monitor) can be completed with an
+  // empty build once the assembler marks "No config required".
+  const [noConfig, setNoConfig] = useState(false);
 
   const existing = useMemo(() => builds.find((b) => b.orderId === order.id && b.status !== 'cancelled'), [builds, order.id]);
 
@@ -105,7 +108,7 @@ export function AssemblyBuilder({ order, onClose }: { order: Order; onClose: () 
       const part = parts.find((p) => p.id === sel.partId);
       return { category: part?.category ?? s, partId: sel.partId, stockUnitId: sel.stockUnitId, quantity: sel.quantity || 1, description: part ? describeAttributes(part.category, part.attributes) || part.name : s };
     });
-    if (lines.length === 0) { toast.error('Select at least one part'); return; }
+    if (lines.length === 0 && !noConfig) { toast.error('Select parts, or tap “No config required”'); return; }
     // Completing a build requires the security label — it's what packing scans.
     const code = barcode.trim();
     if (moveOn) {
@@ -190,6 +193,16 @@ export function AssemblyBuilder({ order, onClose }: { order: Order; onClose: () 
                   ) : (
                     <p className="text-sm text-slate-400 mt-2">Tap to pick from stock</p>
                   )}
+                  {!readOnly && swapConfigForCategory(slot).presets.length > 0 && (
+                    <span
+                      role="button"
+                      tabIndex={0}
+                      onClick={(e) => { e.stopPropagation(); setOpenSlot(slot); }}
+                      className="mt-2 inline-flex items-center gap-1 text-[11px] font-medium text-amber-700 bg-amber-50 border border-amber-200 rounded-full px-2 py-0.5 hover:bg-amber-100"
+                    >
+                      <Repeat className="h-3 w-3" /> Swap
+                    </span>
+                  )}
                 </button>
               );
             })}
@@ -203,7 +216,16 @@ export function AssemblyBuilder({ order, onClose }: { order: Order; onClose: () 
       {/* Footer */}
       {!openSlot && !readOnly && (
         <div className="bg-white border-t px-5 py-3 flex items-center justify-between gap-3 shrink-0">
-          <Button variant="outline" onClick={() => complete(false)} className="shrink-0">Save &amp; stay</Button>
+          <div className="flex items-center gap-2 shrink-0">
+            <Button variant="outline" onClick={() => complete(false)}>Save &amp; stay</Button>
+            <button
+              onClick={() => setNoConfig((v) => !v)}
+              className={`text-xs font-medium px-2.5 py-2 rounded-lg border transition-colors ${noConfig ? 'bg-slate-800 text-white border-slate-800' : 'bg-white text-slate-500 border-slate-300 hover:bg-slate-50'}`}
+              title="Complete without parts/config (e.g. a monitor)"
+            >
+              No config required
+            </button>
+          </div>
           <div className={`flex-1 flex items-center gap-2 max-w-xs rounded-lg border px-2 ${barcode.trim() ? 'border-green-300 bg-green-50' : 'border-slate-300 bg-white'}`}>
             <ScanLine className={`h-4 w-4 shrink-0 ${barcode.trim() ? 'text-green-600' : 'text-slate-400'}`} />
             <input
@@ -214,7 +236,11 @@ export function AssemblyBuilder({ order, onClose }: { order: Order; onClose: () 
             />
             {barcode.trim() && <Check className="h-4 w-4 text-green-600 shrink-0" />}
           </div>
-          <Button onClick={() => complete(true)} className="bg-blue-600 hover:bg-blue-700 text-white shrink-0">
+          <Button
+            onClick={() => complete(true)}
+            disabled={filledCount === 0 && !noConfig}
+            className="bg-blue-600 hover:bg-blue-700 text-white shrink-0 disabled:bg-slate-300 disabled:cursor-not-allowed disabled:hover:bg-slate-300"
+          >
             Complete assembly <ArrowRight className="h-4 w-4 ml-1.5" />
           </Button>
         </div>
@@ -361,12 +387,24 @@ function SwapSection({ slot, swaps, readOnly, onRecordSwap, onRemoveSwap }: {
   const [inCustom, setInCustom] = useState('');
   const [outQty, setOutQty] = useState(1);
   const [inQty, setInQty] = useState(1);
+  const [outConfig, setOutConfig] = useState<Record<string, string>>({});
+  const [inConfig, setInConfig] = useState<Record<string, string>>({});
 
-  function reset() { setOutSel(null); setInSel(null); setOutCustom(''); setInCustom(''); setOutQty(1); setInQty(1); }
+  function reset() { setOutSel(null); setInSel(null); setOutCustom(''); setInCustom(''); setOutQty(1); setInQty(1); setOutConfig({}); setInConfig({}); }
+
+  // Merge the picked size + config tiles (e.g. DDR4) into one preset.
+  function withConfig(base: SwapPreset | null, config: Record<string, string>): SwapPreset | null {
+    if (!base) return null;
+    const extras = Object.values(config).filter(Boolean);
+    return {
+      label: [base.label, ...extras].join(' '),
+      attributes: { ...base.attributes, ...config },
+    };
+  }
 
   function record() {
-    const out = outSel ?? (outCustom.trim() ? customSwapPreset(slot, outCustom) : null);
-    const inp = inSel ?? (inCustom.trim() ? customSwapPreset(slot, inCustom) : null);
+    const out = withConfig(outSel ?? (outCustom.trim() ? customSwapPreset(slot, outCustom) : null), outConfig);
+    const inp = withConfig(inSel ?? (inCustom.trim() ? customSwapPreset(slot, inCustom) : null), inConfig);
     if (!out || !inp) { toast.error('Choose both the removed part and the installed part'); return; }
     onRecordSwap({
       id: uuid(), category: slot,
@@ -379,12 +417,13 @@ function SwapSection({ slot, swaps, readOnly, onRecordSwap, onRemoveSwap }: {
     setOpen(false);
   }
 
-  // Renders the preset chips + custom input + qty stepper for one side of the swap.
+  // Renders the preset tiles + config tiles + custom input + qty stepper for one side.
   function side(
     title: string, tone: 'out' | 'in',
     sel: SwapPreset | null, setSel: (p: SwapPreset | null) => void,
     custom: string, setCustom: (v: string) => void,
     qty: number, setQty: (n: number) => void,
+    config: Record<string, string>, setConfig: (c: Record<string, string>) => void,
   ) {
     const accent = tone === 'out' ? 'text-red-600' : 'text-green-600';
     return (
@@ -403,6 +442,20 @@ function SwapSection({ slot, swaps, readOnly, onRecordSwap, onRemoveSwap }: {
             })}
           </div>
         )}
+        {cfg.configs.map((c) => (
+          <div key={c.key} className="flex flex-wrap items-center gap-1.5">
+            <span className="text-[11px] text-slate-400 w-16 shrink-0">{c.label}</span>
+            {c.options.map((opt) => {
+              const selected = config[c.key] === opt;
+              return (
+                <button key={opt} onClick={() => setConfig({ ...config, [c.key]: selected ? '' : opt })}
+                  className={`text-xs px-2 py-0.5 rounded-md border font-medium ${selected ? 'bg-amber-600 text-white border-amber-600' : 'bg-white text-slate-600 border-slate-300 hover:bg-slate-50'}`}>
+                  {opt}
+                </button>
+              );
+            })}
+          </div>
+        ))}
         <div className="flex items-center gap-2">
           <input
             value={custom}
@@ -431,9 +484,9 @@ function SwapSection({ slot, swaps, readOnly, onRecordSwap, onRemoveSwap }: {
 
       {open && !readOnly && (
         <div className="px-4 pb-4 space-y-3">
-          {side('Removed (out) — returns to stock', 'out', outSel, setOutSel, outCustom, setOutCustom, outQty, setOutQty)}
+          {side('Removed (out) — returns to stock', 'out', outSel, setOutSel, outCustom, setOutCustom, outQty, setOutQty, outConfig, setOutConfig)}
           <div className="flex items-center justify-center text-amber-500"><ArrowRightLeft className="h-4 w-4" /></div>
-          {side('Installed (in) — consumed from stock', 'in', inSel, setInSel, inCustom, setInCustom, inQty, setInQty)}
+          {side('Installed (in) — consumed from stock', 'in', inSel, setInSel, inCustom, setInCustom, inQty, setInQty, inConfig, setInConfig)}
           <Button size="sm" onClick={record} className="w-full bg-amber-600 hover:bg-amber-700 text-white">Record swap</Button>
         </div>
       )}
