@@ -6,6 +6,8 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/u
 import { toast } from 'sonner';
 import { Printer, Package, CheckCircle } from 'lucide-react';
 import { useOrderStore } from '@/lib/store';
+import { fetchPrinterConfig, printLabel, printerForCarrier } from '@/lib/print-agent';
+import { useEffect, useState } from 'react';
 
 interface Props {
   order: Order;
@@ -26,6 +28,34 @@ export function LabelPrintDialog({ order, onClose }: Props) {
 
   const hasLabelData = (order.labelData?.length ?? 0) > 0;
   const canPrint = hasLabelData;
+
+  // Is a printer mapped for this carrier on the print agent? If so, we can send
+  // the label straight to the FedEx/DPD printer instead of the browser dialog.
+  const [agentPrinter, setAgentPrinter] = useState<string | null>(null);
+  useEffect(() => {
+    let alive = true;
+    if (!carrier) return;
+    fetchPrinterConfig().then((cfg) => {
+      if (alive) setAgentPrinter(cfg.agentUrl ? (printerForCarrier(cfg, carrier) || null) : null);
+    }).catch(() => {});
+    return () => { alive = false; };
+  }, [carrier]);
+
+  async function printViaAgent() {
+    const labels = order.labelData ?? [];
+    if (!labels.length || !carrier) { toast.error('No label PDF available'); return; }
+    try {
+      let sent = 0;
+      for (const data of labels) {
+        const ok = await printLabel(carrier, data, undefined, `Label-${order.salesRecordNumber}`);
+        if (ok) sent++;
+      }
+      if (sent > 0) toast.success(`Sent ${sent} label${sent !== 1 ? 's' : ''} to ${agentPrinter}`);
+      else toast.error('Print agent not configured for this carrier');
+    } catch (e) {
+      toast.error(`Print failed: ${e instanceof Error ? e.message : 'error'}`);
+    }
+  }
 
   function printLabels() {
     const labels = order.labelData ?? [];
@@ -121,10 +151,16 @@ export function LabelPrintDialog({ order, onClose }: Props) {
 
           {/* Actions */}
           <div className="flex flex-col gap-2 pt-1">
-            {canPrint && (
-              <Button onClick={printLabels} className="w-full">
+            {canPrint && agentPrinter && (
+              <Button onClick={printViaAgent} className="w-full">
                 <Printer className="h-4 w-4 mr-2" />
-                Print {order.labelData!.length > 1 ? `${order.labelData!.length} Labels` : 'Label'}
+                Print to {carrier} printer ({agentPrinter})
+              </Button>
+            )}
+            {canPrint && (
+              <Button onClick={printLabels} variant={agentPrinter ? 'outline' : 'default'} className="w-full">
+                <Printer className="h-4 w-4 mr-2" />
+                {agentPrinter ? 'Print via browser instead' : `Print ${order.labelData!.length > 1 ? `${order.labelData!.length} Labels` : 'Label'}`}
               </Button>
             )}
 

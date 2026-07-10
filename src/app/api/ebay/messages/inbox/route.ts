@@ -69,7 +69,9 @@ async function upsertMessages(
   opts: { onConflict: string; ignoreDuplicates?: boolean },
 ): Promise<{ error: { message: string } | null }> {
   const { error } = await supabase.from('ebay_messages').upsert(rows, opts);
-  if (error && error.code === '42703' && /message_html/.test(error.message)) {
+  // 42703 = Postgres "column does not exist"; PGRST204 = PostgREST schema-cache
+  // miss. Either way, retry without message_html so the inbox keeps syncing.
+  if (error && (error.code === '42703' || error.code === 'PGRST204') && /message_html/.test(error.message)) {
     const stripped = rows.map(({ message_html: _omit, ...rest }) => rest);
     return supabase.from('ebay_messages').upsert(stripped, opts);
   }

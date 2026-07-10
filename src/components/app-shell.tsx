@@ -8,6 +8,7 @@ import { PanelLeftClose, PanelLeftOpen, LogOut, ChevronDown, Check, Bell, Messag
 import { supabase } from '@/lib/supabase-client';
 import { Button } from './ui/button';
 import { useSupabaseSync } from '@/hooks/use-supabase-sync';
+import { useAutoPull } from '@/hooks/use-auto-pull';
 import { CancellationAlert } from './cancellation-alert';
 import { TrackingScheduler } from './tracking-scheduler';
 import { FeedbackMonitor } from './feedback-monitor';
@@ -36,6 +37,8 @@ export function AppShell({ children }: { children: React.ReactNode }) {
 
   // Initialize Supabase sync (auto-syncs on load and periodically)
   useSupabaseSync();
+  // Automatically pull new marketplace orders every 30 minutes.
+  useAutoPull();
 
   const users = useOrderStore((s) => s.users);
   const currentUserId = useOrderStore((s) => s.currentUserId);

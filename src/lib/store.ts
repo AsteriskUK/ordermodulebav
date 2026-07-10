@@ -57,6 +57,7 @@ interface OrderStore {
   addOrderNote: (orderId: string, note: Omit<OrderNote, 'id' | 'createdAt'>) => void;
   deleteOrderNote: (orderId: string, noteId: string) => void;
   updateOrderTracking: (orderId: string, trackingNumber: string) => void;
+  attachSecurityBarcode: (orderId: string, barcode: string) => void;   // link preprinted label to order
   updateOrderCarrier: (orderId: string, carrier: DeliveryCarrier, deliveryType: DeliveryType) => void;
   updateOrderLabelQty: (orderId: string, qty: number) => void;
   updateOrderCategory: (orderId: string, category: string) => void;
@@ -273,6 +274,15 @@ export const useOrderStore = create<OrderStore>()(
         set((state) => {
           const updatedOrders = state.orders.map((o) =>
             o.id === orderId ? { ...o, deliveryCarrier: carrier, deliveryType } : o
+          );
+          const updatedOrder = updatedOrders.find(o => o.id === orderId);
+          if (updatedOrder) syncOrder(updatedOrder).catch(console.error);
+          return { orders: updatedOrders };
+        }),
+      attachSecurityBarcode: (orderId, barcode) =>
+        set((state) => {
+          const updatedOrders = state.orders.map((o) =>
+            o.id === orderId ? { ...o, securityBarcode: barcode, securityBarcodeAt: new Date().toISOString() } : o
           );
           const updatedOrder = updatedOrders.find(o => o.id === orderId);
           if (updatedOrder) syncOrder(updatedOrder).catch(console.error);

@@ -20,7 +20,8 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
-import { MapPin, Package, User, Truck, MessageSquare, Send, Trash2, ShoppingBag, Star, PackageMinus, Plus } from 'lucide-react';
+import { MapPin, Package, User, Truck, MessageSquare, Send, Trash2, ShoppingBag, Star, PackageMinus, Plus, FileText, ScanLine } from 'lucide-react';
+import { InvoicePreviewDialog } from './invoice-preview-dialog';
 import { DeliveryBadge } from './delivery-badge';
 import { ReturnLabelDialog } from './return-label-dialog';
 import { BuildPanel } from './build-panel';
@@ -66,6 +67,7 @@ export function OrderDetailDialog({ order, onClose }: Props) {
   // eBay messaging
   const [showReturnLabel, setShowReturnLabel] = useState(false);
   const [showBuild, setShowBuild] = useState(false);
+  const [showInvoice, setShowInvoice] = useState(false);
   const [ebayMsgText, setEbayMsgText] = useState('');
   const [ebayMsgReason, setEbayMsgReason] = useState('SHIPPING');
   const [ebayMsgSending, setEbayMsgSending] = useState(false);
@@ -306,11 +308,19 @@ export function OrderDetailDialog({ order, onClose }: Props) {
           </div>
 
           {/* Build / parts allocation */}
-          <div className="flex items-center gap-3">
+          <div className="flex items-center gap-3 flex-wrap">
             <span className="text-sm font-medium text-slate-600">Build:</span>
             <Button size="sm" variant="outline" onClick={() => setShowBuild(true)}>
               <Wrench className="h-3.5 w-3.5 mr-1.5" /> Parts &amp; build
             </Button>
+            <Button size="sm" variant="outline" onClick={() => setShowInvoice(true)}>
+              <FileText className="h-3.5 w-3.5 mr-1.5" /> View invoice
+            </Button>
+            {liveOrder.securityBarcode && (
+              <span className="inline-flex items-center gap-1 text-xs font-mono text-slate-500 bg-slate-100 border border-slate-200 rounded px-2 py-1">
+                <ScanLine className="h-3.5 w-3.5" /> {liveOrder.securityBarcode}
+              </span>
+            )}
           </div>
 
           {/* Quick actions — raise a customer-request ticket in one tap */}
@@ -843,6 +853,7 @@ export function OrderDetailDialog({ order, onClose }: Props) {
       </DialogContent>
       {showReturnLabel && <ReturnLabelDialog order={order} onClose={() => setShowReturnLabel(false)} />}
       {showBuild && <BuildPanel order={order} onClose={() => setShowBuild(false)} />}
+      {showInvoice && <InvoicePreviewDialog orders={[liveOrder]} onClose={() => setShowInvoice(false)} />}
     </Dialog>
   );
 }

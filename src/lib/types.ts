@@ -481,6 +481,10 @@ export interface Order {
   // Replacement linkage
   isReplacement?: boolean;
   originalOrderId?: string;
+  // Preprinted security-barcode label attached to the physical build at assembly.
+  // Scanned again at packing to pull the order up. One barcode ↔ one order.
+  securityBarcode?: string;
+  securityBarcodeAt?: string;   // when it was first attached
 }
 
 export interface Batch {

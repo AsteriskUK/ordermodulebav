@@ -12,7 +12,7 @@ import { suggestBuildLines } from '@/lib/inventory-build';
 import { fetchCatalogPage, catalogToAttributes, INVENTORY_TO_CATALOG_CATEGORY } from '@/lib/catalog';
 import { Button } from '@/components/ui/button';
 import { toast } from 'sonner';
-import { X, Check, ChevronLeft, Plus, CircleAlert, Cpu, Boxes, ArrowRight, Minus, Library, Search, Loader2, Repeat, Trash2, ArrowRightLeft } from 'lucide-react';
+import { X, Check, ChevronLeft, Plus, CircleAlert, Cpu, Boxes, ArrowRight, Minus, Library, Search, Loader2, Repeat, Trash2, ArrowRightLeft, ScanLine } from 'lucide-react';
 
 function uuid(): string {
   return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, (c) => {
@@ -34,6 +34,11 @@ export function AssemblyBuilder({ order, onClose }: { order: Order; onClose: () 
   const upsertInventoryPart = useOrderStore((s) => s.upsertInventoryPart);
   const recordBuildSwap = useOrderStore((s) => s.recordBuildSwap);
   const removeBuildSwap = useOrderStore((s) => s.removeBuildSwap);
+  const attachSecurityBarcode = useOrderStore((s) => s.attachSecurityBarcode);
+  const allOrders = useOrderStore((s) => s.orders);
+  const liveOrder = allOrders.find((o) => o.id === order.id) ?? order;
+  // Security barcode scanned onto the finished build (used at packing to find it).
+  const [barcode, setBarcode] = useState(liveOrder.securityBarcode ?? '');
 
   const existing = useMemo(() => builds.find((b) => b.orderId === order.id && b.status !== 'cancelled'), [builds, order.id]);
 
@@ -97,6 +102,13 @@ export function AssemblyBuilder({ order, onClose }: { order: Order; onClose: () 
       return { category: part?.category ?? s, partId: sel.partId, stockUnitId: sel.stockUnitId, quantity: sel.quantity || 1, description: part ? describeAttributes(part.category, part.attributes) || part.name : s };
     });
     if (lines.length === 0) { toast.error('Select at least one part'); return; }
+    // Completing a build requires the security label — it's what packing scans.
+    const code = barcode.trim();
+    if (moveOn) {
+      if (!code) { toast.error('Scan the security label before completing the build'); return; }
+      const clash = allOrders.find((o) => o.id !== order.id && !o.deletedAt && o.securityBarcode && o.securityBarcode.toLowerCase() === code.toLowerCase());
+      if (clash) { toast.error(`That barcode is already on order #${clash.salesRecordNumber}`); return; }
+    }
     const now = new Date().toISOString();
     const build: Build = {
       id: existing?.id ?? uuid(), orderId: order.id, status: 'reserved', lines,
@@ -105,8 +117,11 @@ export function AssemblyBuilder({ order, onClose }: { order: Order; onClose: () 
       reservedAt: existing?.reservedAt ?? now, createdAt: existing?.createdAt ?? now, updatedAt: now,
     };
     saveBuild(build);
-    if (moveOn) { updateOrderStatus(order.id, 'checking'); toast.success('Parts reserved — moved to Checking'); }
-    else toast.success('Parts reserved (on hold until packed)');
+    if (moveOn) {
+      if (code && code !== liveOrder.securityBarcode) attachSecurityBarcode(order.id, code);
+      updateOrderStatus(order.id, 'checking');
+      toast.success('Build complete — label attached, moved to Checking');
+    } else toast.success('Parts reserved (on hold until packed)');
     onClose();
   }
 
@@ -183,9 +198,19 @@ export function AssemblyBuilder({ order, onClose }: { order: Order; onClose: () 
 
       {/* Footer */}
       {!openSlot && !readOnly && (
-        <div className="bg-white border-t px-5 py-3 flex items-center justify-between gap-2 shrink-0">
-          <Button variant="outline" onClick={() => complete(false)}>Save &amp; stay</Button>
-          <Button onClick={() => complete(true)} className="bg-blue-600 hover:bg-blue-700 text-white">
+        <div className="bg-white border-t px-5 py-3 flex items-center justify-between gap-3 shrink-0">
+          <Button variant="outline" onClick={() => complete(false)} className="shrink-0">Save &amp; stay</Button>
+          <div className={`flex-1 flex items-center gap-2 max-w-xs rounded-lg border px-2 ${barcode.trim() ? 'border-green-300 bg-green-50' : 'border-slate-300 bg-white'}`}>
+            <ScanLine className={`h-4 w-4 shrink-0 ${barcode.trim() ? 'text-green-600' : 'text-slate-400'}`} />
+            <input
+              value={barcode}
+              onChange={(e) => setBarcode(e.target.value)}
+              placeholder="Scan security label…"
+              className="flex-1 min-w-0 py-2 text-sm bg-transparent focus:outline-none"
+            />
+            {barcode.trim() && <Check className="h-4 w-4 text-green-600 shrink-0" />}
+          </div>
+          <Button onClick={() => complete(true)} className="bg-blue-600 hover:bg-blue-700 text-white shrink-0">
             Complete assembly <ArrowRight className="h-4 w-4 ml-1.5" />
           </Button>
         </div>

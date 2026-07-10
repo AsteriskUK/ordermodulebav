@@ -38,6 +38,8 @@ import {
   Printer,
   ShoppingBag,
   RefreshCw,
+  Search,
+  Flag,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { DeliveryBadge } from './delivery-badge';
@@ -45,8 +47,17 @@ import { OrderSourceLogo, GspDestination } from './order-source-logo';
 import { AssemblyBuilder } from './assembly-builder';
 import { OrderDetailDialog } from './order-detail-dialog';
 import { LabelPrintDialog } from './label-print-dialog';
+import { PackScanStation } from './pack-scan-station';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
+
+// Priority badge for queue cards (1 = highest/urgent … 5 = default). Only shown
+// for elevated priorities so the default-priority majority stays uncluttered.
+const PRIORITY_BADGE: Record<number, { label: string; cls: string }> = {
+  1: { label: 'P1 · Urgent', cls: 'bg-red-100 text-red-700 border-red-300' },
+  2: { label: 'P2 · High',   cls: 'bg-orange-100 text-orange-700 border-orange-300' },
+  3: { label: 'P3 · Medium', cls: 'bg-amber-100 text-amber-700 border-amber-300' },
+};
 
 function getAllowedCategories(depts: Department[]): string[] | null {
   const cats: string[] = [];
@@ -88,6 +99,7 @@ export function PackagingPipeline() {
   const [holdReason, setHoldReason] = useState('');
   const [cancelledAlert, setCancelledAlert] = useState<{ orderId: string; salesRecordNumber: string; itemTitle: string } | null>(null);
   const [lastRefresh, setLastRefresh] = useState(new Date());
+  const [search, setSearch] = useState('');
 
   const currentUser = users.find((u) => u.id === currentUserId);
   const isAdmin = currentUser?.role === 'admin' || currentUser?.role === 'manager';
@@ -124,33 +136,52 @@ export function PackagingPipeline() {
     });
   }, [orders, allowedCategories]);
 
+  // Free-text search across the whole board (available to every user). Matches
+  // order numbers, buyer, item, SKU, recipient, postcode and tracking.
+  const searchedOrders = useMemo(() => {
+    const q = search.trim().toLowerCase();
+    if (!q) return visibleOrders;
+    return visibleOrders.filter((o) =>
+      [
+        o.salesRecordNumber, o.orderNumber, o.buyerUsername, o.buyerName,
+        o.itemTitle, o.customLabel, o.postToName, o.postToPostcode,
+        o.trackingNumber, o.category,
+      ].some((f) => (f ?? '').toString().toLowerCase().includes(q))
+    );
+  }, [visibleOrders, search]);
+
   const pendingOrders = useMemo(
-    () => visibleOrders.filter((o) => o.status === 'pending'),
-    [visibleOrders]
+    () => searchedOrders.filter((o) => o.status === 'pending'),
+    [searchedOrders]
   );
   const assemblingOrders = useMemo(
-    () => visibleOrders.filter((o) => o.status === 'assembling'),
-    [visibleOrders]
+    () => searchedOrders.filter((o) => o.status === 'assembling'),
+    [searchedOrders]
   );
   const checkingOrders = useMemo(
-    () => visibleOrders.filter((o) => o.status === 'checking'),
-    [visibleOrders]
+    () => searchedOrders.filter((o) => o.status === 'checking'),
+    [searchedOrders]
   );
   const packingOrders = useMemo(
-    () => visibleOrders.filter((o) => o.status === 'packing'),
-    [visibleOrders]
+    () => searchedOrders.filter((o) => o.status === 'packing'),
+    [searchedOrders]
   );
   const packedOrders = useMemo(
-    () => visibleOrders.filter((o) => o.status === 'packed'),
-    [visibleOrders]
+    () => searchedOrders.filter((o) => o.status === 'packed'),
+    [searchedOrders]
   );
   const shippedOrders = useMemo(
+    () => searchedOrders.filter((o) => o.status === 'shipped'),
+    [searchedOrders]
+  );
+  // EOD clearance always acts on every shipped order, never just the search subset.
+  const allShippedOrders = useMemo(
     () => visibleOrders.filter((o) => o.status === 'shipped'),
     [visibleOrders]
   );
 
   const handleEODClear = () => {
-    const shippedOrderIds = shippedOrders.map(o => o.id);
+    const shippedOrderIds = allShippedOrders.map(o => o.id);
     if (shippedOrderIds.length === 0) {
       toast.info('No shipped orders to clear');
       return;
@@ -243,6 +274,33 @@ export function PackagingPipeline() {
         </button>
       </div>
 
+      {/* Packing scan station — scan the security barcode to pack + print */}
+      {(isAdmin || isPacker) && <PackScanStation />}
+
+      {/* Search — filters every stage; available to all users */}
+      <div className="relative max-w-xl">
+        <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400 pointer-events-none" />
+        <Input
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+          placeholder="Search order #, buyer, item, SKU, postcode, tracking…"
+          className="pl-9 pr-16"
+        />
+        {search && (
+          <button
+            onClick={() => setSearch('')}
+            className="absolute right-2 top-1/2 -translate-y-1/2 flex items-center gap-1 text-xs text-slate-400 hover:text-slate-700 px-1.5 py-0.5 rounded hover:bg-slate-100"
+          >
+            <X className="h-3.5 w-3.5" /> Clear
+          </button>
+        )}
+      </div>
+      {search.trim() && (
+        <p className="-mt-3 text-xs text-slate-500">
+          {searchedOrders.length} order{searchedOrders.length !== 1 ? 's' : ''} {searchedOrders.length === 1 ? 'matches' : 'match'} &ldquo;{search.trim()}&rdquo; across all stages
+        </p>
+      )}
+
       {/* Dept scope indicator */}
       {currentUser ? (
         <div className="flex items-center gap-2 flex-wrap text-xs">
@@ -270,10 +328,10 @@ export function PackagingPipeline() {
       )}
 
       {/* EOD Actions */}
-      {shippedOrders.length > 0 && (
+      {allShippedOrders.length > 0 && (
         <div className="flex items-center gap-3 p-3 bg-slate-50 border border-slate-200 rounded-lg">
           <span className="text-sm font-medium text-slate-700">
-            {shippedOrders.length} shipped order{shippedOrders.length !== 1 ? 's' : ''} ready for EOD clearance
+            {allShippedOrders.length} shipped order{allShippedOrders.length !== 1 ? 's' : ''} ready for EOD clearance
           </span>
           <Button 
             size="sm" 
@@ -457,6 +515,14 @@ export function PackagingPipeline() {
                         <div className="flex items-start justify-between gap-2">
                           <div className="min-w-0 flex-1">
                             <div className="flex items-center gap-1.5 flex-wrap">
+                              {(() => {
+                                const pb = PRIORITY_BADGE[order.priority ?? 5];
+                                return pb ? (
+                                  <span className={`inline-flex items-center gap-0.5 text-[10px] font-bold px-1 py-0 rounded border ${pb.cls} ${order.priority === 1 ? 'animate-pulse' : ''}`}>
+                                    <Flag className="h-2.5 w-2.5" /> {pb.label}
+                                  </span>
+                                ) : null;
+                              })()}
                               <OrderSourceLogo source={orderSource(order)} className="h-4 w-4" />
                               <p className="text-xs font-mono text-slate-500">
                                 #{order.salesRecordNumber}

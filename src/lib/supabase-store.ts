@@ -195,6 +195,8 @@ export async function fetchOrders(): Promise<Order[]> {
     labelData: o.label_data,
     isReplacement: o.metadata?.is_replacement,
     originalOrderId: o.metadata?.original_order_id,
+    securityBarcode: o.metadata?.security_barcode,
+    securityBarcodeAt: o.metadata?.security_barcode_at,
     buyerAddress1: o.metadata?.buyer_address1,
     buyerAddress2: o.metadata?.buyer_address2,
     buyerCity: o.metadata?.buyer_city,
@@ -271,6 +273,8 @@ export async function syncOrder(order: Order): Promise<void> {
       metadata: {
         is_replacement: order.isReplacement,
         original_order_id: order.originalOrderId,
+        security_barcode: order.securityBarcode,
+        security_barcode_at: order.securityBarcodeAt,
         buyer_address1: order.buyerAddress1,
         buyer_address2: order.buyerAddress2,
         buyer_city: order.buyerCity,
@@ -805,7 +809,9 @@ export async function syncBuild(b: Build): Promise<void> {
   };
   let { error } = await supabase.from('builds').upsert(row);
   // Tolerate the swaps column not existing yet (its migration may be unapplied).
-  if (error && error.code === '42703' && /swaps/.test(error.message)) {
+  // Postgres reports 42703; PostgREST reports PGRST204 (column missing from its
+  // schema cache) — handle both so the build still saves without swap history.
+  if (error && (error.code === '42703' || error.code === 'PGRST204') && /swaps/.test(error.message)) {
     delete row.swaps;
     ({ error } = await supabase.from('builds').upsert(row));
   }

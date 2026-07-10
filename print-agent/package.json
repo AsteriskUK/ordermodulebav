@@ -1,0 +1,14 @@
+{
+  "name": "warehouse-print-agent",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Self-hosted print agent — silently prints invoices (HTML) and carrier labels (PDF) to named printers on the warehouse PC.",
+  "bin": { "print-agent": "server.js" },
+  "scripts": {
+    "start": "node server.js"
+  },
+  "dependencies": {
+    "puppeteer": "^23.0.0"
+  },
+  "engines": { "node": ">=18" }
+}
