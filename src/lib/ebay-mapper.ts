@@ -21,6 +21,8 @@ interface EbayLineItem {
   quantity: number;
   lineItemCost?: { value: string };
   deliveryCost?: { shippingCost?: { value: string } };
+  // eBay Fulfillment API puts the selected variation (CPU/RAM/SSD etc.) here.
+  variationAspects?: { name: string; value: string }[];
   properties?: { name: string; value: string }[];
 }
 
@@ -89,8 +91,14 @@ export function mapEbayOrderToOrder(ebayOrder: EbayOrder, batchId: string): Orde
   // One Order per line item — merging into a single shipment row happens at display time in batch shipping
   return lineItems.map((item, idx) => {
     const itemTotal = parseFloat(item.lineItemCost?.value || '0') * item.quantity;
-    const variation = (Array.isArray(item.properties) ? item.properties : [])
-      .filter((p) => p.name !== 'SKU')
+    // Variation lives in variationAspects (the selected CPU/RAM/SSD/etc.); older
+    // code read `properties`, which doesn't hold the variation, so variations came
+    // through blank. Prefer variationAspects, fall back to properties.
+    const aspects = Array.isArray(item.variationAspects) && item.variationAspects.length
+      ? item.variationAspects
+      : (Array.isArray(item.properties) ? item.properties : []);
+    const variation = aspects
+      .filter((p) => p.name && p.value !== undefined && p.value !== '' && p.name.toUpperCase() !== 'SKU')
       .map((p) => `${p.name}: ${p.value}`)
       .join(', ') || '';
 
