@@ -72,6 +72,7 @@ interface OrderStore {
   softCancelOrder: (orderId: string, reason?: string) => void;         // cancel (recoverable) + raise urgent Comms ticket
   acquireAssemblyLock: (orderId: string, force?: boolean) => boolean;  // lock a build to the current assembler
   releaseAssemblyLock: (orderId: string) => void;
+  setOrderPicked: (orderId: string, picked: boolean) => void;          // order-picker: parts gathered
   updateOrderCarrier: (orderId: string, carrier: DeliveryCarrier, deliveryType: DeliveryType) => void;
   updateOrderLabelQty: (orderId: string, qty: number) => void;
   updateOrderCategory: (orderId: string, category: string) => void;
@@ -361,6 +362,22 @@ export const useOrderStore = create<OrderStore>()(
         set((state) => {
           const updatedOrders = state.orders.map((o) =>
             o.id === orderId ? { ...o, lockedById: undefined, lockedByName: undefined, lockedAt: undefined } : o
+          );
+          const updated = updatedOrders.find((o) => o.id === orderId);
+          if (updated) syncOrder(updated).catch(console.error);
+          return { orders: updatedOrders };
+        });
+      },
+      setOrderPicked: (orderId, picked) => {
+        const user = get().users.find((u) => u.id === get().currentUserId);
+        set((state) => {
+          const updatedOrders = state.orders.map((o) =>
+            o.id === orderId
+              ? { ...o,
+                  pickedAt: picked ? new Date().toISOString() : undefined,
+                  pickedById: picked ? user?.id : undefined,
+                  pickedByName: picked ? user?.name : undefined }
+              : o
           );
           const updated = updatedOrders.find((o) => o.id === orderId);
           if (updated) syncOrder(updated).catch(console.error);

@@ -28,6 +28,7 @@ import {
   MessageSquareWarning,
   BarChart3,
   Settings,
+  ListChecks,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useOrderStore } from '@/lib/store';
@@ -47,6 +48,7 @@ const ALL_NAV = [
   { name: 'Order Sheet', href: '/orders', icon: ClipboardList, staffVisible: false, commsVisible: false },
   { name: 'Historical Orders', href: '/historical', icon: History, staffVisible: false, commsVisible: false },
   { name: 'Queue', href: '/packaging', icon: Workflow, staffVisible: true, commsVisible: false },
+  { name: 'Order Picker', href: '/picker', icon: ListChecks, staffVisible: true, commsVisible: false },
   { name: 'Messages', href: '/notes', icon: MessageSquare, staffVisible: true, commsVisible: true },
   { name: 'Feedback', href: '/feedback', icon: MessageSquareWarning, staffVisible: false, commsVisible: true },
   { name: 'Batches', href: '/batches', icon: Package, staffVisible: false, commsVisible: false },

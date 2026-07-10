@@ -35,6 +35,7 @@ export const PAGE_RESOURCES: AccessResource[] = [
   { id: '/orders',           label: 'Order Sheet',       category: 'Operations',      defaultRoles: OPS },
   { id: '/historical',       label: 'Historical Orders', category: 'Operations',      defaultRoles: OPS },
   { id: '/packaging',        label: 'Queue',             category: 'Operations',      defaultRoles: ALL },
+  { id: '/picker',           label: 'Order Picker',      category: 'Operations',      defaultRoles: ALL, defaultDepartments: ['picker'] },
   { id: '/batches',          label: 'Batches',           category: 'Operations',      defaultRoles: OPS },
   { id: '/recently-deleted', label: 'Recently Deleted',  category: 'Operations',      defaultRoles: OPS },
   { id: '/reports',          label: 'Reports',           category: 'Operations',      defaultRoles: OPS },

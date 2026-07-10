@@ -20,6 +20,7 @@ export type UserRole = 'admin' | 'manager' | 'staff' | 'comms';
 export type Department =
   | 'management'
   | 'assembler'
+  | 'picker'
   | 'packing'
   | 'comms'
   | 'returns'
@@ -39,6 +40,7 @@ export const DEPARTMENT_CONFIG: Record<Department, {
 }> = {
   management:  { label: 'Management',   color: 'bg-slate-100 text-slate-800 border-slate-300' },
   assembler:   { label: 'Assembler',     color: 'bg-yellow-100 text-yellow-800 border-yellow-300' },
+  picker:      { label: 'Order Picker',  color: 'bg-lime-100 text-lime-800 border-lime-300' },
   packing:     { label: 'Packing Dept',  color: 'bg-indigo-100 text-indigo-800 border-indigo-300' },
   comms:       { label: 'Comms Dept',    color: 'bg-purple-100 text-purple-800 border-purple-300' },
   returns:     { label: 'Returns Dept',  color: 'bg-rose-100 text-rose-800 border-rose-300' },
@@ -492,6 +494,10 @@ export interface Order {
   lockedById?: string;
   lockedByName?: string;
   lockedAt?: string;
+  // Order-picker: parts gathered + submitted for this order.
+  pickedAt?: string;
+  pickedById?: string;
+  pickedByName?: string;
 }
 
 export interface Batch {
