@@ -1,8 +1,9 @@
 'use client';
 
 import { useCallback, useEffect, useState } from 'react';
+import { useRouter } from 'next/navigation';
 import { Button } from '@/components/ui/button';
-import { RefreshCw, PackageOpen, ExternalLink, X, FileText } from 'lucide-react';
+import { RefreshCw, PackageOpen, ExternalLink, X, FileText, PlusCircle } from 'lucide-react';
 import { toast } from 'sonner';
 
 interface EbayReturn {
@@ -32,6 +33,7 @@ const reasonTone = (t: string | null) =>
 const nice = (s: string | null) => (s ? s.replace(/_/g, ' ').toLowerCase() : '');
 
 export function EbayReturnsList() {
+  const router = useRouter();
   const [returns, setReturns] = useState<EbayReturn[]>([]);
   const [loading, setLoading] = useState(true);
   const [syncing, setSyncing] = useState(false);
@@ -130,7 +132,19 @@ export function EbayReturnsList() {
           <div className="bg-white rounded-2xl shadow-2xl w-full max-w-2xl max-h-[90vh] overflow-hidden" onClick={(e) => e.stopPropagation()}>
             <div className="flex items-center justify-between px-5 py-3 border-b">
               <h3 className="font-bold text-slate-900 flex items-center gap-2"><FileText className="h-5 w-5 text-blue-600" /> Return case #{detail.return_id}</h3>
-              <button onClick={() => setDetail(null)} className="text-slate-400 hover:text-slate-700"><X className="h-5 w-5" /></button>
+              <div className="flex items-center gap-2">
+                <Button
+                  size="sm"
+                  className="h-7 text-xs"
+                  onClick={() => {
+                    setDetail(null);
+                    router.push(`/returns?new=1&order=${encodeURIComponent(detail.order_id || '')}&ebayReturnId=${detail.return_id}&notes=${encodeURIComponent(detail.item_title || '')}`);
+                  }}
+                >
+                  <PlusCircle className="h-3.5 w-3.5 mr-1" />Log in Returns
+                </Button>
+                <button onClick={() => setDetail(null)} className="text-slate-400 hover:text-slate-700"><X className="h-5 w-5" /></button>
+              </div>
             </div>
             <div className="p-5 overflow-y-auto max-h-[70vh] space-y-4 text-sm">
               {detailLoading && <p className="text-xs text-slate-500 flex items-center gap-1"><RefreshCw className="h-3 w-3 animate-spin" /> Loading case details from eBay…</p>}

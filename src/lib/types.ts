@@ -143,6 +143,10 @@ export interface ReturnRecord {
   replacementOrderId?: string;
   /** URLs of uploaded images attached to the return */
   imageUrls?: string[];
+  /** Linked eBay return case id (Post-Order returnId) when the return came from eBay */
+  ebayReturnId?: string;
+  /** Platform the return belongs to (ebay, amazon, backmarket, onbuy, etc.) — kept open for future integrations */
+  platform?: 'ebay' | 'amazon' | 'backmarket' | 'onbuy' | 'temu' | 'manual';
 }
 
 export interface ReplacementItem {

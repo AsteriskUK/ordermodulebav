@@ -23,6 +23,14 @@ import {
 import { PackageOpen, Plus, Search, CheckCircle, Truck, Replace, Pencil, ArrowLeftRight, Loader2, Eye } from 'lucide-react';
 import { toast } from 'sonner';
 
+type EbayReturnAction =
+  | 'SELLER_MARK_AS_RECEIVED'
+  | 'SELLER_MARK_REPLACEMENT_SHIPPED'
+  | 'SELLER_ISSUE_REFUND'
+  | 'SELLER_VOID_LABEL'
+  | 'SELLER_OFFER_PARTIAL_REFUND'
+  | 'SUBMIT_FILE';
+
 const RETURN_REASONS = [
   'Faulty / Not working',
   'Wrong item sent',
@@ -42,6 +50,12 @@ const STATUS_CONFIG: Record<ReturnRecord['status'], { label: string; color: stri
   replacement: { label: 'Replacement', color: 'bg-purple-100 text-purple-800 border-purple-300' },
   swap: { label: 'Swap — awaiting item', color: 'bg-orange-100 text-orange-800 border-orange-300' },
 };
+
+function derivePlatform(batchId?: string): ReturnRecord['platform'] | undefined {
+  const prefix = batchId?.split('-')[0]?.toLowerCase();
+  if (['ebay', 'amazon', 'backmarket', 'onbuy', 'temu'].includes(prefix || '')) return prefix as ReturnRecord['platform'];
+  return undefined;
+}
 
 function genId() {
   return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, (c) => {
@@ -73,6 +87,7 @@ export function ReturnsManager() {
   }, [searchParams]);
   const [statusFilter, setStatusFilter] = useState<string>('all');
   const [tab, setTab] = useState<'open' | 'closed'>('open');
+  const [ebayReturns, setEbayReturns] = useState<Array<{ return_id: string; order_id: string | null; item_title: string | null; state: string | null; status: string | null; raw?: Record<string, unknown> }>>([]);
   // Quick-action deep link (?new=1&order=&buyer=&kind=&notes=) opens the form prefilled.
   const [showForm, setShowForm] = useState(() => searchParams.get('new') === '1');
 
@@ -110,6 +125,7 @@ export function ReturnsManager() {
   const [editReceivedNotes, setEditReceivedNotes] = useState('');
   const [editStatus, setEditStatus] = useState<ReturnRecord['status']>('pending');
   const [editImageUrls, setEditImageUrls] = useState<string[]>([]);
+  const [editEbayReturnId, setEditEbayReturnId] = useState('');
 
   // New return form
   const [newReturnId, setNewReturnId] = useState('');
@@ -129,6 +145,14 @@ export function ReturnsManager() {
   const [responsibleUserId, setResponsibleUserId] = useState('');
   const [returnTrackingNumber, setReturnTrackingNumber] = useState('');
   const [returnImageUrls, setReturnImageUrls] = useState<string[]>([]);
+  const [ebayReturnId, setEbayReturnId] = useState(() => searchParams.get('ebayReturnId') || '');
+
+  useEffect(() => {
+    const newEbayReturnId = searchParams.get('ebayReturnId') || '';
+    const newNotes = searchParams.get('notes') || '';
+    if (newEbayReturnId) setEbayReturnId(newEbayReturnId);
+    if (newNotes && !notes) setNotes(newNotes);
+  }, [searchParams]);
 
   // Deep link auto-select: once orders load, match the order number from the URL.
   useEffect(() => {
@@ -139,6 +163,31 @@ export function ReturnsManager() {
     // eslint-disable-next-line react-hooks/set-state-in-effect
     if (match) setSelectedOrderId(match.id);
   }, [orders, selectedOrderId, searchParams]);
+
+  // Load eBay return cases so we can auto-link local returns and show eBay actions.
+  useEffect(() => {
+    fetch('/api/ebay/returns')
+      .then((res) => res.json())
+      .then((data) => setEbayReturns(data.returns ?? []))
+      .catch(() => { /* silent */ });
+  }, []);
+
+  // Auto-link local returns to eBay return cases by order number / item title.
+  useEffect(() => {
+    if (ebayReturns.length === 0) return;
+    returns.forEach((ret) => {
+      if (ret.ebayReturnId) return;
+      const order = orders.find((o) => o.id === ret.orderId);
+      if (!order) return;
+      const orderNumber = order.orderNumber || order.salesRecordNumber;
+      const candidates = ebayReturns.filter((e) => e.order_id === orderNumber || e.order_id === order.salesRecordNumber);
+      if (candidates.length === 0) return;
+      const match = candidates.length === 1
+        ? candidates[0]
+        : candidates.find((e) => e.item_title && (order.itemTitle || ret.itemTitle).toLowerCase().includes(e.item_title.toLowerCase()));
+      if (match) updateReturn(ret.id, { ebayReturnId: match.return_id, platform: 'ebay' });
+    });
+  }, [ebayReturns, orders, returns]);
 
   const orderSuggestions = useMemo(() => {
     if (!orderSearch.trim()) return [];
@@ -183,6 +232,7 @@ export function ReturnsManager() {
     if (!selectedOrderId) { toast.error('Select an order'); return; }
     const order = orders.find((o) => o.id === selectedOrderId);
     if (!order) return;
+    const platform = derivePlatform(order.batchId) || 'manual';
     const ret: ReturnRecord = {
       id: newReturnId || genId(),
       orderId: selectedOrderId,
@@ -202,6 +252,8 @@ export function ReturnsManager() {
       responsibleUserName: responsibleUserId ? users.find((u) => u.id === responsibleUserId)?.name : undefined,
       status: 'pending',
       imageUrls: returnImageUrls.length > 0 ? returnImageUrls : undefined,
+      ebayReturnId: ebayReturnId.trim() || undefined,
+      platform: (ebayReturnId.trim() ? 'ebay' : platform) as ReturnRecord['platform'],
     };
     addReturn(ret);
     toast.success(`Return logged for order #${order.salesRecordNumber}`);
@@ -215,6 +267,7 @@ export function ReturnsManager() {
     setResponsibleUserId('');
     setReturnTrackingNumber('');
     setReturnImageUrls([]);
+    setEbayReturnId('');
   };
 
   const closeReplaceDialog = () => {
@@ -226,6 +279,23 @@ export function ReturnsManager() {
     setSwapMethod('collection');
     setSwapWeight('1');
     setSwapEmailLabel(true);
+  };
+
+  // Call an eBay Post-Order return action. Returns true if eBay accepted it.
+  const performEbayAction = async (ret: ReturnRecord, actionType: EbayReturnAction, payload?: Record<string, unknown>) => {
+    if (ret.platform !== 'ebay' || !ret.ebayReturnId) return true;
+    const res = await fetch(`/api/ebay/returns/${ret.ebayReturnId}/actions`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ actionType, ...payload }),
+    });
+    const data = await res.json();
+    if (!res.ok) {
+      toast.error(`eBay action failed: ${data.message || data.error || 'unknown error'}`);
+      return false;
+    }
+    toast.success('Updated on eBay');
+    return true;
   };
 
   // Books the DPD collection or issues a return label for the faulty item on a swap.
@@ -292,19 +362,25 @@ export function ReturnsManager() {
       setSwapSubmitting(true);
       try {
         const data = await initiateSwapReturn(replaceReturn);
+        await performEbayAction(replaceReturn, 'SELLER_MARK_REPLACEMENT_SHIPPED', {
+          replacementShipment: { trackingNumber: data.trackingNumber, carrierEnum: 'DPD', shippingMethod: 'SELLER_SHIPPED' },
+        });
         toast.success(
           swapMethod === 'collection'
-            ? `Swap order #${newOrder.salesRecordNumber} created — DPD collection booked (${data.trackingNumber})`
-            : `Swap order #${newOrder.salesRecordNumber} created — DPD return label issued (${data.trackingNumber})`
+            ? `Swap order #${newOrder.salesRecordNumber} created — DPD collection booked and eBay updated (${data.trackingNumber})`
+            : `Swap order #${newOrder.salesRecordNumber} created — DPD return label issued and eBay updated (${data.trackingNumber})`
         );
       } catch (err) {
         // The swap order exists either way — the DPD return can be issued again from the order.
-        toast.error(`Swap order #${newOrder.salesRecordNumber} created, but DPD failed: ${err instanceof Error ? err.message : 'unknown error'}`);
+        toast.error(`Swap order #${newOrder.salesRecordNumber} created, but DPD/eBay failed: ${err instanceof Error ? err.message : 'unknown error'}`);
       } finally {
         setSwapSubmitting(false);
       }
     } else {
-      toast.success(`Replacement order #${newOrder.salesRecordNumber} created`);
+      await performEbayAction(replaceReturn, 'SELLER_MARK_REPLACEMENT_SHIPPED', {
+        replacementShipment: { trackingNumber: newOrder.trackingNumber || '', shippingMethod: 'SELLER_SHIPPED' },
+      });
+      toast.success(`Replacement order #${newOrder.salesRecordNumber} created and eBay updated`);
     }
     closeReplaceDialog();
   };
@@ -461,6 +537,17 @@ export function ReturnsManager() {
                 </Select>
               </div>
             </div>
+            {ebayReturnId && (
+              <div>
+                <label className="text-xs text-slate-500 block mb-1">eBay Return ID</label>
+                <Input
+                  value={ebayReturnId}
+                  onChange={(e) => setEbayReturnId(e.target.value)}
+                  placeholder="e.g. 5321625172"
+                  className="h-8 text-sm w-48 font-mono"
+                />
+              </div>
+            )}
             <div>
               <label className="text-xs text-slate-500 block mb-1">Images</label>
               <ImageUpload
@@ -571,9 +658,21 @@ export function ReturnsManager() {
                       ) : '—'}
                     </TableCell>
                     <TableCell>
-                      <Badge variant="outline" className={`text-xs ${STATUS_CONFIG[ret.status].color}`}>
-                        {STATUS_CONFIG[ret.status].label}
-                      </Badge>
+                      <div className="flex flex-col gap-1">
+                        <Badge variant="outline" className={`text-xs ${STATUS_CONFIG[ret.status].color} w-fit`}>
+                          {STATUS_CONFIG[ret.status].label}
+                        </Badge>
+                        {ret.platform && ret.platform !== 'manual' && (
+                          <Badge variant="outline" className="text-xs w-fit bg-slate-100 text-slate-600 border-slate-300 capitalize">
+                            {ret.platform}
+                          </Badge>
+                        )}
+                        {ret.ebayReturnId && (
+                          <Badge variant="outline" className="text-xs w-fit bg-slate-100 text-slate-600 border-slate-300">
+                            eBay #{ret.ebayReturnId}
+                          </Badge>
+                        )}
+                      </div>
                     </TableCell>
                     <TableCell>
                       <div className="flex gap-1 flex-wrap">
@@ -602,6 +701,7 @@ export function ReturnsManager() {
                             setEditReceivedNotes(ret.receivedNotes || '');
                             setEditStatus(ret.status);
                             setEditImageUrls(ret.imageUrls || []);
+                            setEditEbayReturnId(ret.ebayReturnId || '');
                           }}
                         >
                           <Pencil className="h-3 w-3 mr-1" />Edit
@@ -796,14 +896,16 @@ export function ReturnsManager() {
             </div>
             <DialogFooter>
               <Button variant="outline" onClick={() => setReceiveReturn(null)}>Cancel</Button>
-              <Button onClick={() => {
+              <Button onClick={async () => {
+                const ok = await performEbayAction(receiveReturn, 'SELLER_MARK_AS_RECEIVED', { comments: { content: receiveNotes.trim() } });
+                if (!ok) return;
                 if (receiveReturn.status === 'swap') {
                   // Faulty item is back — the swap is complete, close it out as a replacement.
                   updateReturn(receiveReturn.id, { status: 'replacement', receivedNotes: receiveNotes.trim() || undefined });
-                  toast.success('Faulty item received — swap complete');
+                  toast.success('Faulty item received — swap complete and updated on eBay');
                 } else {
                   updateReturn(receiveReturn.id, { status: 'received', receivedNotes: receiveNotes.trim() || undefined });
-                  toast.success('Return marked as received');
+                  toast.success('Return marked as received and updated on eBay');
                 }
                 setReceiveReturn(null);
               }}>
@@ -848,16 +950,20 @@ export function ReturnsManager() {
             </div>
             <DialogFooter>
               <Button variant="outline" onClick={() => setRefundReturn(null)}>Cancel</Button>
-              <Button className="bg-green-600 hover:bg-green-700" onClick={() => {
+              <Button className="bg-green-600 hover:bg-green-700" onClick={async () => {
                 const amount = parseFloat(refundAmountConfirm);
+                const refundAmount = isNaN(amount) ? refundReturn.refundAmount ?? 0 : amount;
+                const currency = 'GBP';
+                const ok = await performEbayAction(refundReturn, 'SELLER_ISSUE_REFUND', { refundAmount: { value: refundAmount, currency }, comments: { content: refundReturn.notes } });
+                if (!ok) return;
                 updateReturn(refundReturn.id, {
                   status: 'refunded',
-                  refundAmount: isNaN(amount) ? refundReturn.refundAmount : amount,
+                  refundAmount,
                   processedByUserId: currentUser?.id,
                   processedByUserName: currentUser?.name,
                 });
                 processReturn(refundReturn.id, 'refund', currentUser?.id || '', currentUser?.name || '');
-                toast.success(`Refund of £${(isNaN(amount) ? refundReturn.refundAmount ?? 0 : amount).toFixed(2)} issued`);
+                toast.success(`Refund of £${refundAmount.toFixed(2)} issued on eBay and recorded`);
                 setRefundReturn(null);
               }}>
                 Issue Refund
@@ -933,6 +1039,15 @@ export function ReturnsManager() {
                 />
               </div>
               <div>
+                <label className="text-xs text-slate-500 block mb-1">eBay Return ID</label>
+                <Input
+                  value={editEbayReturnId}
+                  onChange={(e) => setEditEbayReturnId(e.target.value)}
+                  placeholder="e.g. 5321625172"
+                  className="h-8 text-sm w-48 font-mono"
+                />
+              </div>
+              <div>
                 <label className="text-xs text-slate-500 block mb-1">Images</label>
                 <ImageUpload
                   bucket={RETURN_IMAGE_BUCKET}
@@ -981,6 +1096,8 @@ export function ReturnsManager() {
                   responsibleUserId: editResponsibleUserId || undefined,
                   responsibleUserName: editResponsibleUserId ? users.find((u) => u.id === editResponsibleUserId)?.name : undefined,
                   imageUrls: editImageUrls.length > 0 ? editImageUrls : undefined,
+                  ebayReturnId: editEbayReturnId.trim() || undefined,
+                  platform: (editEbayReturnId.trim() ? 'ebay' : editReturn.platform === 'ebay' ? 'manual' : editReturn.platform) as ReturnRecord['platform'],
                 });
                 if (editStatus === 'refunded' || editStatus === 'replacement' || editStatus === 'swap') {
                   const resolution = editStatus === 'refunded' ? 'refund' : editStatus === 'swap' ? 'swap' : 'replacement';

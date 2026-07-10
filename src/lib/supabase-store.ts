@@ -515,6 +515,8 @@ export async function syncReturn(ret: ReturnRecord): Promise<void> {
       swap_return_method: ret.swapReturnMethod,
       received_notes: ret.receivedNotes,
       image_urls: ret.imageUrls,
+      ebay_return_id: ret.ebayReturnId,
+      platform: ret.platform,
     }).filter(([, v]) => v !== undefined)
   );
 
@@ -576,6 +578,8 @@ export async function fetchReturns(): Promise<ReturnRecord[]> {
     swapReturnMethod: r.metadata?.swap_return_method,
     receivedNotes: r.metadata?.received_notes,
     imageUrls: r.metadata?.image_urls,
+    ebayReturnId: r.metadata?.ebay_return_id,
+    platform: r.metadata?.platform,
     responsibleDepartment: r.responsible_department,
     responsibleUserId: r.responsible_user_id,
     responsibleUserName: r.responsible_user_name,
