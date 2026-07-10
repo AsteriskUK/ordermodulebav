@@ -22,10 +22,11 @@ export function PackScanStation() {
     const code = raw.trim();
     if (!code) return;
     const q = code.toLowerCase();
-    // Prefer the security barcode; fall back to order/tracking number for flexibility.
+    // Packing scan should only pull up orders that are currently in the packing stage.
+    const candidates = orders.filter((o) => !o.deletedAt && o.status === 'packing');
     const match =
-      orders.find((o) => !o.deletedAt && o.securityBarcode && o.securityBarcode.toLowerCase() === q) ??
-      orders.find((o) => !o.deletedAt && (o.salesRecordNumber?.toLowerCase() === q || o.orderNumber?.toLowerCase() === q || o.trackingNumber?.toLowerCase() === q));
+      candidates.find((o) => o.securityBarcode && o.securityBarcode.toLowerCase() === q) ??
+      candidates.find((o) => o.salesRecordNumber?.toLowerCase() === q || o.orderNumber?.toLowerCase() === q || o.trackingNumber?.toLowerCase() === q);
     if (match) { setScanned(match); setNotFound(null); }
     else { setNotFound(code); setScanned(null); }
   }
@@ -44,7 +45,7 @@ export function PackScanStation() {
       </div>
       {notFound && (
         <p className="text-xs text-amber-700 mt-2 flex items-center gap-1">
-          <AlertTriangle className="h-3.5 w-3.5" /> No order found for “{notFound}”. Was the label attached at assembly?
+          <AlertTriangle className="h-3.5 w-3.5" /> No order in “Packing” found for “{notFound}”. Move it to Packing first or check the barcode.
         </p>
       )}
       {scanned && (

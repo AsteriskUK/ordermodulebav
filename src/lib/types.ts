@@ -498,6 +498,13 @@ export interface Order {
   pickedAt?: string;
   pickedById?: string;
   pickedByName?: string;
+  // Cleaning / vinyl hand-offs (tracked without adding new order statuses).
+  cleanedAt?: string;
+  cleanedById?: string;
+  cleanedByName?: string;
+  vinylAppliedAt?: string;
+  vinylAppliedById?: string;
+  vinylAppliedByName?: string;
 }
 
 export interface Batch {

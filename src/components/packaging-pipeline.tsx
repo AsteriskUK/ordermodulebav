@@ -89,6 +89,8 @@ export function PackagingPipeline() {
   const bulkUpdateStatus = useOrderStore((s) => s.bulkUpdateStatus);
   const softCancelOrder = useOrderStore((s) => s.softCancelOrder);
   const acquireAssemblyLock = useOrderStore((s) => s.acquireAssemblyLock);
+  const setOrderCleaned = useOrderStore((s) => s.setOrderCleaned);
+  const setOrderVinylApplied = useOrderStore((s) => s.setOrderVinylApplied);
   const [activeOrderId, setActiveOrderId] = useState<string | null>(null);
   const [assemblyOrderId, setAssemblyOrderId] = useState<string | null>(null);
   const activeOrder = orders.find((o) => o.id === activeOrderId) ?? null;
@@ -500,9 +502,9 @@ export function PackagingPipeline() {
                       <div
                         key={order.id}
                         onClick={() => {
-                          // Assembling stage → open the full-screen parts/build picker.
+                          // Pending / Assembling stage → open the full-screen parts/build picker.
                           // Lock it to this assembler so two people don't build the same order.
-                          if (s.stage === 'assembling') {
+                          if (s.stage === 'pending' || s.stage === 'assembling') {
                             const holder = assemblyLockHolder(order);
                             if (holder && holder.id !== currentUserId && !isAdmin) {
                               toast.warning(`Being assembled by ${holder.name ?? 'another user'}`);
@@ -631,14 +633,29 @@ export function PackagingPipeline() {
                                     );
                                   })()
                                 ) : (
-                                  <Button
-                                    size="sm"
-                                    className="h-6 text-xs px-2"
-                                    onClick={() => moveToNext(order.id, s.nextStage)}
-                                  >
-                                    <CheckCircle className="h-3 w-3 mr-1" />
-                                    Done
-                                  </Button>
+                                  (() => {
+                                    const isChecking = s.stage === 'checking';
+                                    const isAssembling = s.stage === 'assembling';
+                                    const needsCleaning = isChecking && !order.cleanedAt;
+                                    const needsVinyl = isAssembling && order.cleanedAt && !order.vinylAppliedAt;
+                                    const readyForPacking = isChecking && order.vinylAppliedAt;
+                                    const label = needsCleaning ? 'Cleaning done' : needsVinyl ? 'Vinyl applied' : readyForPacking ? 'To packing' : 'Done';
+                                    const next = needsCleaning ? 'assembling' : needsVinyl ? 'checking' : s.nextStage;
+                                    return (
+                                      <Button
+                                        size="sm"
+                                        className={`h-6 text-xs px-2 ${needsCleaning ? 'bg-cyan-600 hover:bg-cyan-700' : needsVinyl ? 'bg-purple-600 hover:bg-purple-700' : readyForPacking ? 'bg-indigo-600 hover:bg-indigo-700' : ''}`}
+                                        onClick={() => {
+                                          if (needsCleaning) setOrderCleaned(order.id, true);
+                                          if (needsVinyl) setOrderVinylApplied(order.id, true);
+                                          moveToNext(order.id, next);
+                                        }}
+                                      >
+                                        <CheckCircle className="h-3 w-3 mr-1" />
+                                        {label}
+                                      </Button>
+                                    );
+                                  })()
                                 )}
                                 {s.prevStage && (
                                   <Button

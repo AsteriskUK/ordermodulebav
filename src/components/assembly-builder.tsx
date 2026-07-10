@@ -36,6 +36,8 @@ export function AssemblyBuilder({ order, onClose }: { order: Order; onClose: () 
   const removeBuildSwap = useOrderStore((s) => s.removeBuildSwap);
   const attachSecurityBarcode = useOrderStore((s) => s.attachSecurityBarcode);
   const releaseAssemblyLock = useOrderStore((s) => s.releaseAssemblyLock);
+  const setOrderPicked = useOrderStore((s) => s.setOrderPicked);
+  const setOrderVinylApplied = useOrderStore((s) => s.setOrderVinylApplied);
   const allOrders = useOrderStore((s) => s.orders);
   const liveOrder = allOrders.find((o) => o.id === order.id) ?? order;
 
@@ -48,6 +50,20 @@ export function AssemblyBuilder({ order, onClose }: { order: Order; onClose: () 
   const [noConfig, setNoConfig] = useState(false);
 
   const existing = useMemo(() => builds.find((b) => b.orderId === order.id && b.status !== 'cancelled'), [builds, order.id]);
+
+  // Mode is driven by the order status so the same page serves as:
+  //   - Order Picker (pending)
+  //   - Assembly Builder (assembling)
+  //   - Vinyl Application (assembling after cleaning)
+  const mode = useMemo(() => {
+    if (liveOrder.status === 'pending') return 'pick';
+    if (liveOrder.status === 'assembling' && liveOrder.cleanedAt && !liveOrder.vinylAppliedAt) return 'vinyl';
+    return 'assemble';
+  }, [liveOrder.status, liveOrder.cleanedAt, liveOrder.vinylAppliedAt]);
+  const isPick = mode === 'pick';
+  const isVinyl = mode === 'vinyl';
+  const title = isPick ? 'Order Picker' : isVinyl ? 'Apply Vinyl' : 'Assemble';
+  const nextStatus = isVinyl ? 'checking' : 'checking';
 
   // Component slots for this product, plus any extra categories the assembler adds.
   const [slots, setSlots] = useState<string[]>(() => {
@@ -103,6 +119,18 @@ export function AssemblyBuilder({ order, onClose }: { order: Order; onClose: () 
   }
 
   function complete(moveOn: boolean) {
+    const code = barcode.trim();
+    // Vinyl mode: just confirm the film is applied and hand back to checking.
+    if (isVinyl) {
+      if (moveOn) {
+        setOrderVinylApplied(order.id, true);
+        updateOrderStatus(order.id, nextStatus);
+        toast.success('Vinyl applied — moved to Checking');
+      }
+      onClose();
+      return;
+    }
+
     const lines: BuildLine[] = slots.filter((s) => selections[s]?.partId).map((s) => {
       const sel = selections[s];
       const part = parts.find((p) => p.id === sel.partId);
@@ -110,7 +138,6 @@ export function AssemblyBuilder({ order, onClose }: { order: Order; onClose: () 
     });
     if (lines.length === 0 && !noConfig) { toast.error('Select parts, or tap “No config required”'); return; }
     // Completing a build requires the security label — it's what packing scans.
-    const code = barcode.trim();
     if (moveOn) {
       if (!code) { toast.error('Scan the security label before completing the build'); return; }
       const clash = allOrders.find((o) => o.id !== order.id && !o.deletedAt && o.securityBarcode && o.securityBarcode.toLowerCase() === code.toLowerCase());
@@ -126,8 +153,9 @@ export function AssemblyBuilder({ order, onClose }: { order: Order; onClose: () 
     saveBuild(build);
     if (moveOn) {
       if (code && code !== liveOrder.securityBarcode) attachSecurityBarcode(order.id, code);
-      updateOrderStatus(order.id, 'checking');
-      toast.success('Build complete — label attached, moved to Checking');
+      setOrderPicked(order.id, true);
+      updateOrderStatus(order.id, nextStatus);
+      toast.success(`${isPick ? 'Picked' : 'Build complete'} — label attached, moved to Checking`);
     } else toast.success('Parts reserved (on hold until packed)');
     onClose();
   }
@@ -145,17 +173,30 @@ export function AssemblyBuilder({ order, onClose }: { order: Order; onClose: () 
         )}
         <div className="min-w-0 flex-1">
           <p className="font-bold text-slate-900 flex items-center gap-2">
-            <Cpu className="h-4 w-4 text-blue-600" /> Assemble · #{order.salesRecordNumber}
-            {existing && <span className={`text-[10px] font-medium px-2 py-0.5 rounded border ${BUILD_STATUS_CONFIG[existing.status].color}`}>{BUILD_STATUS_CONFIG[existing.status].label}</span>}
+            <Cpu className="h-4 w-4 text-blue-600" /> {title} · #{order.salesRecordNumber}
+            {existing && !isVinyl && <span className={`text-[10px] font-medium px-2 py-0.5 rounded border ${BUILD_STATUS_CONFIG[existing.status].color}`}>{BUILD_STATUS_CONFIG[existing.status].label}</span>}
           </p>
           <p className="text-xs text-slate-400 truncate">{openSlot ? INVENTORY_CATEGORY_MAP[openSlot]?.label : order.itemTitle}</p>
         </div>
-        {!openSlot && <span className="text-sm text-slate-500 shrink-0">{filledCount}/{slots.length} parts</span>}
+        {!openSlot && !isVinyl && <span className="text-sm text-slate-500 shrink-0">{filledCount}/{slots.length} parts</span>}
       </div>
 
       {/* Body */}
       <div className="flex-1 overflow-y-auto p-5">
-        {openSlot ? (
+        {isVinyl ? (
+          <div className="max-w-xl mx-auto">
+            <div className="bg-white border border-slate-200 rounded-xl p-5 shadow-sm space-y-3">
+              <p className="text-sm font-medium text-slate-800">Order is ready for vinyl film application.</p>
+              <p className="text-xs text-slate-500">Confirm below once the vinyl film has been applied and the unit is ready to go back to checking.</p>
+              {liveOrder.cleanedAt && (
+                <p className="text-xs text-slate-500">
+                  Cleaned: {new Date(liveOrder.cleanedAt).toLocaleString('en-GB', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' })}
+                  {liveOrder.cleanedByName && ` · ${liveOrder.cleanedByName}`}
+                </p>
+              )}
+            </div>
+          </div>
+        ) : openSlot ? (
           <SlotPicker
             slot={openSlot}
             parts={parts} stockUnits={stockUnits} stockLevels={stockLevels} builds={builds}
@@ -216,33 +257,43 @@ export function AssemblyBuilder({ order, onClose }: { order: Order; onClose: () 
       {/* Footer */}
       {!openSlot && !readOnly && (
         <div className="bg-white border-t px-5 py-3 flex items-center justify-between gap-3 shrink-0">
-          <div className="flex items-center gap-2 shrink-0">
-            <Button variant="outline" onClick={() => complete(false)}>Save &amp; stay</Button>
-            <button
-              onClick={() => setNoConfig((v) => !v)}
-              className={`text-xs font-medium px-2.5 py-2 rounded-lg border transition-colors ${noConfig ? 'bg-slate-800 text-white border-slate-800' : 'bg-white text-slate-500 border-slate-300 hover:bg-slate-50'}`}
-              title="Complete without parts/config (e.g. a monitor)"
-            >
-              No config required
-            </button>
-          </div>
-          <div className={`flex-1 flex items-center gap-2 max-w-xs rounded-lg border px-2 ${barcode.trim() ? 'border-green-300 bg-green-50' : 'border-slate-300 bg-white'}`}>
-            <ScanLine className={`h-4 w-4 shrink-0 ${barcode.trim() ? 'text-green-600' : 'text-slate-400'}`} />
-            <input
-              value={barcode}
-              onChange={(e) => setBarcode(e.target.value)}
-              placeholder="Scan security label…"
-              className="flex-1 min-w-0 py-2 text-sm bg-transparent focus:outline-none"
-            />
-            {barcode.trim() && <Check className="h-4 w-4 text-green-600 shrink-0" />}
-          </div>
-          <Button
-            onClick={() => complete(true)}
-            disabled={filledCount === 0 && !noConfig}
-            className="bg-blue-600 hover:bg-blue-700 text-white shrink-0 disabled:bg-slate-300 disabled:cursor-not-allowed disabled:hover:bg-slate-300"
-          >
-            Complete assembly <ArrowRight className="h-4 w-4 ml-1.5" />
-          </Button>
+          {isVinyl ? (
+            <div className="flex-1 flex justify-end">
+              <Button onClick={() => complete(true)} className="bg-purple-600 hover:bg-purple-700 text-white">
+                Vinyl applied <ArrowRight className="h-4 w-4 ml-1.5" />
+              </Button>
+            </div>
+          ) : (
+            <>
+              <div className="flex items-center gap-2 shrink-0">
+                <Button variant="outline" onClick={() => complete(false)}>Save &amp; stay</Button>
+                <button
+                  onClick={() => setNoConfig((v) => !v)}
+                  className={`text-xs font-medium px-2.5 py-2 rounded-lg border transition-colors ${noConfig ? 'bg-slate-800 text-white border-slate-800' : 'bg-white text-slate-500 border-slate-300 hover:bg-slate-50'}`}
+                  title="Complete without parts/config (e.g. a monitor)"
+                >
+                  No config required
+                </button>
+              </div>
+              <div className={`flex-1 flex items-center gap-2 max-w-xs rounded-lg border px-2 ${barcode.trim() ? 'border-green-300 bg-green-50' : 'border-slate-300 bg-white'}`}>
+                <ScanLine className={`h-4 w-4 shrink-0 ${barcode.trim() ? 'text-green-600' : 'text-slate-400'}`} />
+                <input
+                  value={barcode}
+                  onChange={(e) => setBarcode(e.target.value)}
+                  placeholder="Scan security label…"
+                  className="flex-1 min-w-0 py-2 text-sm bg-transparent focus:outline-none"
+                />
+                {barcode.trim() && <Check className="h-4 w-4 text-green-600 shrink-0" />}
+              </div>
+              <Button
+                onClick={() => complete(true)}
+                disabled={filledCount === 0 && !noConfig}
+                className="bg-blue-600 hover:bg-blue-700 text-white shrink-0 disabled:bg-slate-300 disabled:cursor-not-allowed disabled:hover:bg-slate-300"
+              >
+                {isPick ? 'Pick complete' : 'Complete assembly'} <ArrowRight className="h-4 w-4 ml-1.5" />
+              </Button>
+            </>
+          )}
         </div>
       )}
       {readOnly && (

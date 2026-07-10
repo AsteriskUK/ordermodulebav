@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useState } from 'react';
 import { Button } from '@/components/ui/button';
-import { RefreshCw, PackageOpen, ExternalLink } from 'lucide-react';
+import { RefreshCw, PackageOpen, ExternalLink, X, FileText } from 'lucide-react';
 import { toast } from 'sonner';
 
 interface EbayReturn {
@@ -20,6 +20,7 @@ interface EbayReturn {
   refund_amount: number | null;
   currency: string | null;
   creation_date: string | null;
+  raw?: Record<string, unknown>;
 }
 
 // Not-as-described (SNAD) returns are the seller's problem → red; remorse → amber.
@@ -34,6 +35,8 @@ export function EbayReturnsList() {
   const [returns, setReturns] = useState<EbayReturn[]>([]);
   const [loading, setLoading] = useState(true);
   const [syncing, setSyncing] = useState(false);
+  const [detail, setDetail] = useState<EbayReturn | null>(null);
+  const [detailLoading, setDetailLoading] = useState(false);
 
   const load = useCallback(async () => {
     try {
@@ -55,6 +58,20 @@ export function EbayReturnsList() {
 
   useEffect(() => { load(); sync(); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, []);
 
+  useEffect(() => {
+    if (!detail) return;
+    setDetailLoading(true);
+    fetch(`/api/ebay/returns/${detail.return_id}`)
+      .then(async (res) => {
+        if (res.ok) {
+          const data = await res.json();
+          setDetail((prev) => prev ? { ...prev, raw: data.detail ?? prev.raw } : null);
+        }
+      })
+      .catch(() => { /* keep existing raw */ })
+      .finally(() => setDetailLoading(false));
+  }, [detail?.return_id]);
+
   return (
     <div>
       <div className="flex items-center justify-between mb-2">
@@ -73,9 +90,9 @@ export function EbayReturnsList() {
       ) : (
         <div className="space-y-1.5">
           {returns.map((r) => (
-            <div key={r.return_id} className="border border-slate-200 rounded-xl bg-white px-3 py-2.5 flex items-start gap-3">
+            <div key={r.return_id} onClick={() => setDetail(r)} className="border border-slate-200 rounded-xl bg-white px-3 py-2.5 flex items-start gap-3 cursor-pointer hover:border-blue-400 hover:shadow-sm transition-all">
               {r.image_url ? (
-                <a href={r.item_id ? `https://www.ebay.co.uk/itm/${r.item_id}` : '#'} target="_blank" rel="noopener noreferrer" className="shrink-0">
+                <a href={r.item_id ? `https://www.ebay.co.uk/itm/${r.item_id}` : '#'} target="_blank" rel="noopener noreferrer" className="shrink-0" onClick={(e) => e.stopPropagation()}>
                   {/* eslint-disable-next-line @next/next/no-img-element */}
                   <img src={r.image_url} alt="" className="h-11 w-11 rounded-lg object-cover border border-slate-200" />
                 </a>
@@ -97,13 +114,66 @@ export function EbayReturnsList() {
                   {r.buyer_login && <span>· {r.buyer_login}</span>}
                   {r.refund_amount != null && <span>· refund {r.currency === 'GBP' ? '£' : ''}{Number(r.refund_amount).toFixed(2)}</span>}
                   {r.order_id && <span>· #{r.order_id}</span>}
-                  <a href={`https://www.ebay.co.uk/returns/rtn?returnId=${r.return_id}`} target="_blank" rel="noopener noreferrer" className="text-slate-400 hover:text-blue-600 flex items-center gap-0.5">
+                  <a href={`https://www.ebay.co.uk/returns/rtn?returnId=${r.return_id}`} target="_blank" rel="noopener noreferrer" className="text-slate-400 hover:text-blue-600 flex items-center gap-0.5" onClick={(e) => e.stopPropagation()}>
                     case <ExternalLink className="h-3 w-3" />
                   </a>
                 </p>
               </div>
             </div>
           ))}
+        </div>
+      )}
+
+      {/* eBay return case detail */}
+      {detail && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4" onClick={() => setDetail(null)}>
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-2xl max-h-[90vh] overflow-hidden" onClick={(e) => e.stopPropagation()}>
+            <div className="flex items-center justify-between px-5 py-3 border-b">
+              <h3 className="font-bold text-slate-900 flex items-center gap-2"><FileText className="h-5 w-5 text-blue-600" /> Return case #{detail.return_id}</h3>
+              <button onClick={() => setDetail(null)} className="text-slate-400 hover:text-slate-700"><X className="h-5 w-5" /></button>
+            </div>
+            <div className="p-5 overflow-y-auto max-h-[70vh] space-y-4 text-sm">
+              {detailLoading && <p className="text-xs text-slate-500 flex items-center gap-1"><RefreshCw className="h-3 w-3 animate-spin" /> Loading case details from eBay…</p>}
+              <div className="grid grid-cols-2 gap-3 text-xs">
+                <div className="bg-slate-50 border border-slate-200 rounded-lg p-3 space-y-1">
+                  <p className="text-slate-500">eBay Order</p>
+                  <p className="font-mono font-medium">{detail.order_id ?? '—'}</p>
+                </div>
+                <div className="bg-slate-50 border border-slate-200 rounded-lg p-3 space-y-1">
+                  <p className="text-slate-500">Buyer</p>
+                  <p className="font-medium">{detail.buyer_login ?? '—'}</p>
+                </div>
+                <div className="bg-slate-50 border border-slate-200 rounded-lg p-3 space-y-1">
+                  <p className="text-slate-500">Reason</p>
+                  <p className="font-medium">{nice(detail.reason)} {detail.reason_type && <span className={`ml-1 px-1.5 py-0.5 rounded border ${reasonTone(detail.reason_type)}`}>{nice(detail.reason_type)}</span>}</p>
+                </div>
+                <div className="bg-slate-50 border border-slate-200 rounded-lg p-3 space-y-1">
+                  <p className="text-slate-500">Status</p>
+                  <p className="font-medium">{nice(detail.status || detail.state)}</p>
+                </div>
+                {detail.refund_amount != null && (
+                  <div className="bg-slate-50 border border-slate-200 rounded-lg p-3 space-y-1">
+                    <p className="text-slate-500">Refund</p>
+                    <p className="font-medium">{detail.currency === 'GBP' ? '£' : detail.currency || ''}{Number(detail.refund_amount).toFixed(2)}</p>
+                  </div>
+                )}
+                {detail.creation_date && (
+                  <div className="bg-slate-50 border border-slate-200 rounded-lg p-3 space-y-1">
+                    <p className="text-slate-500">Created</p>
+                    <p className="font-medium">{new Date(detail.creation_date).toLocaleString('en-GB')}</p>
+                  </div>
+                )}
+              </div>
+              {detail.raw && (
+                <div>
+                  <p className="text-xs font-semibold text-slate-600 mb-1">Case details from eBay</p>
+                  <pre className="bg-slate-50 border border-slate-200 rounded-lg p-3 text-[11px] text-slate-600 overflow-auto max-h-80">
+                    {JSON.stringify(detail.raw, null, 2)}
+                  </pre>
+                </div>
+              )}
+            </div>
+          </div>
         </div>
       )}
     </div>

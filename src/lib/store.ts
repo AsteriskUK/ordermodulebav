@@ -73,6 +73,8 @@ interface OrderStore {
   acquireAssemblyLock: (orderId: string, force?: boolean) => boolean;  // lock a build to the current assembler
   releaseAssemblyLock: (orderId: string) => void;
   setOrderPicked: (orderId: string, picked: boolean) => void;          // order-picker: parts gathered
+  setOrderCleaned: (orderId: string, cleaned: boolean) => void;          // cleaning stage hand-off
+  setOrderVinylApplied: (orderId: string, applied: boolean) => void;    // vinyl film hand-off
   updateOrderCarrier: (orderId: string, carrier: DeliveryCarrier, deliveryType: DeliveryType) => void;
   updateOrderLabelQty: (orderId: string, qty: number) => void;
   updateOrderCategory: (orderId: string, category: string) => void;
@@ -377,6 +379,38 @@ export const useOrderStore = create<OrderStore>()(
                   pickedAt: picked ? new Date().toISOString() : undefined,
                   pickedById: picked ? user?.id : undefined,
                   pickedByName: picked ? user?.name : undefined }
+              : o
+          );
+          const updated = updatedOrders.find((o) => o.id === orderId);
+          if (updated) syncOrder(updated).catch(console.error);
+          return { orders: updatedOrders };
+        });
+      },
+      setOrderCleaned: (orderId, cleaned) => {
+        const user = get().users.find((u) => u.id === get().currentUserId);
+        set((state) => {
+          const updatedOrders = state.orders.map((o) =>
+            o.id === orderId
+              ? { ...o,
+                  cleanedAt: cleaned ? new Date().toISOString() : undefined,
+                  cleanedById: cleaned ? user?.id : undefined,
+                  cleanedByName: cleaned ? user?.name : undefined }
+              : o
+          );
+          const updated = updatedOrders.find((o) => o.id === orderId);
+          if (updated) syncOrder(updated).catch(console.error);
+          return { orders: updatedOrders };
+        });
+      },
+      setOrderVinylApplied: (orderId, applied) => {
+        const user = get().users.find((u) => u.id === get().currentUserId);
+        set((state) => {
+          const updatedOrders = state.orders.map((o) =>
+            o.id === orderId
+              ? { ...o,
+                  vinylAppliedAt: applied ? new Date().toISOString() : undefined,
+                  vinylAppliedById: applied ? user?.id : undefined,
+                  vinylAppliedByName: applied ? user?.name : undefined }
               : o
           );
           const updated = updatedOrders.find((o) => o.id === orderId);

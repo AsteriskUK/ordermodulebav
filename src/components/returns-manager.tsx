@@ -6,6 +6,7 @@ import { useOrderStore } from '@/lib/store';
 import { ReturnRecord, ReplacementItem, Department, DEPARTMENT_CONFIG } from '@/lib/types';
 import { ImageUpload } from '@/components/image-upload';
 import { RETURN_IMAGE_BUCKET, REPLACEMENT_IMAGE_BUCKET } from '@/lib/image-upload';
+import { OrderDetailDialog } from '@/components/order-detail-dialog';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -19,7 +20,7 @@ import {
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter,
 } from '@/components/ui/dialog';
-import { PackageOpen, Plus, Search, CheckCircle, Truck, Replace, Pencil, ArrowLeftRight, Loader2 } from 'lucide-react';
+import { PackageOpen, Plus, Search, CheckCircle, Truck, Replace, Pencil, ArrowLeftRight, Loader2, Eye } from 'lucide-react';
 import { toast } from 'sonner';
 
 const RETURN_REASONS = [
@@ -94,6 +95,9 @@ export function ReturnsManager() {
   // Refund confirm dialog
   const [refundReturn, setRefundReturn] = useState<ReturnRecord | null>(null);
   const [refundAmountConfirm, setRefundAmountConfirm] = useState('');
+
+  // View linked original order
+  const [viewOrderId, setViewOrderId] = useState<string | null>(null);
 
   // Edit dialog
   const [editReturn, setEditReturn] = useState<ReturnRecord | null>(null);
@@ -573,6 +577,16 @@ export function ReturnsManager() {
                     </TableCell>
                     <TableCell>
                       <div className="flex gap-1 flex-wrap">
+                        {ret.orderId && (
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            className="h-6 text-xs px-2 text-blue-600 border-blue-300 hover:bg-blue-50"
+                            onClick={() => setViewOrderId(ret.orderId)}
+                          >
+                            <Eye className="h-3 w-3 mr-1" />Order
+                          </Button>
+                        )}
                         <Button
                           size="sm"
                           variant="outline"
@@ -980,6 +994,14 @@ export function ReturnsManager() {
             </DialogFooter>
           </DialogContent>
         </Dialog>
+      )}
+
+      {/* Linked original order view */}
+      {viewOrderId && (
+        <OrderDetailDialog
+          order={orders.find((o) => o.id === viewOrderId)!}
+          onClose={() => setViewOrderId(null)}
+        />
       )}
     </div>
   );
