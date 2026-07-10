@@ -35,8 +35,12 @@ export function AssemblyBuilder({ order, onClose }: { order: Order; onClose: () 
   const recordBuildSwap = useOrderStore((s) => s.recordBuildSwap);
   const removeBuildSwap = useOrderStore((s) => s.removeBuildSwap);
   const attachSecurityBarcode = useOrderStore((s) => s.attachSecurityBarcode);
+  const releaseAssemblyLock = useOrderStore((s) => s.releaseAssemblyLock);
   const allOrders = useOrderStore((s) => s.orders);
   const liveOrder = allOrders.find((o) => o.id === order.id) ?? order;
+
+  // Release the assembly lock when this builder closes (whether completed or not).
+  useEffect(() => () => releaseAssemblyLock(order.id), [order.id, releaseAssemblyLock]);
   // Security barcode scanned onto the finished build (used at packing to find it).
   const [barcode, setBarcode] = useState(liveOrder.securityBarcode ?? '');
 

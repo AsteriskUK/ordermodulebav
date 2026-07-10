@@ -485,6 +485,11 @@ export interface Order {
   // Scanned again at packing to pull the order up. One barcode ↔ one order.
   securityBarcode?: string;
   securityBarcodeAt?: string;   // when it was first attached
+  // Advisory assembly lock — held while an assembler has the build open, so two
+  // assemblers don't work the same order. Auto-expires (see LOCK_TTL in store).
+  lockedById?: string;
+  lockedByName?: string;
+  lockedAt?: string;
 }
 
 export interface Batch {

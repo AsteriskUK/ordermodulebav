@@ -14,6 +14,17 @@ function generateUUID(): string {
   });
 }
 
+// Advisory assembly locks auto-expire so a closed tab / abandoned build doesn't
+// block the order forever.
+export const ASSEMBLY_LOCK_TTL_MS = 30 * 60 * 1000;
+
+/** The assembler holding a fresh lock on this order, or null if free/expired. */
+export function assemblyLockHolder(order: { lockedById?: string; lockedByName?: string; lockedAt?: string }): { id?: string; name?: string } | null {
+  if (!order.lockedById || !order.lockedAt) return null;
+  if (Date.now() - new Date(order.lockedAt).getTime() > ASSEMBLY_LOCK_TTL_MS) return null;
+  return { id: order.lockedById, name: order.lockedByName };
+}
+
 export interface EmailConfig {
   enabled: boolean;
   recipientEmail: string;
@@ -59,6 +70,8 @@ interface OrderStore {
   updateOrderTracking: (orderId: string, trackingNumber: string) => void;
   attachSecurityBarcode: (orderId: string, barcode: string) => void;   // link preprinted label to order
   softCancelOrder: (orderId: string, reason?: string) => void;         // cancel (recoverable) + raise urgent Comms ticket
+  acquireAssemblyLock: (orderId: string, force?: boolean) => boolean;  // lock a build to the current assembler
+  releaseAssemblyLock: (orderId: string) => void;
   updateOrderCarrier: (orderId: string, carrier: DeliveryCarrier, deliveryType: DeliveryType) => void;
   updateOrderLabelQty: (orderId: string, qty: number) => void;
   updateOrderCategory: (orderId: string, category: string) => void;
@@ -322,6 +335,34 @@ export const useOrderStore = create<OrderStore>()(
           activity: [{ at: now, byId: user?.id, byName: user?.name, type: 'create', text: reason?.trim() || 'Cancellation raised to Comms' }],
           createdAt: now,
           updatedAt: now,
+        });
+      },
+      acquireAssemblyLock: (orderId, force = false) => {
+        const { orders, users, currentUserId } = get();
+        const order = orders.find((o) => o.id === orderId);
+        if (!order) return false;
+        const holder = assemblyLockHolder(order);
+        if (!force && holder && holder.id !== currentUserId) return false; // someone else is on it
+        const user = users.find((u) => u.id === currentUserId);
+        const now = new Date().toISOString();
+        set((state) => {
+          const updatedOrders = state.orders.map((o) =>
+            o.id === orderId ? { ...o, lockedById: currentUserId ?? undefined, lockedByName: user?.name, lockedAt: now } : o
+          );
+          const updated = updatedOrders.find((o) => o.id === orderId);
+          if (updated) syncOrder(updated).catch(console.error);
+          return { orders: updatedOrders };
+        });
+        return true;
+      },
+      releaseAssemblyLock: (orderId) => {
+        set((state) => {
+          const updatedOrders = state.orders.map((o) =>
+            o.id === orderId ? { ...o, lockedById: undefined, lockedByName: undefined, lockedAt: undefined } : o
+          );
+          const updated = updatedOrders.find((o) => o.id === orderId);
+          if (updated) syncOrder(updated).catch(console.error);
+          return { orders: updatedOrders };
         });
       },
       updateOrderLabelQty: (orderId, qty) =>

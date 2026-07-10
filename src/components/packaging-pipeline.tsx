@@ -1,7 +1,7 @@
 'use client';
 
 import { useMemo, useState } from 'react';
-import { useOrderStore } from '@/lib/store';
+import { useOrderStore, assemblyLockHolder } from '@/lib/store';
 import { ORDER_STATUS_CONFIG, PACKAGING_STAGES, Order, OrderStatus, PackagingStage, DEPARTMENT_CONFIG, Department } from '@/lib/types';
 import { getOrderRowClass, buildInvoicesHtml, printHtml } from '@/lib/order-utils';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -40,6 +40,7 @@ import {
   RefreshCw,
   Search,
   Flag,
+  Lock,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { DeliveryBadge } from './delivery-badge';
@@ -87,6 +88,7 @@ export function PackagingPipeline() {
   const updateOrderComment = useOrderStore((s) => s.updateOrderComment);
   const bulkUpdateStatus = useOrderStore((s) => s.bulkUpdateStatus);
   const softCancelOrder = useOrderStore((s) => s.softCancelOrder);
+  const acquireAssemblyLock = useOrderStore((s) => s.acquireAssemblyLock);
   const [activeOrderId, setActiveOrderId] = useState<string | null>(null);
   const [assemblyOrderId, setAssemblyOrderId] = useState<string | null>(null);
   const activeOrder = orders.find((o) => o.id === activeOrderId) ?? null;
@@ -499,7 +501,20 @@ export function PackagingPipeline() {
                         key={order.id}
                         onClick={() => {
                           // Assembling stage → open the full-screen parts/build picker.
-                          if (s.stage === 'assembling') { setAssemblyOrderId(order.id); return; }
+                          // Lock it to this assembler so two people don't build the same order.
+                          if (s.stage === 'assembling') {
+                            const holder = assemblyLockHolder(order);
+                            if (holder && holder.id !== currentUserId && !isAdmin) {
+                              toast.warning(`Being assembled by ${holder.name ?? 'another user'}`);
+                              return;
+                            }
+                            if (!acquireAssemblyLock(order.id, isAdmin)) {
+                              toast.warning('Someone else just started this build');
+                              return;
+                            }
+                            setAssemblyOrderId(order.id);
+                            return;
+                          }
                           const newId = order.id === activeOrderId ? null : order.id;
                           setActiveOrderId(newId);
                           if (newId && order.variation) {
@@ -521,6 +536,14 @@ export function PackagingPipeline() {
                                 return pb ? (
                                   <span className={`inline-flex items-center gap-0.5 text-[10px] font-bold px-1 py-0 rounded border ${pb.cls} ${order.priority === 1 ? 'animate-pulse' : ''}`}>
                                     <Flag className="h-2.5 w-2.5" /> {pb.label}
+                                  </span>
+                                ) : null;
+                              })()}
+                              {(() => {
+                                const holder = s.stage === 'assembling' ? assemblyLockHolder(order) : null;
+                                return holder && holder.id !== currentUserId ? (
+                                  <span className="inline-flex items-center gap-0.5 text-[10px] font-bold px-1 py-0 rounded border bg-slate-200 text-slate-600 border-slate-300" title={`Being assembled by ${holder.name ?? 'another user'}`}>
+                                    <Lock className="h-2.5 w-2.5" /> {holder.name ?? 'locked'}
                                   </span>
                                 ) : null;
                               })()}
