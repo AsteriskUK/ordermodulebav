@@ -139,3 +139,6 @@ ALTER TABLE ebay_messages ADD COLUMN IF NOT EXISTS message_html TEXT;
 
 -- ---- Builds: record component swaps (parts pulled out / put in during assembly) ----
 ALTER TABLE builds ADD COLUMN IF NOT EXISTS swaps JSONB DEFAULT '[]'::jsonb;
+
+-- ---- eBay feedback: cache listing photo for display ----
+ALTER TABLE ebay_feedback ADD COLUMN IF NOT EXISTS image_url TEXT;

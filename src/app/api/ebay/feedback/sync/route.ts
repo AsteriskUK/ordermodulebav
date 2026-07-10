@@ -5,7 +5,9 @@ import { randomUUID } from 'crypto';
 const FEEDBACK_BASE = 'https://api.ebay.com/commerce/feedback/v1';
 const TOKEN_URL = 'https://api.ebay.com/identity/v1/oauth2/token';
 const FEEDBACK_SCOPE = 'https://api.ebay.com/oauth/api_scope/commerce.feedback.readonly';
-const PAGE_LIMIT = 100;   // newest feedback entries to scan per sync
+const PAGE_LIMIT = 100;   // feedback entries per page
+const MAX_PAGES = 30;     // backfill pages per sync → up to 3000 entries
+const TIME_BUDGET_MS = 18000;   // stop paging before a serverless timeout
 
 function getSupabase() {
   return createClient(process.env.NEXT_PUBLIC_SUPABASE_URL!, process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!);
@@ -51,7 +53,18 @@ interface FeedbackEntry {
   feedbackState?: string;
 }
 
-// POST /api/ebay/feedback/sync — pull recent received feedback, flag NEW negatives,
+// Only auto-raise a ticket for a negative that's actually recent — otherwise the
+// first full (historical) sync would flood Comms with tickets for old negatives.
+function isRecentFeedback(p?: { value?: number; unit?: string }): boolean {
+  const u = (p?.unit ?? '').toUpperCase();
+  const v = p?.value ?? 0;
+  if (['SECOND', 'MINUTE', 'HOUR'].includes(u)) return true;
+  if (u === 'DAY') return v <= 14;   // eBay reports age in days, e.g. "30 DAY", "180 DAY"
+  if (u === 'WEEK') return v <= 2;
+  return false; // MONTH / YEAR / older / unknown → historical
+}
+
+// POST /api/ebay/feedback/sync — pull ALL received feedback, flag NEW recent negatives,
 // auto-raise a ticket for each. Idempotent (dedup by feedbackId).
 export async function POST() {
   const sellerId = process.env.EBAY_SELLER_USERNAME || (await getSetting('ebay_seller_username'));
@@ -63,21 +76,58 @@ export async function POST() {
   if (!token) return NextResponse.json({ error: 'not_connected' }, { status: 401 });
 
   const supabase = getSupabase();
-  const url = `${FEEDBACK_BASE}/feedback?feedback_type=FEEDBACK_RECEIVED&user_id=${encodeURIComponent(sellerId)}&limit=${PAGE_LIMIT}`;
-  const res = await fetch(url, { headers: { Authorization: `Bearer ${token}`, 'X-EBAY-C-MARKETPLACE-ID': 'EBAY_GB', 'Content-Type': 'application/json' } });
-  const body = await res.text();
-  if (!res.ok) {
-    console.error('[eBay feedback] fetch failed', res.status, body.slice(0, 300));
-    return NextResponse.json({ error: 'ebay_api_error', status: res.status, message: body.slice(0, 300) }, { status: 502 });
+  const headers = { Authorization: `Bearer ${token}`, 'X-EBAY-C-MARKETPLACE-ID': 'EBAY_GB', 'Content-Type': 'application/json' };
+  const startedAt = Date.now();
+
+  async function fetchPage(offset: number): Promise<{ entries: FeedbackEntry[]; total: number } | null> {
+    const res = await fetch(`${FEEDBACK_BASE}/feedback?feedback_type=FEEDBACK_RECEIVED&user_id=${encodeURIComponent(sellerId!)}&limit=${PAGE_LIMIT}&offset=${offset}`, { headers });
+    if (!res.ok) { console.error('[eBay feedback] page failed', offset, res.status); return null; }
+    const data = JSON.parse(await res.text()) as { feedbackEntries?: FeedbackEntry[]; pagination?: { total?: number } };
+    return { entries: data.feedbackEntries ?? [], total: data.pagination?.total ?? 0 };
   }
 
-  const entries = (JSON.parse(body) as { feedbackEntries?: FeedbackEntry[] }).feedbackEntries ?? [];
+  // The API has ~27k entries; pulling them all in one request would time out.
+  // So: always re-scan the newest pages (catch new feedback), then continue the
+  // historical backfill from a saved offset within a time budget. Over several
+  // syncs this walks back as far as eBay allows. Dedup is by feedbackId.
+  const entries: FeedbackEntry[] = [];
+  const first = await fetchPage(0);
+  if (!first) return NextResponse.json({ error: 'ebay_api_error', message: 'feedback fetch failed' }, { status: 502 });
+  const total = first.total;
+  entries.push(...first.entries);
+  entries.push(...((await fetchPage(PAGE_LIMIT))?.entries ?? []));
+
+  let backfillOffset = Number((await getSetting('ebay_feedback_backfill_offset')) ?? '0');
+  if (total && backfillOffset >= total) backfillOffset = 0; // wrap round to re-verify
+  let pages = 0;
+  while (pages < MAX_PAGES && Date.now() - startedAt < TIME_BUDGET_MS && (!total || backfillOffset < total)) {
+    const page = await fetchPage(backfillOffset);
+    if (!page) break;
+    entries.push(...page.entries);
+    backfillOffset += PAGE_LIMIT;
+    pages++;
+    if (page.entries.length < PAGE_LIMIT) { backfillOffset = total || backfillOffset; break; }
+  }
+  await supabase.from('app_settings').upsert({ key: 'ebay_feedback_backfill_offset', value: String(backfillOffset), updated_at: new Date().toISOString() });
+
   const ids = entries.map((e) => e.feedbackId).filter(Boolean) as string[];
   if (ids.length === 0) return NextResponse.json({ synced: 0, newNegatives: 0 });
 
-  // Which of these have we already recorded?
-  const { data: existing } = await supabase.from('ebay_feedback').select('feedback_id').in('feedback_id', ids);
-  const seen = new Set((existing ?? []).map((r) => r.feedback_id));
+  // Attach the listing photo from our cached listings, keyed by listing id.
+  const listingIds = [...new Set(entries.map((e) => e.orderLineItemSummary?.listingId).filter(Boolean))] as string[];
+  const imageByListing = new Map<string, string>();
+  for (let i = 0; i < listingIds.length; i += 100) {
+    const { data: imgs } = await supabase.from('ebay_listings').select('item_id,image_url').in('item_id', listingIds.slice(i, i + 100));
+    for (const r of imgs ?? []) if (r.image_url) imageByListing.set(r.item_id, r.image_url);
+  }
+
+  // Which of these have we already recorded? Chunk the IN() so a few thousand
+  // ids don't blow the URL length limit.
+  const seen = new Set<string>();
+  for (let i = 0; i < ids.length; i += 200) {
+    const { data: existing } = await supabase.from('ebay_feedback').select('feedback_id').in('feedback_id', ids.slice(i, i + 200));
+    for (const r of existing ?? []) seen.add(r.feedback_id);
+  }
 
   const rows: Record<string, unknown>[] = [];
   const newNegatives: FeedbackEntry[] = [];
@@ -88,8 +138,8 @@ export async function POST() {
     const isNegative = e.commentType === 'NEGATIVE';
     let ticketId: string | null = null;
 
-    // Auto-raise a ticket the first time we see a negative.
-    if (isNew && isNegative) {
+    // Auto-raise a ticket the first time we see a *recent* negative.
+    if (isNew && isNegative && isRecentFeedback(e.feedbackEnteredPeriod)) {
       newNegatives.push(e);
       ticketId = randomUUID();
       const now = new Date().toISOString();
@@ -117,10 +167,14 @@ export async function POST() {
       comment_text: e.feedbackComment?.commentText,
       listing_id: e.orderLineItemSummary?.listingId,
       listing_title: e.orderLineItemSummary?.listingTitle,
+      image_url: e.orderLineItemSummary?.listingId ? imageByListing.get(e.orderLineItemSummary.listingId) ?? null : null,
       price: e.orderLineItemSummary?.listingPrice?.value,
       currency: e.orderLineItemSummary?.listingPrice?.currency,
       buyer_masked: e.providerUserDetail?.userId,
       entered_period: e.feedbackEnteredPeriod ? `${e.feedbackEnteredPeriod.value} ${e.feedbackEnteredPeriod.unit}` : null,
+      // Historical (non-recent) negatives come in pre-acknowledged so the backfill
+      // doesn't flood the alert banner with years-old, already-handled negatives.
+      acknowledged: !(isNegative && isRecentFeedback(e.feedbackEnteredPeriod)),
       automated: e.automatedFeedback ?? false,
       state: e.feedbackState,
       ticket_id: ticketId,
@@ -129,11 +183,23 @@ export async function POST() {
 
   // Insert only new rows (don't clobber acknowledged flags on existing).
   const newRows = rows.filter((r) => !seen.has(r.feedback_id as string));
-  if (newRows.length) await supabase.from('ebay_feedback').upsert(newRows, { onConflict: 'feedback_id', ignoreDuplicates: true });
+  if (newRows.length) {
+    const opts = { onConflict: 'feedback_id', ignoreDuplicates: true };
+    const { error } = await supabase.from('ebay_feedback').upsert(newRows, opts);
+    // Tolerate the image_url column not existing yet (migration may be unapplied).
+    if (error && (error.code === '42703' || error.code === 'PGRST204') && /image_url/.test(error.message)) {
+      await supabase.from('ebay_feedback').upsert(newRows.map(({ image_url: _omit, ...rest }) => rest), opts);
+    }
+  }
 
   return NextResponse.json({
     synced: entries.length,
+    added: newRows.length,
     newNegatives: newNegatives.length,
+    // Backfill progress so the UI can show "pulling history…".
+    total,
+    backfillOffset,
+    backfillComplete: !total || backfillOffset >= total,
     negatives: newNegatives.map((e) => ({ text: e.feedbackComment?.commentText, listing: e.orderLineItemSummary?.listingTitle })),
   });
 }

@@ -12,6 +12,7 @@ interface FeedbackRow {
   comment_text: string | null;
   listing_id: string | null;
   listing_title: string | null;
+  image_url: string | null;
   price: number | null;
   currency: string | null;
   buyer_masked: string | null;
@@ -126,7 +127,14 @@ export function FeedbackList() {
             return (
               <div key={r.feedback_id} className={`border rounded-xl bg-white px-4 py-3 ${r.comment_type === 'NEGATIVE' && !r.acknowledged ? 'border-red-300 bg-red-50/40' : 'border-slate-200'}`}>
                 <div className="flex items-start gap-3">
-                  <Icon className={`h-4 w-4 mt-0.5 shrink-0 ${meta.dot}`} />
+                  {r.image_url ? (
+                    <a href={r.listing_id ? `https://www.ebay.co.uk/itm/${r.listing_id}` : '#'} target="_blank" rel="noopener noreferrer" className="shrink-0">
+                      {/* eslint-disable-next-line @next/next/no-img-element */}
+                      <img src={r.image_url} alt="" className="h-11 w-11 rounded-lg object-cover border border-slate-200" />
+                    </a>
+                  ) : (
+                    <Icon className={`h-4 w-4 mt-0.5 shrink-0 ${meta.dot}`} />
+                  )}
                   <div className="min-w-0 flex-1">
                     <div className="flex items-center gap-2 flex-wrap">
                       <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded border ${meta.color}`}>{meta.label}</span>
@@ -135,7 +143,8 @@ export function FeedbackList() {
                     {r.comment_text && <p className="text-sm text-slate-800 mt-1 italic">“{r.comment_text}”</p>}
                     <p className="text-xs text-slate-400 mt-1 flex items-center gap-2 flex-wrap">
                       {r.buyer_masked && <span>Buyer {r.buyer_masked}</span>}
-                      {r.entered_period && <span>· within {r.entered_period.toLowerCase()}</span>}
+                      {r.entered_period && <span>· left within {r.entered_period.toLowerCase()}</span>}
+                      <span>· seen {new Date(r.first_seen_at).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' })}</span>
                       {r.price != null && <span>· {r.currency === 'GBP' ? '£' : ''}{Number(r.price).toFixed(2)}</span>}
                       {r.automated && <span>· auto</span>}
                       {r.listing_id && (
