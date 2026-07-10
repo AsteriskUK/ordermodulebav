@@ -348,12 +348,14 @@ export const TICKET_PRIORITY_CONFIG: Record<TicketPriority, { label: string; col
 };
 
 export interface TicketActivity {
+  id?: string;              // stable id so notes/messages can be edited
   at: string;
   byId?: string;
   byName?: string;
-  /** note = free comment; status = status change; assign = (re)assignment; create = ticket created */
+  /** note = free comment/message; status = status change; assign = (re)assignment; create = ticket created */
   type: 'note' | 'status' | 'assign' | 'create';
   text: string;
+  editedAt?: string;        // set when a note is edited
 }
 
 export interface TicketRecord {

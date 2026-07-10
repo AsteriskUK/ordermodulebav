@@ -107,6 +107,8 @@ interface OrderStore {
   tickets: TicketRecord[];
   addTicket: (ticket: TicketRecord) => void;
   updateTicket: (id: string, updates: Partial<TicketRecord>, activity?: Omit<TicketActivity, 'at'>) => void;
+  editTicketActivity: (ticketId: string, activityId: string, text: string) => void;   // edit a note/message
+  deleteTicketActivity: (ticketId: string, activityId: string) => void;
   deleteTicket: (id: string) => void;
   // Inventory
   inventoryParts: InventoryPart[];
@@ -677,12 +679,45 @@ export const useOrderStore = create<OrderStore>()(
               ...t,
               ...updates,
               updatedAt: now,
-              activity: activity ? [...(t.activity ?? []), { ...activity, at: now }] : (t.activity ?? []),
+              activity: activity ? [...(t.activity ?? []), { id: generateUUID(), ...activity, at: now }] : (t.activity ?? []),
             };
             // Stamp resolved time when moving into a terminal state
             if (updates.status && (updates.status === 'resolved' || updates.status === 'closed') && !t.resolvedAt) {
               merged.resolvedAt = now;
             }
+            syncTicket(merged).catch(console.error);
+            return merged;
+          });
+          return { tickets };
+        });
+      },
+      editTicketActivity: (ticketId, activityId, text) => {
+        set((state) => {
+          const tickets = state.tickets.map((t) => {
+            if (t.id !== ticketId) return t;
+            const now = new Date().toISOString();
+            const merged: TicketRecord = {
+              ...t,
+              updatedAt: now,
+              activity: (t.activity ?? []).map((a) =>
+                a.id === activityId && a.type === 'note' ? { ...a, text, editedAt: now } : a
+              ),
+            };
+            syncTicket(merged).catch(console.error);
+            return merged;
+          });
+          return { tickets };
+        });
+      },
+      deleteTicketActivity: (ticketId, activityId) => {
+        set((state) => {
+          const tickets = state.tickets.map((t) => {
+            if (t.id !== ticketId) return t;
+            const merged: TicketRecord = {
+              ...t,
+              updatedAt: new Date().toISOString(),
+              activity: (t.activity ?? []).filter((a) => !(a.id === activityId && a.type === 'note')),
+            };
             syncTicket(merged).catch(console.error);
             return merged;
           });
