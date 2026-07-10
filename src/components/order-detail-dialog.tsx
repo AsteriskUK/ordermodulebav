@@ -68,6 +68,8 @@ export function OrderDetailDialog({ order, onClose }: Props) {
   const [showReturnLabel, setShowReturnLabel] = useState(false);
   const [showBuild, setShowBuild] = useState(false);
   const [showInvoice, setShowInvoice] = useState(false);
+  // Listing photo for the order (eBay item id → cached listing image).
+  const [listing, setListing] = useState<{ image_url?: string | null; web_url?: string | null } | null>(null);
   const [ebayMsgText, setEbayMsgText] = useState('');
   const [ebayMsgReason, setEbayMsgReason] = useState('SHIPPING');
   const [ebayMsgSending, setEbayMsgSending] = useState(false);
@@ -193,6 +195,18 @@ export function OrderDetailDialog({ order, onClose }: Props) {
   useEffect(() => {
     notesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [liveOrder.notes?.length]);
+
+  // Fetch the listing photo for eBay orders (numeric item id).
+  useEffect(() => {
+    const itemId = order.itemNumber;
+    if (!itemId || !/^\d+$/.test(itemId)) return;
+    let alive = true;
+    fetch(`/api/ebay/listing?itemId=${itemId}`)
+      .then((r) => r.json())
+      .then((d) => { if (alive && d.listing?.image_url) setListing(d.listing); })
+      .catch(() => {});
+    return () => { alive = false; };
+  }, [order.itemNumber]);
 
   function genMissingId(): string {
     return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, (c) => {
@@ -385,6 +399,12 @@ export function OrderDetailDialog({ order, onClose }: Props) {
               <Package className="h-4 w-4" /> Item Details
             </h4>
             <div className="bg-slate-50 rounded-lg p-3 space-y-1 text-sm">
+              {listing?.image_url && (
+                <a href={listing.web_url ?? '#'} target="_blank" rel="noopener noreferrer" className="float-right ml-3 mb-1 block">
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                  <img src={listing.image_url} alt="listing" className="h-24 w-24 object-cover rounded-lg border border-slate-200" />
+                </a>
+              )}
               <p>
                 <span className="text-slate-500">Title:</span>{' '}
                 <span className="font-medium">{order.itemTitle}</span>
