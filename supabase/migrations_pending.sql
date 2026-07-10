@@ -142,3 +142,30 @@ ALTER TABLE builds ADD COLUMN IF NOT EXISTS swaps JSONB DEFAULT '[]'::jsonb;
 
 -- ---- eBay feedback: cache listing photo for display ----
 ALTER TABLE ebay_feedback ADD COLUMN IF NOT EXISTS image_url TEXT;
+
+-- ---- eBay Post-Order return cases (buyer-initiated returns) ----
+CREATE TABLE IF NOT EXISTS ebay_returns (
+  return_id TEXT PRIMARY KEY,
+  order_id TEXT,
+  buyer_login TEXT,
+  item_id TEXT,
+  item_title TEXT,
+  image_url TEXT,
+  return_type TEXT,           -- MONEY_BACK / REPLACEMENT etc.
+  reason TEXT,
+  reason_type TEXT,           -- REMORSE / SNAD etc.
+  state TEXT,
+  status TEXT,
+  refund_amount NUMERIC,
+  currency TEXT,
+  creation_date TIMESTAMPTZ,
+  raw JSONB,
+  first_seen_at TIMESTAMPTZ DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_ebay_returns_creation ON ebay_returns(creation_date DESC);
+ALTER TABLE ebay_returns ENABLE ROW LEVEL SECURITY;
+DO $$ BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_policies WHERE schemaname='public' AND tablename='ebay_returns' AND policyname='Allow all') THEN
+    CREATE POLICY "Allow all" ON ebay_returns FOR ALL USING (true);
+  END IF;
+END $$;
