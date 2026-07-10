@@ -57,6 +57,19 @@ function derivePlatform(batchId?: string): ReturnRecord['platform'] | undefined 
   return undefined;
 }
 
+function isEbayActionAvailable(
+  ret: ReturnRecord,
+  actionType: EbayReturnAction,
+  ebayReturns: Array<{ return_id: string; raw?: Record<string, unknown> }>
+): boolean {
+  if (ret.platform !== 'ebay' || !ret.ebayReturnId) return true; // non-eBay or unlinked: always allow
+  const ebayReturn = ebayReturns.find((e) => e.return_id === ret.ebayReturnId);
+  if (!ebayReturn?.raw) return true; // allow if cached data missing; eBay will reject if truly unavailable
+  const summary = (ebayReturn.raw.summary as Record<string, unknown> | undefined) || ebayReturn.raw;
+  const options = (summary.sellerAvailableOptions as Array<{ actionType: string }> | undefined) || [];
+  return options.some((o) => o.actionType === actionType);
+}
+
 function genId() {
   return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, (c) => {
     const r = Math.random() * 16 | 0;
@@ -708,12 +721,16 @@ export function ReturnsManager() {
                         </Button>
                         {(ret.status === 'pending' || ret.status === 'swap') && (
                           <Button size="sm" variant="outline" className="h-6 text-xs px-2"
+                            disabled={!isEbayActionAvailable(ret, 'SELLER_MARK_AS_RECEIVED', ebayReturns)}
+                            title={!isEbayActionAvailable(ret, 'SELLER_MARK_AS_RECEIVED', ebayReturns) ? 'Not available on eBay right now' : undefined}
                             onClick={() => { setReceiveReturn(ret); setReceiveNotes(ret.receivedNotes || ''); }}>
                             <Truck className="h-3 w-3 mr-1" />Received
                           </Button>
                         )}
                         {(ret.status === 'pending' || ret.status === 'received') && (
                           <Button size="sm" variant="outline" className="h-6 text-xs px-2 text-purple-700 border-purple-300"
+                            disabled={!isEbayActionAvailable(ret, 'SELLER_MARK_REPLACEMENT_SHIPPED', ebayReturns)}
+                            title={!isEbayActionAvailable(ret, 'SELLER_MARK_REPLACEMENT_SHIPPED', ebayReturns) ? 'Not available on eBay right now' : undefined}
                             onClick={() => {
                               const orig = orders.find(o => o.id === ret.orderId);
                               setReplaceMode('replacement');
@@ -725,6 +742,8 @@ export function ReturnsManager() {
                         )}
                         {ret.status === 'pending' && (
                           <Button size="sm" variant="outline" className="h-6 text-xs px-2 text-orange-700 border-orange-300"
+                            disabled={!isEbayActionAvailable(ret, 'SELLER_MARK_REPLACEMENT_SHIPPED', ebayReturns)}
+                            title={!isEbayActionAvailable(ret, 'SELLER_MARK_REPLACEMENT_SHIPPED', ebayReturns) ? 'Not available on eBay right now' : undefined}
                             onClick={() => {
                               const orig = orders.find(o => o.id === ret.orderId);
                               setReplaceMode('swap');
@@ -736,6 +755,8 @@ export function ReturnsManager() {
                         )}
                         {(ret.status === 'pending' || ret.status === 'received') && (
                           <Button size="sm" variant="outline" className="h-6 text-xs px-2 text-green-700 border-green-300"
+                            disabled={!isEbayActionAvailable(ret, 'SELLER_ISSUE_REFUND', ebayReturns)}
+                            title={!isEbayActionAvailable(ret, 'SELLER_ISSUE_REFUND', ebayReturns) ? 'Not available on eBay right now' : undefined}
                             onClick={() => {
                               setRefundReturn(ret);
                               setRefundAmountConfirm(ret.refundAmount?.toFixed(2) ?? '');
