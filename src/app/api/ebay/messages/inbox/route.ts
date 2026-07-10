@@ -11,7 +11,9 @@ const MSG_SCOPE = 'https://api.ebay.com/oauth/api_scope/commerce.message';
 // single serverless invocation can't run away on accounts with 13k+ threads.
 const PAGE_SIZE = 50;
 const MAX_PAGES = 20;
-const TIME_BUDGET_MS = 8000; // stop walking pages before a serverless timeout
+const TIME_BUDGET_MS = 8000;          // budget for the incremental (newest-first) passes
+const BACKFILL_BUDGET_MS = 20000;     // overall budget incl. the historical backfill pass
+const BACKFILL_MAX_PAGES = 60;        // historical conversations per run (× PAGE_SIZE)
 const LAST_SYNC_KEY = 'ebay_messages_last_sync';
 
 function getSupabase() {
@@ -286,6 +288,57 @@ async function syncConversationType(
   return { synced, lastStatus };
 }
 
+// Historical backfill for a conversation type — the incremental pass only covers
+// the newest ~1000; this walks older pages from a saved offset (a chunk per run)
+// so all historical eBay return/refund/INR notifications come in over time.
+async function backfillConversationType(
+  supabase: ReturnType<typeof getSupabase>,
+  token: string,
+  conversationType: string,
+  startedAt: number,
+): Promise<number> {
+  const key = `ebay_messages_backfill_offset_${conversationType}`;
+  const { data } = await supabase.from('app_settings').select('value').eq('key', key).single();
+  let offset = Number(data?.value ?? '0');
+  let synced = 0;
+
+  for (let page = 0; page < BACKFILL_MAX_PAGES; page++) {
+    if (Date.now() - startedAt > BACKFILL_BUDGET_MS) break;
+    const res = await fetch(
+      `${MSG_BASE}/conversation?conversation_type=${conversationType}&limit=${PAGE_SIZE}&offset=${offset}`,
+      { headers: ebayHeaders(token) }
+    );
+    if (!res.ok) break;
+    const data2 = await res.json() as {
+      conversations?: Array<{ conversationId?: string; referenceId?: string; latestMessage?: EbayApiMessage }>;
+    };
+    const conversations = data2.conversations ?? [];
+    if (conversations.length === 0) break;
+
+    const rows: MessageRow[] = [];
+    for (const conv of conversations) {
+      const row = conv.latestMessage && buildRow(conv.latestMessage, conv, conversationType);
+      if (row) rows.push(row);
+    }
+    // Which of this page are genuinely new? (eBay retains little old history, so
+    // once a page is all-known we're done — reset the offset for next time.)
+    const pageIds = rows.map((r) => r.ebay_message_id);
+    const { data: known } = await supabase.from('ebay_messages').select('ebay_message_id').in('ebay_message_id', pageIds);
+    const knownSet = new Set((known ?? []).map((k) => k.ebay_message_id));
+    const newRows = rows.filter((r) => !knownSet.has(r.ebay_message_id));
+    if (newRows.length) {
+      const { error } = await upsertMessages(supabase, newRows, { onConflict: 'ebay_message_id', ignoreDuplicates: true });
+      if (error) break;
+      synced += newRows.length;
+    }
+    offset += PAGE_SIZE;
+    if (newRows.length === 0 || conversations.length < PAGE_SIZE) { offset = 0; break; } // nothing new / end → restart next run
+  }
+
+  await supabase.from('app_settings').upsert({ key, value: String(offset), updated_at: new Date().toISOString() });
+  return synced;
+}
+
 // POST /api/ebay/messages/inbox — incremental sync of both client and eBay
 // conversation lists (sharing one serverless time budget).
 export async function POST() {
@@ -298,10 +351,17 @@ export async function POST() {
   const members = await syncConversationType(supabase, token, 'FROM_MEMBERS', startedAt);
   const ebay = await syncConversationType(supabase, token, 'FROM_EBAY', startedAt);
 
+  // With remaining budget, backfill older history — eBay notifications
+  // (returns/refunds/INR) first, then client threads.
+  let backfilled = 0;
+  if (Date.now() - startedAt < BACKFILL_BUDGET_MS) backfilled += await backfillConversationType(supabase, token, 'FROM_EBAY', startedAt);
+  if (Date.now() - startedAt < BACKFILL_BUDGET_MS) backfilled += await backfillConversationType(supabase, token, 'FROM_MEMBERS', startedAt);
+
   return NextResponse.json({
-    synced: members.synced + ebay.synced,
+    synced: members.synced + ebay.synced + backfilled,
     client: members.synced,
     ebay: ebay.synced,
+    backfilled,
     ebayApiStatus: members.lastStatus || ebay.lastStatus,
   });
 }
