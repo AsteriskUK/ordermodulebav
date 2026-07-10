@@ -86,6 +86,7 @@ export function PackagingPipeline() {
   const updateOrderStatus = useOrderStore((s) => s.updateOrderStatus);
   const updateOrderComment = useOrderStore((s) => s.updateOrderComment);
   const bulkUpdateStatus = useOrderStore((s) => s.bulkUpdateStatus);
+  const softCancelOrder = useOrderStore((s) => s.softCancelOrder);
   const [activeOrderId, setActiveOrderId] = useState<string | null>(null);
   const [assemblyOrderId, setAssemblyOrderId] = useState<string | null>(null);
   const activeOrder = orders.find((o) => o.id === activeOrderId) ?? null;
@@ -234,8 +235,8 @@ export function PackagingPipeline() {
 
   function cancelOrder(orderId: string) {
     const o = orders.find((x) => x.id === orderId);
-    updateOrderStatus(orderId, 'cancelled');
-    toast.info('Order cancelled');
+    softCancelOrder(orderId);
+    toast.info('Order cancelled — raised to Comms as priority');
     if (o) setCancelledAlert({ orderId, salesRecordNumber: o.salesRecordNumber, itemTitle: o.itemTitle });
   }
 

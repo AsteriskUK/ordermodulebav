@@ -58,6 +58,7 @@ interface OrderStore {
   deleteOrderNote: (orderId: string, noteId: string) => void;
   updateOrderTracking: (orderId: string, trackingNumber: string) => void;
   attachSecurityBarcode: (orderId: string, barcode: string) => void;   // link preprinted label to order
+  softCancelOrder: (orderId: string, reason?: string) => void;         // cancel (recoverable) + raise urgent Comms ticket
   updateOrderCarrier: (orderId: string, carrier: DeliveryCarrier, deliveryType: DeliveryType) => void;
   updateOrderLabelQty: (orderId: string, qty: number) => void;
   updateOrderCategory: (orderId: string, category: string) => void;
@@ -288,6 +289,41 @@ export const useOrderStore = create<OrderStore>()(
           if (updatedOrder) syncOrder(updatedOrder).catch(console.error);
           return { orders: updatedOrders };
         }),
+      softCancelOrder: (orderId, reason) => {
+        const { orders, tickets, users, currentUserId, updateOrderStatus, addTicket } = get();
+        const order = orders.find((o) => o.id === orderId);
+        if (!order) return;
+        // Soft cancel — status only, order is retained (recoverable via Recently Deleted / status change).
+        updateOrderStatus(orderId, 'cancelled');
+        // Raise an urgent Comms ticket so they handle the refund/buyer comms — but
+        // not if one is already open for this order (avoid duplicates on re-detection).
+        const dup = tickets.find((t) => t.orderId === orderId && t.category === 'cancellation' && t.status !== 'closed' && t.status !== 'resolved');
+        if (dup) return;
+        const user = users.find((u) => u.id === currentUserId);
+        const now = new Date().toISOString();
+        addTicket({
+          id: generateUUID(),
+          subject: `Cancellation — #${order.salesRecordNumber}`,
+          body: reason?.trim() || 'Order cancelled — Comms to handle buyer refund / communication.',
+          category: 'cancellation',
+          status: 'open',
+          priority: 'urgent',
+          department: 'comms',
+          orderId: order.id,
+          salesRecordNumber: order.salesRecordNumber,
+          orderNumber: order.orderNumber,
+          buyerUsername: order.buyerUsername,
+          buyerName: order.buyerName,
+          itemTitle: order.itemTitle,
+          contactMethod: order.buyerEmail ? 'email' : undefined,
+          contactValue: order.buyerEmail || undefined,
+          createdById: user?.id,
+          createdByName: user?.name,
+          activity: [{ at: now, byId: user?.id, byName: user?.name, type: 'create', text: reason?.trim() || 'Cancellation raised to Comms' }],
+          createdAt: now,
+          updatedAt: now,
+        });
+      },
       updateOrderLabelQty: (orderId, qty) =>
         set((state) => {
           const updatedOrders = state.orders.map((o) =>

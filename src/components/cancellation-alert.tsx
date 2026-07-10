@@ -16,7 +16,7 @@ const POLL_INTERVAL_MS = 5 * 60 * 1000; // 5 minutes
 
 export function CancellationAlert() {
   const orders = useOrderStore((s) => s.orders);
-  const updateOrderStatus = useOrderStore((s) => s.updateOrderStatus);
+  const softCancelOrder = useOrderStore((s) => s.softCancelOrder);
 
   const [cancellations, setCancellations] = useState<CancellationItem[]>([]);
   const [dismissed, setDismissed] = useState<Set<string>>(new Set());
@@ -31,13 +31,13 @@ export function CancellationAlert() {
       if (data.cancellations?.length) {
         setCancellations(data.cancellations);
 
-        // Auto-move matched orders to cancelled
+        // Auto-soft-cancel matched orders + raise them to Comms as priority.
         for (const c of data.cancellations) {
           const order = orders.find(
             (o) => o.orderNumber === c.orderId || o.salesRecordNumber === c.orderId
           );
           if (order && order.status !== 'cancelled' && order.status !== 'shipped') {
-            updateOrderStatus(order.id, 'cancelled');
+            softCancelOrder(order.id, c.cancelReason ? `Buyer cancellation request: ${c.cancelReason}` : 'Buyer requested cancellation on eBay');
           }
         }
       } else {
@@ -48,7 +48,7 @@ export function CancellationAlert() {
     } finally {
       setLoading(false);
     }
-  }, [orders, updateOrderStatus]);
+  }, [orders, softCancelOrder]);
 
   useEffect(() => {
     fetchCancellations();
