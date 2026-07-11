@@ -37,6 +37,7 @@ interface ReturnCustomer {
 interface ReturnBody {
   customer: ReturnCustomer;
   weight?: number;
+  boxes?: number;           // number of parcels on the return
   reference?: string;       // e.g. original sales record number
   sendEmail?: boolean;      // email label/barcode to the customer
   wantBarcode?: boolean;    // also fetch a 2D barcode
@@ -52,6 +53,7 @@ export async function POST(req: NextRequest) {
 
   const body = (await req.json()) as ReturnBody;
   const { customer, weight = 1, reference, sendEmail = false, wantBarcode = false } = body;
+  const numberOfParcels = Math.max(1, Math.floor(body.boxes ?? 1));
 
   if (!customer?.address1 || !customer?.postcode || !customer?.name) {
     return NextResponse.json({ error: 'invalid_customer', message: 'Customer name, address and postcode are required.' }, { status: 400 });
@@ -86,7 +88,7 @@ export async function POST(req: NextRequest) {
           countryCode: 'GB',
         },
       },
-      numberOfParcels: 1,
+      numberOfParcels,
       totalWeight: Math.max(0.1, weight),
       shipmentDate: new Date().toISOString().slice(0, 19),
       shippingRef1: clean(reference || 'RETURN', 25),

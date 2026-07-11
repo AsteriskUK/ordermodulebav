@@ -1,5 +1,43 @@
-import { Order, InventoryPart, StockUnit, BuildLine } from './types';
-import { describeAttributes } from './inventory-config';
+import { Order, InventoryPart, StockUnit, BuildLine, Build } from './types';
+import { describeAttributes, isPackingStageCategory, INVENTORY_CATEGORY_MAP } from './inventory-config';
+
+export interface OutstandingPackItem {
+  key: string;        // stable key stored in Order.packChecklist
+  category: string;
+  label: string;
+  done: boolean;
+}
+
+/**
+ * Accessories/monitors added to the build that the PACKING department fits at
+ * packing (not the assembler). Merged with the order's tick state so the packer
+ * can confirm each one. Returns [] when the build has no such items.
+ */
+export function getOutstandingPackItems(order: Order, builds: Build[]): OutstandingPackItem[] {
+  const build = builds.find((b) => b.orderId === order.id && b.status !== 'cancelled');
+  if (!build) return [];
+  const checklist = order.packChecklist ?? {};
+  const seen = new Set<string>();
+  const items: OutstandingPackItem[] = [];
+  for (const line of build.lines) {
+    if (!isPackingStageCategory(line.category)) continue;
+    const key = `${line.category}:${line.partId || line.description}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    items.push({
+      key,
+      category: line.category,
+      label: line.description || INVENTORY_CATEGORY_MAP[line.category]?.label || line.category,
+      done: !!checklist[key],
+    });
+  }
+  return items;
+}
+
+/** True when there are no outstanding packing-stage items, or all are ticked. */
+export function allPackItemsConfirmed(order: Order, builds: Build[]): boolean {
+  return getOutstandingPackItems(order, builds).every((i) => i.done);
+}
 
 /** Map the existing product category to an inventory base-unit category. */
 export function baseCategoryForOrder(order: Pick<Order, 'category'>): string | undefined {

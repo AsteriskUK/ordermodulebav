@@ -4,6 +4,7 @@ import { useMemo, useRef, useState } from 'react';
 import { Order } from '@/lib/types';
 import { useOrderStore } from '@/lib/store';
 import { buildInvoicesHtml, printHtml } from '@/lib/order-utils';
+import { getOutstandingPackItems } from '@/lib/inventory-build';
 import { fetchPrinterConfig, printInvoicesFor, printLabel, printerForCarrier } from '@/lib/print-agent';
 import { InvoicePreviewDialog } from './invoice-preview-dialog';
 import { Button } from '@/components/ui/button';
@@ -60,14 +61,22 @@ export function PackScanStation() {
 
 function ConfirmPackedDialog({ order, onClose }: { order: Order; onClose: () => void }) {
   const updateOrderStatus = useOrderStore((s) => s.updateOrderStatus);
+  const builds = useOrderStore((s) => s.builds);
   const [busy, setBusy] = useState(false);
   const [showInvoice, setShowInvoice] = useState(false);
+
+  const outstanding = getOutstandingPackItems(order, builds);
+  const outstandingPending = outstanding.filter((i) => !i.done);
 
   const carrier = order.labelCarrier || order.deliveryCarrier;
   const labels = useMemo(() => order.labelData ?? [], [order.labelData]);
   const hasLabel = labels.length > 0 && (carrier === 'DPD' || carrier === 'FedEx');
 
   async function confirmPacked() {
+    if (outstandingPending.length > 0) {
+      toast.error(`Fit outstanding items first: ${outstandingPending.map((i) => i.label).join(', ')}`);
+      return;
+    }
     setBusy(true);
     const printed: string[] = [];
     try {

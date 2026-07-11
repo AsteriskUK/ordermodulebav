@@ -210,6 +210,18 @@ export const INVENTORY_CATEGORY_MAP: Record<string, InventoryCategory> = Object.
   INVENTORY_CATEGORIES.map((c) => [c.key, c]),
 );
 
+// Core internal components the assembler fits during the build. Everything else
+// (monitor, charger/adapter, keyboards/mice/cables under "misc", etc.) is an
+// accessory the PACKING department fits at the packing stage.
+const CORE_BUILD_CATEGORIES = new Set([
+  'laptop', 'desktop', 'ram', 'storage', 'cpu', 'motherboard', 'gpu', 'psu', 'case', 'cooler', 'battery',
+]);
+
+/** True for accessory/peripheral categories that are added at packing, not assembly. */
+export function isPackingStageCategory(categoryKey: string): boolean {
+  return !CORE_BUILD_CATEGORIES.has(categoryKey);
+}
+
 export const STOCK_GRADES = GRADE_OPTIONS;
 
 export type StockUnitStatus = 'in_stock' | 'in_build' | 'allocated' | 'listed' | 'sold' | 'scrapped';

@@ -4,6 +4,7 @@ import { useMemo, useState } from 'react';
 import { useOrderStore, assemblyLockHolder } from '@/lib/store';
 import { ORDER_STATUS_CONFIG, PACKAGING_STAGES, Order, OrderStatus, PackagingStage, DEPARTMENT_CONFIG, Department } from '@/lib/types';
 import { getOrderRowClass, buildInvoicesHtml, printHtml } from '@/lib/order-utils';
+import { getOutstandingPackItems } from '@/lib/inventory-build';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -32,7 +33,6 @@ import {
   MapPin,
   Tag,
   Hash,
-  PackageX,
   Truck,
   MessageSquare,
   Printer,
@@ -91,6 +91,8 @@ export function PackagingPipeline() {
   const acquireAssemblyLock = useOrderStore((s) => s.acquireAssemblyLock);
   const setOrderCleaned = useOrderStore((s) => s.setOrderCleaned);
   const setOrderVinylApplied = useOrderStore((s) => s.setOrderVinylApplied);
+  const builds = useOrderStore((s) => s.builds);
+  const togglePackChecklistItem = useOrderStore((s) => s.togglePackChecklistItem);
   const [activeOrderId, setActiveOrderId] = useState<string | null>(null);
   const [assemblyOrderId, setAssemblyOrderId] = useState<string | null>(null);
   const activeOrder = orders.find((o) => o.id === activeOrderId) ?? null;
@@ -230,11 +232,6 @@ export function PackagingPipeline() {
     toast.warning('Order placed on hold');
     setHoldOrderId(null);
     setHoldReason('');
-  }
-
-  function moveToNoStock(orderId: string) {
-    updateOrderStatus(orderId, 'no-stock');
-    toast.warning('Marked as No Stock');
   }
 
   function cancelOrder(orderId: string) {
@@ -514,6 +511,12 @@ export function PackagingPipeline() {
                               toast.warning('Someone else just started this build');
                               return;
                             }
+                            // Picking a pending order claims it into the assembling queue: it
+                            // leaves everyone else's Pending list and shows as locked to this
+                            // user in Assembling, so no one else can pick it.
+                            if (s.stage === 'pending') {
+                              updateOrderStatus(order.id, 'assembling');
+                            }
                             setAssemblyOrderId(order.id);
                             return;
                           }
@@ -613,21 +616,42 @@ export function PackagingPipeline() {
                                   (() => {
                                     const hasTracking = !!order.trackingNumber;
                                     const isCollection = order.deliveryType === 'collection';
-                                    const canPrint = hasTracking || isCollection;
+                                    const outstanding = getOutstandingPackItems(order, builds);
+                                    const allFitted = outstanding.every((i) => i.done);
+                                    const canPrint = (hasTracking || isCollection) && allFitted;
                                     return (
                                       <>
+                                        {outstanding.length > 0 && (
+                                          <div className="mb-1 rounded-md border border-amber-200 bg-amber-50 p-1.5 w-full">
+                                            <p className="text-[10px] font-semibold text-amber-700 mb-0.5">Fit at packing:</p>
+                                            {outstanding.map((it) => (
+                                              <label key={it.key} className="flex items-center gap-1.5 text-[11px] text-slate-700 cursor-pointer py-0.5">
+                                                <input
+                                                  type="checkbox"
+                                                  checked={it.done}
+                                                  onChange={() => togglePackChecklistItem(order.id, it.key)}
+                                                  className="h-3 w-3"
+                                                />
+                                                <span className={it.done ? 'line-through text-slate-400' : ''}>{it.label}</span>
+                                              </label>
+                                            ))}
+                                          </div>
+                                        )}
                                         <Button
                                           size="sm"
                                           className={`h-6 text-xs px-2 ${canPrint ? 'bg-green-600 hover:bg-green-700' : 'bg-slate-300 cursor-not-allowed'}`}
                                           onClick={() => canPrint && setLabelOrderId(order.id)}
                                           disabled={!canPrint}
-                                          title={!canPrint ? 'Tracking number required before printing label' : undefined}
+                                          title={!allFitted ? 'Fit all outstanding accessories/monitors first' : !hasTracking && !isCollection ? 'Tracking number required before printing label' : undefined}
                                         >
                                           <Printer className="h-3 w-3 mr-1" />
-                                          {isCollection ? 'Pack' : canPrint ? 'Print Label' : 'No Tracking'}
+                                          {isCollection ? 'Pack' : (hasTracking ? 'Print Label' : 'No Tracking')}
                                         </Button>
-                                        {!canPrint && (
+                                        {!hasTracking && !isCollection && (
                                           <p className="text-[10px] text-amber-600">Add tracking first</p>
+                                        )}
+                                        {!allFitted && (
+                                          <p className="text-[10px] text-amber-600">Fit accessories first</p>
                                         )}
                                       </>
                                     );
@@ -702,15 +726,6 @@ export function PackagingPipeline() {
                                     <Button
                                       size="sm"
                                       variant="ghost"
-                                      className="h-6 text-xs px-2 text-orange-600 hover:text-orange-700 hover:bg-orange-50"
-                                      onClick={() => moveToNoStock(order.id)}
-                                    >
-                                      <PackageX className="h-3 w-3 mr-1" />
-                                      No Stock
-                                    </Button>
-                                    <Button
-                                      size="sm"
-                                      variant="ghost"
                                       className="h-6 text-xs px-2 text-slate-500 hover:text-slate-700 hover:bg-slate-50"
                                       onClick={() => cancelOrder(order.id)}
                                     >
@@ -754,66 +769,6 @@ export function PackagingPipeline() {
           );
         })}
       </div>
-
-      {/* No Stock orders */}
-      {visibleOrders.filter((o) => o.status === 'no-stock').length > 0 && (
-        <Card className="border-orange-200">
-          <CardHeader>
-            <CardTitle className="text-base flex items-center gap-2 text-orange-700">
-              <PackageX className="h-4 w-4" />
-              No Stock / Stock Shortage ({visibleOrders.filter((o) => o.status === 'no-stock').length})
-            </CardTitle>
-          </CardHeader>
-          <CardContent>
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead className="text-xs">Order #</TableHead>
-                  <TableHead className="text-xs">Item</TableHead>
-                  <TableHead className="text-xs">SKU</TableHead>
-                  <TableHead className="text-xs">Customer</TableHead>
-                  <TableHead className="text-xs">Comments</TableHead>
-                  <TableHead className="text-xs">Actions</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {visibleOrders
-                  .filter((o) => o.status === 'no-stock')
-                  .map((order) => (
-                    <TableRow key={order.id}>
-                      <TableCell className="font-mono text-xs">{order.salesRecordNumber}</TableCell>
-                      <TableCell className="text-xs max-w-[200px] truncate">{order.itemTitle}</TableCell>
-                      <TableCell className="font-mono text-xs text-slate-400">{order.customLabel || '—'}</TableCell>
-                      <TableCell className="text-xs">{order.postToName}</TableCell>
-                      <TableCell className="text-xs text-slate-500">{order.comments || '—'}</TableCell>
-                      <TableCell>
-                        <div className="flex gap-1">
-                          <Button
-                            size="sm"
-                            variant="outline"
-                            className="h-6 text-xs text-green-700 border-green-300 hover:bg-green-50"
-                            onClick={() => { updateOrderStatus(order.id, 'pending'); toast.success('Released back to Pending'); }}
-                          >
-                            <ArrowLeft className="h-3 w-3 mr-1" />
-                            Release
-                          </Button>
-                          <Button
-                            size="sm"
-                            variant="outline"
-                            className="h-6 text-xs"
-                            onClick={() => { updateOrderStatus(order.id, 'cancelled'); toast.info('Order cancelled'); }}
-                          >
-                            Cancel
-                          </Button>
-                        </div>
-                      </TableCell>
-                    </TableRow>
-                  ))}
-              </TableBody>
-            </Table>
-          </CardContent>
-        </Card>
-      )}
 
       {/* On Hold orders */}
       {visibleOrders.filter((o) => o.status === 'held').length > 0 && (

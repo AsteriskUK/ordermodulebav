@@ -42,6 +42,10 @@ const RETURN_REASONS = [
   'Other',
 ];
 
+// Swaps now capture the number of boxes rather than a weight; DPD still needs a
+// weight on the consignment, so we default to 20 kg.
+const SWAP_DEFAULT_WEIGHT_KG = 20;
+
 const STATUS_CONFIG: Record<ReturnRecord['status'], { label: string; color: string }> = {
   pending: { label: 'Pending', color: 'bg-yellow-100 text-yellow-800 border-yellow-300' },
   received: { label: 'Received', color: 'bg-blue-100 text-blue-800 border-blue-300' },
@@ -112,7 +116,7 @@ export function ReturnsManager() {
   const [replacementNotes, setReplacementNotes] = useState('');
   const [replacementImageUrls, setReplacementImageUrls] = useState<string[]>([]);
   const [swapMethod, setSwapMethod] = useState<'collection' | 'label'>('collection');
-  const [swapWeight, setSwapWeight] = useState('1');
+  const [swapBoxes, setSwapBoxes] = useState('1');
   const [swapEmailLabel, setSwapEmailLabel] = useState(true);
   const [swapSubmitting, setSwapSubmitting] = useState(false);
 
@@ -290,7 +294,7 @@ export function ReturnsManager() {
     setReplacementNotes('');
     setReplacementImageUrls([]);
     setSwapMethod('collection');
-    setSwapWeight('1');
+    setSwapBoxes('1');
     setSwapEmailLabel(true);
   };
 
@@ -320,7 +324,9 @@ export function ReturnsManager() {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        weight: parseFloat(swapWeight) || 1,
+        // Weight is no longer collected in the UI — DPD needs a value, so default to 20 kg.
+        weight: SWAP_DEFAULT_WEIGHT_KG,
+        boxes: parseInt(swapBoxes, 10) || 1,
         reference: order.salesRecordNumber,
         ...(swapMethod === 'label' ? { sendEmail: swapEmailLabel } : {}),
         customer: {
@@ -369,7 +375,12 @@ export function ReturnsManager() {
     };
     addReplacementItem(replaceReturn.id, item);
     processReturn(replaceReturn.id, replaceMode, currentUser?.id || '', currentUser?.name || '');
-    const newOrder = createReplacementOrder(replaceReturn.id);
+    // On a swap, the box count entered for the collection also sizes the outbound (send) order.
+    const boxes = parseInt(swapBoxes, 10) || 1;
+    const newOrder = createReplacementOrder(
+      replaceReturn.id,
+      replaceMode === 'swap' ? { numberOfBoxes: boxes, labelQty: boxes } : undefined,
+    );
 
     if (replaceMode === 'swap') {
       setSwapSubmitting(true);
@@ -859,9 +870,9 @@ export function ReturnsManager() {
                     </div>
                     <div className="flex items-end gap-3">
                       <div>
-                        <label className="text-xs text-slate-500 block mb-1">Weight (kg)</label>
-                        <Input type="number" min={0.1} step={0.1} value={swapWeight}
-                          onChange={(e) => setSwapWeight(e.target.value)} className="w-24" />
+                        <label className="text-xs text-slate-500 block mb-1">Boxes</label>
+                        <Input type="number" min={1} step={1} value={swapBoxes}
+                          onChange={(e) => setSwapBoxes(e.target.value)} className="w-24" />
                       </div>
                       {swapMethod === 'label' && (
                         <button type="button" onClick={() => setSwapEmailLabel((v) => !v)}

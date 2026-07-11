@@ -4,6 +4,7 @@ import { get, set as idbSet, del } from 'idb-keyval';
 import { Order, OrderNote, OrderStatus, Batch, DeliveryCarrier, DeliveryType, AppUser, EodEvent, ReturnRecord, ReplacementItem, MissingItemRecord, Department, AttendanceRecord, LeaveRequest, LeaveBalance, TicketRecord, TicketActivity, InventoryPart, StockUnit, StockLevel, GoodsReceipt, Build, BuildSwap, AccessConfig } from './types';
 import { syncAttendance, syncLeaveRequest, syncLeaveBalance, syncOrder, syncBatch, syncUser, deleteUserFromSupabase, syncReturn, syncTicket, deleteTicketFromSupabase, syncMissingItem, syncInventoryPart, syncStockUnit, syncStockLevel, syncGoodsReceipt, syncBuild, softDeleteOrderInSupabase, hardDeleteOrderFromSupabase } from './supabase-store';
 import { buildSku, INVENTORY_CATEGORY_MAP } from './inventory-config';
+import { allPackItemsConfirmed } from './inventory-build';
 
 // Generate proper UUID v4 for PostgreSQL compatibility
 function generateUUID(): string {
@@ -75,6 +76,7 @@ interface OrderStore {
   setOrderPicked: (orderId: string, picked: boolean) => void;          // order-picker: parts gathered
   setOrderCleaned: (orderId: string, cleaned: boolean) => void;          // cleaning stage hand-off
   setOrderVinylApplied: (orderId: string, applied: boolean) => void;    // vinyl film hand-off
+  togglePackChecklistItem: (orderId: string, key: string) => void;      // packing: tick an outstanding accessory/monitor
   updateOrderCarrier: (orderId: string, carrier: DeliveryCarrier, deliveryType: DeliveryType) => void;
   updateOrderLabelQty: (orderId: string, qty: number) => void;
   updateOrderCategory: (orderId: string, category: string) => void;
@@ -100,7 +102,7 @@ interface OrderStore {
   updateReturn: (returnId: string, updates: Partial<ReturnRecord>) => void;
   processReturn: (returnId: string, resolution: 'refund' | 'replacement' | 'swap', processedByUserId: string, processedByUserName: string) => void;
   addReplacementItem: (returnId: string, item: ReplacementItem) => void;
-  createReplacementOrder: (returnId: string) => Order;
+  createReplacementOrder: (returnId: string, overrides?: Partial<Order>) => Order;
   // Missing Items
   missingItems: MissingItemRecord[];
   addMissingItem: (record: MissingItemRecord) => void;
@@ -222,6 +224,11 @@ export const useOrderStore = create<OrderStore>()(
         }),
       updateOrderStatus: (orderId, status) => {
         const before = get().orders.find((o) => o.id === orderId);
+        // Block Packed until the packing dept has ticked every outstanding
+        // accessory/monitor added during the build. Callers show the checklist.
+        if (status === 'packed' && before && before.status !== 'packed' && !allPackItemsConfirmed(before, get().builds)) {
+          return;
+        }
         set((state) => {
           const order = state.orders.find((o) => o.id === orderId);
           if (!order) return {};
@@ -413,6 +420,19 @@ export const useOrderStore = create<OrderStore>()(
                   vinylAppliedByName: applied ? user?.name : undefined }
               : o
           );
+          const updated = updatedOrders.find((o) => o.id === orderId);
+          if (updated) syncOrder(updated).catch(console.error);
+          return { orders: updatedOrders };
+        });
+      },
+      togglePackChecklistItem: (orderId, key) => {
+        set((state) => {
+          const updatedOrders = state.orders.map((o) => {
+            if (o.id !== orderId) return o;
+            const checklist = { ...(o.packChecklist ?? {}) };
+            checklist[key] = !checklist[key];
+            return { ...o, packChecklist: checklist };
+          });
           const updated = updatedOrders.find((o) => o.id === orderId);
           if (updated) syncOrder(updated).catch(console.error);
           return { orders: updatedOrders };
@@ -1067,7 +1087,7 @@ export const useOrderStore = create<OrderStore>()(
         touchedLevels.forEach((l) => syncStockLevel(l).catch(console.error));
         get().stockUnits.filter((u) => consumedUnitIds.includes(u.id)).forEach((u) => syncStockUnit(u).catch(console.error));
       },
-      createReplacementOrder: (returnId) => {
+      createReplacementOrder: (returnId, overrides) => {
         const state = get();
         const ret = state.returns.find((r) => r.id === returnId);
         if (!ret) throw new Error('Return not found');
@@ -1129,6 +1149,7 @@ export const useOrderStore = create<OrderStore>()(
               createdAt: now,
             },
           ],
+          ...overrides,
         };
 
         set((state) => ({

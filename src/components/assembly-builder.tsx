@@ -216,8 +216,8 @@ export function AssemblyBuilder({ order, onClose }: { order: Order; onClose: () 
               const part = sel ? parts.find((p) => p.id === sel.partId) : undefined;
               const avail = part ? computeAvailability(part.id, part, stockLevels, stockUnits, builds) : null;
               return (
-                <button key={slot} onClick={() => !readOnly && setOpenSlot(slot)}
-                  className={`text-left rounded-xl border-2 p-4 bg-white transition-colors ${sel?.partId ? 'border-green-300' : 'border-dashed border-slate-300 hover:border-blue-400'}`}>
+                <div key={slot}
+                  className={`text-left rounded-xl border-2 p-4 bg-white transition-colors ${sel?.partId ? 'border-green-300' : 'border-dashed border-slate-300'}`}>
                   <div className="flex items-center justify-between">
                     <span className="text-xs font-semibold text-slate-500 uppercase tracking-wide">{cat?.label ?? slot}</span>
                     {sel?.partId ? <Check className="h-4 w-4 text-green-500" /> : <Plus className="h-4 w-4 text-slate-300" />}
@@ -229,22 +229,30 @@ export function AssemblyBuilder({ order, onClose }: { order: Order; onClose: () 
                         {sel.stockUnitId ? <span className="text-slate-400 font-mono">{stockUnits.find((u) => u.id === sel.stockUnitId)?.assetTag ?? 'unit'}</span> : <span className="text-slate-400">Qty {sel.quantity}</span>}
                         {avail && <span className={avail.available < 0 ? 'text-red-600' : 'text-slate-400'}>· {avail.available} avail</span>}
                       </p>
-                      {!readOnly && <span onClick={(e) => { e.stopPropagation(); clearSlot(slot); }} className="text-[11px] text-slate-400 hover:text-red-500 mt-1 inline-block">clear</span>}
+                      {!readOnly && <button type="button" onClick={() => clearSlot(slot)} className="text-[11px] text-slate-400 hover:text-red-500 mt-1 inline-block">clear</button>}
                     </>
                   ) : (
-                    <p className="text-sm text-slate-400 mt-2">Tap to pick from stock</p>
+                    <p className="text-sm text-slate-400 mt-2">No part selected</p>
                   )}
-                  {!readOnly && swapConfigForCategory(slot).presets.length > 0 && (
-                    <span
-                      role="button"
-                      tabIndex={0}
-                      onClick={(e) => { e.stopPropagation(); setOpenSlot(slot); }}
-                      className="mt-2 inline-flex items-center gap-1 text-[11px] font-medium text-amber-700 bg-amber-50 border border-amber-200 rounded-full px-2 py-0.5 hover:bg-amber-100"
-                    >
-                      <Repeat className="h-3 w-3" /> Swap
-                    </span>
-                  )}
-                </button>
+                  {/* Two actions per slot: pull a part from stock, or swap a component out/in. */}
+                  {!readOnly && (() => {
+                    const canSwap = swapConfigForCategory(slot).presets.length > 0;
+                    return (
+                      <div className={`mt-3 grid gap-2 ${canSwap ? 'grid-cols-2' : 'grid-cols-1'}`}>
+                        <button type="button" onClick={() => setOpenSlot(slot)}
+                          className="inline-flex items-center justify-center gap-1 text-xs font-medium text-blue-700 bg-blue-50 border border-blue-200 rounded-lg px-2 py-1.5 hover:bg-blue-100">
+                          <Plus className="h-3.5 w-3.5" /> Add stock
+                        </button>
+                        {canSwap && (
+                          <button type="button" onClick={() => setOpenSlot(slot)}
+                            className="inline-flex items-center justify-center gap-1 text-xs font-medium text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-2 py-1.5 hover:bg-amber-100">
+                            <Repeat className="h-3.5 w-3.5" /> Swap stock
+                          </button>
+                        )}
+                      </div>
+                    );
+                  })()}
+                </div>
               );
             })}
             {!readOnly && (

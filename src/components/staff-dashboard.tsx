@@ -16,6 +16,8 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { MyTicketsWidget } from './my-tickets-widget';
 import { DeliveryBadge } from './delivery-badge';
+import { getOutstandingPackItems } from '@/lib/inventory-build';
+import { toast } from 'sonner';
 import {
   Wrench,
   Package,
@@ -49,6 +51,7 @@ export function StaffDashboard() {
   const users = useOrderStore((s) => s.users);
   const currentUserId = useOrderStore((s) => s.currentUserId);
   const updateOrderStatus = useOrderStore((s) => s.updateOrderStatus);
+  const builds = useOrderStore((s) => s.builds);
 
   const currentUser = users.find((u) => u.id === currentUserId);
   const userDepts: Department[] = currentUser
@@ -334,7 +337,11 @@ export function StaffDashboard() {
                     </div>
                     <DeliveryBadge deliveryType={o.deliveryType} deliveryCarrier={o.deliveryCarrier} size="sm" />
                     {o.status === 'packing' ? (
-                      <Button size="sm" onClick={() => { updateOrderStatus(o.id, 'packed'); }}>
+                      <Button size="sm" onClick={() => {
+                        const pending = getOutstandingPackItems(o, builds).filter((i) => !i.done);
+                        if (pending.length > 0) { toast.error(`Fit outstanding items first: ${pending.map((i) => i.label).join(', ')}`); return; }
+                        updateOrderStatus(o.id, 'packed');
+                      }}>
                         <Package className="h-3.5 w-3.5 mr-1" /> Packed
                       </Button>
                     ) : (

@@ -54,6 +54,7 @@ interface CollectionCustomer {
 interface CollectionBody {
   customer: CollectionCustomer;
   weight?: number;
+  boxes?: number;           // number of parcels to collect
   reference?: string;       // e.g. original sales record number
   collectionDate?: string;  // ISO date; defaults to tomorrow
 }
@@ -68,6 +69,7 @@ export async function POST(req: NextRequest) {
 
   const body = (await req.json()) as CollectionBody;
   const { customer, weight = 1, reference, collectionDate } = body;
+  const numberOfParcels = Math.max(1, Math.floor(body.boxes ?? 1));
 
   if (!customer?.address1 || !customer?.postcode || !customer?.name) {
     return NextResponse.json({ error: 'invalid_customer', message: 'Customer name, address and postcode are required.' }, { status: 400 });
@@ -105,7 +107,7 @@ export async function POST(req: NextRequest) {
       deliveryTown: deliveryAddress.town,
       deliveryCountryCode: deliveryAddress.countryCode,
       totalWeight: Math.max(0.1, weight),
-      numberOfParcels: 1,
+      numberOfParcels,
     });
     if (!services.length) {
       return NextResponse.json(
@@ -148,7 +150,7 @@ export async function POST(req: NextRequest) {
           email: customer.email?.trim().slice(0, 100) || '',
         },
       },
-      numberOfParcels: 1,
+      numberOfParcels,
       totalWeight: Math.max(0.1, weight),
       currency: 'GBP',
       networkCode,

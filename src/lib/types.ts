@@ -502,6 +502,10 @@ export interface Order {
   pickedAt?: string;
   pickedById?: string;
   pickedByName?: string;
+  // Accessories/monitors added during the build are fitted by the packing
+  // department at packing, not by the assembler. Each is tracked here by key so
+  // the order can't be marked Packed until every outstanding item is ticked.
+  packChecklist?: Record<string, boolean>;
   // Cleaning / vinyl hand-offs (tracked without adding new order statuses).
   cleanedAt?: string;
   cleanedById?: string;
