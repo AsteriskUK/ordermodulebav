@@ -53,6 +53,49 @@ async function doRefresh(refreshToken: string): Promise<string | null> {
   return data.access_token;
 }
 
+/**
+ * Shared USER access token for every seller API that acts as the eBay account:
+ * fulfillment (orders/cancellations), Post-Order (returns), messaging, etc.
+ *
+ * Refreshed WITHOUT a `scope` param, so eBay returns a token carrying ALL scopes
+ * the refresh token was granted. This is deliberate: the routes previously each
+ * refreshed with their own narrow scope and cached under the same
+ * `ebay_access_token` key, so a message-sync (commerce.message) could clobber the
+ * fulfillment token a return action needed — causing intermittent scope failures.
+ * A single all-scopes token under one key removes that race entirely.
+ */
+export async function getEbayUserToken(): Promise<string | null> {
+  const envRefreshToken = process.env.EBAY_REFRESH_TOKEN;
+  const [dbRefreshToken, access, expiresAtRaw] = await Promise.all([
+    envRefreshToken ? Promise.resolve(null) : getDbSetting('ebay_refresh_token'),
+    getDbSetting('ebay_access_token'),
+    getDbSetting('ebay_token_expires_at'),
+  ]);
+  const refreshToken = envRefreshToken ?? dbRefreshToken;
+  const expiresAt = Number(expiresAtRaw ?? '0');
+  if (access && expiresAt && Date.now() < expiresAt - 5 * 60 * 1000) return access;
+  if (!refreshToken) return access; // no refresh available — try the stored token anyway
+
+  const credentials = Buffer.from(
+    `${process.env.EBAY_CLIENT_ID!}:${process.env.EBAY_CLIENT_SECRET!}`
+  ).toString('base64');
+  const res = await fetch(TOKEN_URL, {
+    method: 'POST',
+    headers: { Authorization: `Basic ${credentials}`, 'Content-Type': 'application/x-www-form-urlencoded' },
+    body: new URLSearchParams({ grant_type: 'refresh_token', refresh_token: refreshToken }),
+  });
+  if (!res.ok) {
+    console.error('[eBay] user token refresh failed', res.status);
+    return access;
+  }
+  const data = (await res.json()) as { access_token: string; expires_in: number };
+  await Promise.all([
+    setDbSetting('ebay_access_token', data.access_token),
+    setDbSetting('ebay_token_expires_at', String(Date.now() + data.expires_in * 1000)),
+  ]);
+  return data.access_token;
+}
+
 export async function getEbayAppToken(): Promise<string | null> {
   const credentials = Buffer.from(
     `${process.env.EBAY_CLIENT_ID!}:${process.env.EBAY_CLIENT_SECRET!}`

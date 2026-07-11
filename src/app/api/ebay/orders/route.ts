@@ -1,83 +1,16 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { createClient } from '@supabase/supabase-js';
 import { mapEbayOrderToOrder } from '@/lib/ebay-mapper';
+import { getEbayUserToken } from '@/lib/ebay-client';
 import { Order, Batch } from '@/lib/types';
 import { stableUuid } from '@/lib/utils';
 
 const BASE_URL = 'https://api.ebay.com';
-const TOKEN_URL = 'https://api.ebay.com/identity/v1/oauth2/token';
-
-function getSupabase() {
-  return createClient(
-    process.env.NEXT_PUBLIC_SUPABASE_URL!,
-    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
-  );
-}
-
-async function getDbSetting(key: string): Promise<string | null> {
-  const { data } = await getSupabase().from('app_settings').select('value').eq('key', key).single();
-  return data?.value ?? null;
-}
-
-async function setDbSetting(key: string, value: string) {
-  await getSupabase().from('app_settings').upsert({ key, value, updated_at: new Date().toISOString() });
-}
-
-async function refreshAccessToken(refreshToken: string): Promise<string | null> {
-  const clientId = process.env.EBAY_CLIENT_ID!;
-  const clientSecret = process.env.EBAY_CLIENT_SECRET!;
-  const credentials = Buffer.from(`${clientId}:${clientSecret}`).toString('base64');
-
-  const res = await fetch(TOKEN_URL, {
-    method: 'POST',
-    headers: {
-      'Authorization': `Basic ${credentials}`,
-      'Content-Type': 'application/x-www-form-urlencoded',
-    },
-    body: new URLSearchParams({
-      grant_type: 'refresh_token',
-      refresh_token: refreshToken,
-      scope: 'https://api.ebay.com/oauth/api_scope/sell.fulfillment.readonly',
-    }),
-  });
-
-  if (!res.ok) return null;
-  const data = await res.json() as { access_token: string; expires_in: number };
-
-  const expiresAt = Date.now() + data.expires_in * 1000;
-  await setDbSetting('ebay_access_token', data.access_token);
-  await setDbSetting('ebay_token_expires_at', String(expiresAt));
-
-  return data.access_token;
-}
 
 export async function GET(req: NextRequest) {
   try {
-  // Env var takes priority (manual override)
-  const envRefreshToken = process.env.EBAY_REFRESH_TOKEN;
-
-  const [dbRefreshTokenRow, dbAccessTokenRow, dbExpiresAtRow] = await Promise.all([
-    envRefreshToken ? Promise.resolve(null) : getDbSetting('ebay_refresh_token'),
-    getDbSetting('ebay_access_token'),
-    getDbSetting('ebay_token_expires_at'),
-  ]);
-  const dbRefreshToken = envRefreshToken ?? dbRefreshTokenRow;
-  const dbAccessToken = dbAccessTokenRow;
-  const expiresAt = Number(dbExpiresAtRow ?? '0');
-
-  if (!dbRefreshToken) {
-    return NextResponse.json({ error: 'not_connected', message: 'Not connected to eBay. Connect via /api/ebay/auth.' }, { status: 401 });
-  }
-
-  let accessToken: string | null = dbAccessToken;
-
-  // Refresh if missing or within 5 minutes of expiry
-  if (!accessToken || (expiresAt && Date.now() > expiresAt - 5 * 60 * 1000)) {
-    accessToken = await refreshAccessToken(dbRefreshToken);
-  }
-
+  const accessToken = await getEbayUserToken();
   if (!accessToken) {
-    return NextResponse.json({ error: 'token_expired', message: 'eBay session expired. Please re-authorise.' }, { status: 401 });
+    return NextResponse.json({ error: 'not_connected', message: 'Not connected to eBay. Connect via /api/ebay/auth.' }, { status: 401 });
   }
 
   const { searchParams } = new URL(req.url);

@@ -2,10 +2,10 @@ import { NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
 import { createHash } from 'crypto';
 import { mapEbayOrderToOrder } from '@/lib/ebay-mapper';
+import { getEbayUserToken } from '@/lib/ebay-client';
 import { Order } from '@/lib/types';
 
 const BASE_URL = 'https://api.ebay.com';
-const TOKEN_URL = 'https://api.ebay.com/identity/v1/oauth2/token';
 
 // Small batches on purpose: one page per call so a single request stays light
 // and well within serverless limits. The client loops until done.
@@ -40,25 +40,8 @@ async function setSetting(key: string, value: string) {
   await getSupabase().from('app_settings').upsert({ key, value, updated_at: new Date().toISOString() });
 }
 
-async function getAccessToken(): Promise<string | null> {
-  const refreshToken = process.env.EBAY_REFRESH_TOKEN ?? (await getSetting('ebay_refresh_token'));
-  if (!refreshToken) return null;
-  const accessToken = await getSetting('ebay_access_token');
-  const expiresAt = Number((await getSetting('ebay_token_expires_at')) ?? 0);
-  if (accessToken && Date.now() < expiresAt - 5 * 60 * 1000) return accessToken;
-
-  const creds = Buffer.from(`${process.env.EBAY_CLIENT_ID}:${process.env.EBAY_CLIENT_SECRET}`).toString('base64');
-  const res = await fetch(TOKEN_URL, {
-    method: 'POST',
-    headers: { Authorization: `Basic ${creds}`, 'Content-Type': 'application/x-www-form-urlencoded' },
-    body: new URLSearchParams({ grant_type: 'refresh_token', refresh_token: refreshToken, scope: 'https://api.ebay.com/oauth/api_scope/sell.fulfillment.readonly' }),
-  });
-  if (!res.ok) return null;
-  const data = (await res.json()) as { access_token: string; expires_in: number };
-  await setSetting('ebay_access_token', data.access_token);
-  await setSetting('ebay_token_expires_at', String(Date.now() + data.expires_in * 1000));
-  return data.access_token;
-}
+// Shared all-scopes user token (see getEbayUserToken) — avoids scope clobbering.
+const getAccessToken = getEbayUserToken;
 
 interface Cursor { windowEndMs: number; offset: number; imported: number; pages: number; done: boolean; }
 

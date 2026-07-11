@@ -1,33 +1,16 @@
 import { NextResponse } from 'next/server';
 import { getSupabase, getSetting, setSetting } from './helpers';
+import { getEbayUserToken } from '@/lib/ebay-client';
 import { stableUuid } from '@/lib/utils';
 
 // eBay Post-Order API — buyer-initiated return cases. Uses the seller's user
 // OAuth token with the legacy `IAF` auth scheme (Post-Order doesn't accept Bearer).
 const PO_BASE = 'https://api.ebay.com/post-order/v2';
-const TOKEN_URL = 'https://api.ebay.com/identity/v1/oauth2/token';
 const PAGE_LIMIT = 100;
 const MAX_PAGES = 20;
 
-async function getUserToken(): Promise<string | null> {
-  const refreshToken = process.env.EBAY_REFRESH_TOKEN ?? (await getSetting('ebay_refresh_token'));
-  const access = await getSetting('ebay_access_token');
-  const expiresAt = Number((await getSetting('ebay_token_expires_at')) ?? '0');
-  if (access && Date.now() < expiresAt - 5 * 60 * 1000) return access;
-  if (!refreshToken) return access; // no refresh available — try the stored token anyway
-
-  const creds = Buffer.from(`${process.env.EBAY_CLIENT_ID}:${process.env.EBAY_CLIENT_SECRET}`).toString('base64');
-  const res = await fetch(TOKEN_URL, {
-    method: 'POST',
-    headers: { Authorization: `Basic ${creds}`, 'Content-Type': 'application/x-www-form-urlencoded' },
-    body: new URLSearchParams({ grant_type: 'refresh_token', refresh_token: refreshToken, scope: 'https://api.ebay.com/oauth/api_scope/sell.fulfillment' }),
-  });
-  if (!res.ok) { console.error('[eBay returns] token refresh failed', res.status); return access; }
-  const data = await res.json() as { access_token: string; expires_in: number };
-  await setSetting('ebay_access_token', data.access_token);
-  await setSetting('ebay_token_expires_at', String(Date.now() + data.expires_in * 1000));
-  return data.access_token;
-}
+// Shared all-scopes user token (see getEbayUserToken) — avoids scope clobbering.
+const getUserToken = getEbayUserToken;
 
 interface ReturnMember {
   returnId?: string;

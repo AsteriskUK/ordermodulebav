@@ -1,28 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getSetting, setSetting, updateEbayReturnRow } from '../../helpers';
+import { updateEbayReturnRow } from '../../helpers';
+import { getEbayUserToken as getUserToken } from '@/lib/ebay-client';
 
 const PO_BASE = 'https://api.ebay.com/post-order/v2';
-const TOKEN_URL = 'https://api.ebay.com/identity/v1/oauth2/token';
-
-async function getUserToken(): Promise<string | null> {
-  const refreshToken = process.env.EBAY_REFRESH_TOKEN ?? (await getSetting('ebay_refresh_token'));
-  const access = await getSetting('ebay_access_token');
-  const expiresAt = Number((await getSetting('ebay_token_expires_at')) ?? '0');
-  if (access && Date.now() < expiresAt - 5 * 60 * 1000) return access;
-  if (!refreshToken) return access;
-
-  const creds = Buffer.from(`${process.env.EBAY_CLIENT_ID}:${process.env.EBAY_CLIENT_SECRET}`).toString('base64');
-  const res = await fetch(TOKEN_URL, {
-    method: 'POST',
-    headers: { Authorization: `Basic ${creds}`, 'Content-Type': 'application/x-www-form-urlencoded' },
-    body: new URLSearchParams({ grant_type: 'refresh_token', refresh_token: refreshToken, scope: 'https://api.ebay.com/oauth/api_scope/sell.fulfillment' }),
-  });
-  if (!res.ok) return access;
-  const data = await res.json() as { access_token: string; expires_in: number };
-  await setSetting('ebay_access_token', data.access_token);
-  await setSetting('ebay_token_expires_at', String(Date.now() + data.expires_in * 1000));
-  return data.access_token;
-}
 
 export type EbayReturnAction =
   | 'SELLER_MARK_AS_RECEIVED'
