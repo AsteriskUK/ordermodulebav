@@ -340,6 +340,89 @@ export function parseReturnsReport(tsv: string): AmazonReturn[] {
   return out;
 }
 
+// ─── Finances (fees, refunds, net) ────────────────────────────────────────────
+// SP-API Finances v0. financialEvents are keyed by *posted* date (when the money
+// moved), analogous to eBay's transactionDate. We aggregate the day's shipment and
+// refund events into gross / fees / refunds / net for the Overview. Requires the
+// "Finance and Accounting" SP-API role; degrades gracefully if not granted.
+// Note: this does NOT include advertising (PPC) spend — that lives in the separate
+// Amazon Advertising API, or as "Cost of Advertising" lines in the Settlement report.
+
+interface FinMoney { CurrencyAmount?: number; CurrencyCode?: string }
+interface FinCharge { ChargeType?: string; ChargeAmount?: FinMoney }
+interface FinFee { FeeType?: string; FeeAmount?: FinMoney }
+interface FinPromo { PromotionAmount?: FinMoney }
+interface FinShipmentItem { ItemChargeList?: FinCharge[]; ItemFeeList?: FinFee[]; PromotionList?: FinPromo[] }
+interface FinShipmentEvent { AmazonOrderId?: string; ShipmentItemList?: FinShipmentItem[] }
+interface FinRefundItem { ItemChargeAdjustmentList?: FinCharge[]; ItemFeeAdjustmentList?: FinFee[] }
+interface FinRefundEvent { AmazonOrderId?: string; ShipmentItemAdjustmentList?: FinRefundItem[] }
+interface FinancialEvents { ShipmentEventList?: FinShipmentEvent[]; RefundEventList?: FinRefundEvent[] }
+
+export interface AmazonFinanceSummary {
+  gross: number;       // sum of Principal item charges
+  fees: number;        // total selling fees (referral/FBA/etc.), positive
+  refunds: number;     // refunded principal, positive
+  promotions: number;  // seller-funded promotions, positive
+  net: number;         // gross − fees − refunds − promotions
+  currency: string;
+  orderCount: number;
+}
+
+export async function fetchAmazonFinanceSummary(postedAfter: string, postedBefore: string): Promise<AmazonFinanceSummary> {
+  const creds = getAmazonCredentials()!;
+  const token = await getAmazonAccessToken();
+  let gross = 0, fees = 0, refunds = 0, promotions = 0;
+  let currency = 'GBP';
+  const orders = new Set<string>();
+  let nextToken: string | undefined;
+
+  for (let page = 0; page < 20; page++) {
+    const params: Record<string, string> = nextToken
+      ? { NextToken: nextToken }
+      : { PostedAfter: postedAfter, PostedBefore: postedBefore, MaxResultsPerPage: '100' };
+    const data = await spGet<{ payload?: { FinancialEvents?: FinancialEvents; NextToken?: string } }>(
+      '/finances/v0/financialEvents', params, token, creds.endpoint,
+    );
+    const ev = data.payload?.FinancialEvents ?? {};
+    for (const se of ev.ShipmentEventList ?? []) {
+      if (se.AmazonOrderId) orders.add(se.AmazonOrderId);
+      for (const it of se.ShipmentItemList ?? []) {
+        for (const c of it.ItemChargeList ?? []) {
+          if (c.ChargeType === 'Principal') gross += c.ChargeAmount?.CurrencyAmount ?? 0;
+          if (c.ChargeAmount?.CurrencyCode) currency = c.ChargeAmount.CurrencyCode;
+        }
+        for (const f of it.ItemFeeList ?? []) fees += f.FeeAmount?.CurrencyAmount ?? 0;          // negative
+        for (const p of it.PromotionList ?? []) promotions += p.PromotionAmount?.CurrencyAmount ?? 0; // negative
+      }
+    }
+    for (const re of ev.RefundEventList ?? []) {
+      for (const it of re.ShipmentItemAdjustmentList ?? []) {
+        for (const c of it.ItemChargeAdjustmentList ?? []) {
+          if (c.ChargeType === 'Principal') refunds += c.ChargeAmount?.CurrencyAmount ?? 0;       // negative
+        }
+        for (const f of it.ItemFeeAdjustmentList ?? []) fees += f.FeeAmount?.CurrencyAmount ?? 0;  // positive (fee returned)
+      }
+    }
+    nextToken = data.payload?.NextToken;
+    if (!nextToken) break;
+  }
+
+  const round = (n: number) => Math.round(n * 100) / 100;
+  const grossR = round(gross);
+  const feesPos = Math.abs(round(fees));
+  const refundsPos = Math.abs(round(refunds));
+  const promoPos = Math.abs(round(promotions));
+  return {
+    gross: grossR,
+    fees: feesPos,
+    refunds: refundsPos,
+    promotions: promoPos,
+    net: round(grossR - feesPos - refundsPos - promoPos),
+    currency,
+    orderCount: orders.size,
+  };
+}
+
 // ─── Messaging ───────────────────────────────────────────────────────────────
 // SP-API Messaging v1. Amazon has no buyer-message inbox API — sellers can only
 // *send*, and only the templated message types Amazon permits for a given order

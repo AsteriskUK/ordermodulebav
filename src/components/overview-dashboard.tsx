@@ -39,6 +39,20 @@ interface PlatformResponse {
   platforms: PlatformMetrics[];
 }
 
+interface AmazonMetrics {
+  date: string;
+  grossSale: number;
+  totalOrders: number;
+  refundsIssued: number;
+  fees: number | null;
+  promotions: number | null;
+  netPayout: number;
+  financesAvailable: boolean;
+  currency: string;
+  salesSource: 'amazon' | 'local';
+  hint: string | null;
+}
+
 const PLATFORM_TABS = [
   { id: 'ebay',        label: 'eBay',        logo: '/ebay.png',        ext: false },
   { id: 'backmarket',  label: 'Back Market', logo: '/backmarket.svg',  ext: false },
@@ -122,8 +136,10 @@ export function OverviewDashboard() {
   const [tab, setTab] = useState<TabId>('ebay');
   const [ebay, setEbay] = useState<EbayMetrics | null>(null);
   const [platforms, setPlatforms] = useState<PlatformMetrics[]>([]);
+  const [amazon, setAmazon] = useState<AmazonMetrics | null>(null);
   const [ebayLoading, setEbayLoading] = useState(false);
   const [platformsLoading, setPlatformsLoading] = useState(false);
+  const [amazonLoading, setAmazonLoading] = useState(false);
 
   const loadEbay = useCallback(async () => {
     setEbayLoading(true);
@@ -148,11 +164,22 @@ export function OverviewDashboard() {
     }
   }, [date]);
 
+  const loadAmazon = useCallback(async () => {
+    setAmazonLoading(true);
+    try {
+      const res = await fetch(`/api/amazon/metrics?date=${date}`);
+      if (res.ok) setAmazon(await res.json() as AmazonMetrics);
+    } finally {
+      setAmazonLoading(false);
+    }
+  }, [date]);
+
   useEffect(() => { loadEbay(); }, [loadEbay]);
   useEffect(() => { loadPlatforms(); }, [loadPlatforms]);
+  useEffect(() => { loadAmazon(); }, [loadAmazon]);
 
-  const isLoading = tab === 'ebay' ? ebayLoading : platformsLoading;
-  const refresh = tab === 'ebay' ? loadEbay : loadPlatforms;
+  const isLoading = tab === 'ebay' ? ebayLoading : tab === 'amazon' ? amazonLoading : platformsLoading;
+  const refresh = tab === 'ebay' ? loadEbay : tab === 'amazon' ? loadAmazon : loadPlatforms;
   const currentPlatform = platforms.find((p) => p.source === tab);
 
   return (
@@ -191,7 +218,10 @@ export function OverviewDashboard() {
       {isLoading && tab === 'ebay' && !ebay && (
         <div className="py-16 text-center text-slate-400"><RefreshCw className="h-6 w-6 mx-auto animate-spin mb-2" /><p className="text-sm">Loading…</p></div>
       )}
-      {isLoading && tab !== 'ebay' && platforms.length === 0 && (
+      {amazonLoading && tab === 'amazon' && !amazon && (
+        <div className="py-16 text-center text-slate-400"><RefreshCw className="h-6 w-6 mx-auto animate-spin mb-2" /><p className="text-sm">Loading…</p></div>
+      )}
+      {isLoading && tab !== 'ebay' && tab !== 'amazon' && platforms.length === 0 && (
         <div className="py-16 text-center text-slate-400"><RefreshCw className="h-6 w-6 mx-auto animate-spin mb-2" /><p className="text-sm">Loading…</p></div>
       )}
 
@@ -241,6 +271,36 @@ export function OverviewDashboard() {
         </>
       )}
 
+      {/* Amazon tab — rich metrics from SP-API Finances */}
+      {tab === 'amazon' && amazon && (
+        <>
+          <div>
+            <h3 className="text-xs font-semibold text-slate-500 uppercase tracking-wide mb-2">
+              Sales · {amazon.date}
+              {amazon.salesSource === 'amazon' && <span className="ml-2 font-normal text-slate-400 normal-case">· live from Amazon Finances</span>}
+            </h3>
+            <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-3">
+              <Stat label="Gross Sale" value={money(amazon.grossSale, amazon.currency)} icon={PoundSterling} tone="green" />
+              <Stat label="Total Orders" value={amazon.totalOrders.toLocaleString()} icon={ShoppingCart} tone="blue" />
+              <Stat label="Refunds" value={money(amazon.refundsIssued, amazon.currency)} icon={RotateCcw} tone="red" />
+              <Stat label="Amazon Fees" value={amazon.fees != null ? money(amazon.fees, amazon.currency) : '—'} sub={amazon.fees == null ? 'unavailable' : 'referral + FBA'} icon={PoundSterling} tone="amber" />
+              <Stat label="Net Payout" value={money(amazon.netPayout, amazon.currency)} sub={amazon.financesAvailable ? 'gross − fees − refunds' : 'gross − refunds (est.)'} icon={PoundSterling} tone="green" />
+            </div>
+          </div>
+
+          {amazon.hint && (
+            <div className="flex items-start gap-2 text-xs bg-amber-50 border border-amber-200 text-amber-700 rounded-lg px-3 py-2">
+              <AlertTriangle className="h-4 w-4 shrink-0 mt-0.5" />
+              <span>{amazon.hint}</span>
+            </div>
+          )}
+
+          <p className="text-xs text-slate-400">
+            Ad spend (PPC) isn&apos;t available in SP-API — it needs the Amazon Advertising API, or the Settlement report for total spend.
+          </p>
+        </>
+      )}
+
       {/* Temu: no API integration yet — placeholder */}
       {tab === 'temu' && (
         <div className="py-16 text-center text-slate-400 space-y-2">
@@ -250,8 +310,8 @@ export function OverviewDashboard() {
         </div>
       )}
 
-      {/* BackMarket / Amazon / OnBuy */}
-      {tab !== 'ebay' && tab !== 'temu' && (
+      {/* BackMarket / OnBuy */}
+      {tab !== 'ebay' && tab !== 'temu' && tab !== 'amazon' && (
         currentPlatform
           ? <PlatformTabContent p={currentPlatform} />
           : (!platformsLoading && <div className="py-12 text-center text-slate-400 text-sm">No data available.</div>)
