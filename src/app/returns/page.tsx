@@ -1,6 +1,7 @@
 import { AppShell } from '@/components/app-shell';
 import { ReturnsManager } from '@/components/returns-manager';
 import { EbayReturnsList } from '@/components/ebay-returns-list';
+import { AmazonReturnsList } from '@/components/amazon-returns-list';
 import { RoleGate } from '@/components/role-gate';
 
 export default function ReturnsPage() {
@@ -10,6 +11,7 @@ export default function ReturnsPage() {
         <div className="space-y-6">
           <ReturnsManager />
           <EbayReturnsList />
+          <AmazonReturnsList />
         </div>
       </RoleGate>
     </AppShell>

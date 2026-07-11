@@ -149,32 +149,34 @@ export async function POST(req: Request) {
     .in('order_number', orderNumbers);
   const orderByNumber = new Map((orders ?? []).map((o) => [o.order_number, o]));
 
+  // Capture EVERY return, even when we don't hold the local order yet (orders are
+  // still being backfilled). Unmatched returns get order_id: null — the
+  // returns.order_id FK allows null but not a non-existent id.
   const returnsToInsert = rows
     .filter((r) => r.return_id && !existingEbayReturnIds.has(r.return_id))
     .map((r) => {
       const order = r.order_id ? orderByNumber.get(r.order_id) : undefined;
-      if (!order) return null;
       const raw = r.raw as ReturnMember;
       const reasonLabel = r.reason ? r.reason.replace(/_/g, ' ') : 'Return requested';
       return {
         id: stableUuid(`ebay-return-${r.return_id}`),
-        order_id: order.id,
-        sales_record_number: order.sales_record_number,
-        order_number: order.order_number,
-        buyer_username: r.buyer_login || order.buyer_username,
-        item_title: r.item_title || order.item_title,
+        order_id: order?.id ?? null,
+        sales_record_number: order?.sales_record_number ?? r.order_id,
+        order_number: order?.order_number ?? r.order_id,
+        buyer_username: r.buyer_login || order?.buyer_username || null,
+        item_title: r.item_title || order?.item_title || null,
         reason: reasonLabel,
         status: 'pending',
         notes: raw.creationInfo?.comments?.content || '',
         returned_at: r.creation_date || new Date().toISOString(),
         refund_amount: r.refund_amount,
-        metadata: { platform: 'ebay', ebay_return_id: r.return_id },
+        metadata: { platform: 'ebay', ebay_return_id: r.return_id, order_matched: !!order },
       };
-    })
-    .filter(Boolean) as Array<Record<string, unknown>>;
+    });
 
   if (returnsToInsert.length > 0) {
-    const { error: insertError } = await supabase.from('returns').insert(returnsToInsert);
+    // Upsert on id so re-syncs never fail on a row we already created.
+    const { error: insertError } = await supabase.from('returns').upsert(returnsToInsert, { onConflict: 'id' });
     if (insertError) console.error('[eBay returns] auto-create local returns failed', insertError.message);
   }
 

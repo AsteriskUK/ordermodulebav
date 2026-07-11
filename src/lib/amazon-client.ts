@@ -1,3 +1,4 @@
+import { gunzipSync } from 'zlib';
 import { Order } from './types';
 import { deriveShipping } from './csv-parser';
 import { deriveCategory } from './categoriser';
@@ -200,6 +201,143 @@ export async function fetchAmazonOrderItems(orderId: string): Promise<AmazonOrde
     nextToken = data.payload?.NextToken;
   } while (nextToken);
   return items;
+}
+
+// ─── Returns (Reports API) ────────────────────────────────────────────────────
+// Amazon has no live returns endpoint for merchant-fulfilled (MFN) orders like
+// eBay's Post-Order API. Returns come via the Reports API: request a report, poll
+// until it's DONE, then download the (optionally GZIP'd) flat-file document. The
+// request is rate-limited to ~1/min, so the route caches the reportId and resumes
+// polling on the next call rather than requesting a fresh report each time.
+
+const REPORTS_BASE = '/reports/2021-06-30';
+// Merchant-fulfilled returns by return date (tab-separated flat file).
+export const MFN_RETURNS_REPORT_TYPE = 'GET_FLAT_FILE_RETURNS_DATA_BY_RETURN_DATE';
+
+async function spPost<T>(path: string, body: unknown, token: string, endpoint: string): Promise<T> {
+  for (let attempt = 0; attempt < 4; attempt++) {
+    const res = await fetch(`${endpoint}${path}`, {
+      method: 'POST',
+      headers: { 'x-amz-access-token': token, 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+    if (res.status === 429 && attempt < 3) {
+      await new Promise((r) => setTimeout(r, 1000 * Math.pow(2, attempt)));
+      continue;
+    }
+    const text = await res.text();
+    if (!res.ok) throw new Error(`Amazon POST ${path} failed ${res.status}: ${text.slice(0, 300)}`);
+    return (text ? JSON.parse(text) : {}) as T;
+  }
+  throw new Error(`Amazon POST ${path} throttled after retries`);
+}
+
+/** Ask Amazon to generate an MFN returns report. Returns the reportId to poll. */
+export async function requestReturnsReport(daysBack: number): Promise<string> {
+  const creds = getAmazonCredentials()!;
+  const token = await getAmazonAccessToken();
+  // SP-API rejects an end time within the last ~2 minutes.
+  const dataEndTime = new Date(Date.now() - 2 * 60 * 1000).toISOString();
+  const dataStartTime = new Date(Date.now() - daysBack * 24 * 60 * 60 * 1000).toISOString();
+  const data = await spPost<{ reportId?: string }>(
+    `${REPORTS_BASE}/reports`,
+    { reportType: MFN_RETURNS_REPORT_TYPE, marketplaceIds: [creds.marketplaceId], dataStartTime, dataEndTime },
+    token,
+    creds.endpoint,
+  );
+  if (!data.reportId) throw new Error('Amazon report request returned no reportId');
+  return data.reportId;
+}
+
+export interface AmazonReportStatus {
+  processingStatus: string;          // IN_QUEUE | IN_PROGRESS | DONE | CANCELLED | FATAL
+  reportDocumentId?: string;
+}
+
+export async function getReportStatus(reportId: string): Promise<AmazonReportStatus> {
+  const creds = getAmazonCredentials()!;
+  const token = await getAmazonAccessToken();
+  return spGet<AmazonReportStatus>(`${REPORTS_BASE}/reports/${reportId}`, {}, token, creds.endpoint);
+}
+
+/** Download a completed report document and return its decompressed text. */
+export async function getReportDocumentText(reportDocumentId: string): Promise<string> {
+  const creds = getAmazonCredentials()!;
+  const token = await getAmazonAccessToken();
+  const doc = await spGet<{ url?: string; compressionAlgorithm?: string }>(
+    `${REPORTS_BASE}/documents/${reportDocumentId}`,
+    {},
+    token,
+    creds.endpoint,
+  );
+  if (!doc.url) throw new Error('Amazon report document had no download URL');
+  const res = await fetch(doc.url); // pre-signed S3 URL — no auth header
+  if (!res.ok) throw new Error(`Amazon report document download failed ${res.status}`);
+  const buf = Buffer.from(await res.arrayBuffer());
+  const raw = doc.compressionAlgorithm === 'GZIP' ? gunzipSync(buf) : buf;
+  // EU flat-file reports are usually Windows-1252, not UTF-8. Decode as strict
+  // UTF-8 first and fall back to windows-1252 if that fails, so accented item
+  // names / dashes don't come back as replacement characters.
+  try {
+    return new TextDecoder('utf-8', { fatal: true }).decode(raw);
+  } catch {
+    return new TextDecoder('windows-1252').decode(raw);
+  }
+}
+
+export interface AmazonReturn {
+  orderId: string;
+  rmaId?: string;
+  asin?: string;
+  sku?: string;
+  itemName?: string;
+  reason?: string;
+  status?: string;
+  quantity?: number;
+  returnDate?: string;
+}
+
+/**
+ * Parse the MFN returns flat file. Columns vary by marketplace, so we key off the
+ * header names (normalised) rather than fixed positions.
+ */
+export function parseReturnsReport(tsv: string): AmazonReturn[] {
+  const lines = tsv.split(/\r?\n/).filter((l) => l.trim().length > 0);
+  if (lines.length < 2) return [];
+  const norm = (s: string) => s.trim().toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
+  const header = lines[0].split('\t').map(norm);
+  const idx = (name: string) => header.indexOf(name);
+  const col = {
+    orderId: idx('order id'),
+    rmaId: idx('amazon rma id') !== -1 ? idx('amazon rma id') : idx('merchant rma id'),
+    asin: idx('asin'),
+    sku: idx('merchant sku') !== -1 ? idx('merchant sku') : idx('sku'),
+    itemName: idx('item name'),
+    reason: idx('return reason'),
+    status: idx('return request status'),
+    quantity: idx('return quantity'),
+    returnDate: idx('return request date'),
+  };
+  const cell = (parts: string[], i: number) => (i >= 0 && i < parts.length ? parts[i].trim() : '');
+  const out: AmazonReturn[] = [];
+  for (let i = 1; i < lines.length; i++) {
+    const p = lines[i].split('\t');
+    const orderId = cell(p, col.orderId);
+    if (!orderId) continue;
+    const qty = parseInt(cell(p, col.quantity), 10);
+    out.push({
+      orderId,
+      rmaId: cell(p, col.rmaId) || undefined,
+      asin: cell(p, col.asin) || undefined,
+      sku: cell(p, col.sku) || undefined,
+      itemName: cell(p, col.itemName) || undefined,
+      reason: cell(p, col.reason) || undefined,
+      status: cell(p, col.status) || undefined,
+      quantity: Number.isNaN(qty) ? undefined : qty,
+      returnDate: cell(p, col.returnDate) || undefined,
+    });
+  }
+  return out;
 }
 
 // ─── Messaging ───────────────────────────────────────────────────────────────
