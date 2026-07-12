@@ -145,6 +145,10 @@ export interface ReturnRecord {
   imageUrls?: string[];
   /** Linked eBay return case id (Post-Order returnId) when the return came from eBay */
   ebayReturnId?: string;
+  /** Amazon fields (from the returns report) for case number + listing link */
+  amazonRmaId?: string;
+  asin?: string;
+  sku?: string;
   /** Platform the return belongs to (ebay, amazon, backmarket, onbuy, etc.) — kept open for future integrations */
   platform?: 'ebay' | 'amazon' | 'backmarket' | 'onbuy' | 'temu' | 'manual';
 }

@@ -20,7 +20,7 @@ import {
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter,
 } from '@/components/ui/dialog';
-import { PackageOpen, Plus, Search, CheckCircle, Truck, Replace, Pencil, ArrowLeftRight, Loader2, Eye } from 'lucide-react';
+import { PackageOpen, Plus, Search, CheckCircle, Truck, Replace, Pencil, ArrowLeftRight, Loader2, Eye, RefreshCw, ExternalLink } from 'lucide-react';
 import { toast } from 'sonner';
 
 type EbayReturnAction =
@@ -104,7 +104,7 @@ export function ReturnsManager() {
   }, [searchParams]);
   const [statusFilter, setStatusFilter] = useState<string>('all');
   const [tab, setTab] = useState<'open' | 'closed'>('open');
-  const [ebayReturns, setEbayReturns] = useState<Array<{ return_id: string; order_id: string | null; item_title: string | null; state: string | null; status: string | null; raw?: Record<string, unknown> }>>([]);
+  const [ebayReturns, setEbayReturns] = useState<Array<{ return_id: string; order_id: string | null; item_id: string | null; item_title: string | null; image_url: string | null; state: string | null; status: string | null; raw?: Record<string, unknown> }>>([]);
   // Quick-action deep link (?new=1&order=&buyer=&kind=&notes=) opens the form prefilled.
   const [showForm, setShowForm] = useState(() => searchParams.get('new') === '1');
 
@@ -181,13 +181,59 @@ export function ReturnsManager() {
     if (match) setSelectedOrderId(match.id);
   }, [orders, selectedOrderId, searchParams]);
 
-  // Load eBay return cases so we can auto-link local returns and show eBay actions.
-  useEffect(() => {
+  // Load eBay return cases so we can auto-link local returns, show thumbnails/case
+  // links and eBay actions.
+  const loadEbayReturns = () => {
     fetch('/api/ebay/returns')
       .then((res) => res.json())
       .then((data) => setEbayReturns(data.returns ?? []))
       .catch(() => { /* silent */ });
-  }, []);
+  };
+  useEffect(() => { loadEbayReturns(); }, []);
+
+  // Pull the latest returns from the marketplaces (auto-creates local records).
+  const [syncing, setSyncing] = useState<null | 'ebay' | 'amazon'>(null);
+  const syncEbayReturns = async () => {
+    setSyncing('ebay');
+    try {
+      const res = await fetch('/api/ebay/returns', { method: 'POST' });
+      const data = await res.json();
+      if (res.ok) { toast.success(`Synced ${data.synced ?? 0} eBay returns${data.created ? ` — ${data.created} new` : ''}`); loadEbayReturns(); }
+      else toast.error(`eBay returns sync failed: ${data.message || data.error || 'error'}`);
+    } catch { toast.error('eBay returns sync failed'); } finally { setSyncing(null); }
+  };
+  const syncAmazonReturns = async () => {
+    setSyncing('amazon');
+    try {
+      const res = await fetch('/api/amazon/returns', { method: 'POST' });
+      const data = await res.json();
+      if (res.ok && data.pending) toast.info(data.message || 'Amazon returns report generating — sync again shortly.');
+      else if (res.ok) toast.success(`Synced ${data.synced ?? 0} Amazon returns${data.created ? ` — ${data.created} new` : ''}`);
+      else toast.error(`Amazon returns sync failed: ${data.message || data.error || 'error'}`);
+    } catch { toast.error('Amazon returns sync failed'); } finally { setSyncing(null); }
+  };
+
+  // Listing thumbnail / listing link / case number for a return, by platform.
+  const returnListing = (ret: ReturnRecord): { thumb: string | null; listingUrl: string | null; caseNumber: string | null; caseUrl: string | null } => {
+    if (ret.platform === 'ebay' && ret.ebayReturnId) {
+      const er = ebayReturns.find((e) => e.return_id === ret.ebayReturnId);
+      return {
+        thumb: er?.image_url ?? null,
+        listingUrl: er?.item_id ? `https://www.ebay.co.uk/itm/${er.item_id}` : null,
+        caseNumber: ret.ebayReturnId,
+        caseUrl: `https://www.ebay.co.uk/returns/rtn?returnId=${ret.ebayReturnId}`,
+      };
+    }
+    if (ret.platform === 'amazon') {
+      return {
+        thumb: null,
+        listingUrl: ret.asin ? `https://www.amazon.co.uk/dp/${ret.asin}` : null,
+        caseNumber: ret.amazonRmaId ?? null,
+        caseUrl: null,
+      };
+    }
+    return { thumb: null, listingUrl: null, caseNumber: null, caseUrl: null };
+  };
 
   // Auto-link local returns to eBay return cases by order number / item title.
   useEffect(() => {
@@ -420,10 +466,20 @@ export function ReturnsManager() {
           <h2 className="text-2xl font-bold text-slate-900">Returns &amp; Refunds</h2>
           <p className="text-slate-500 text-sm mt-1">Track and process customer returns</p>
         </div>
-        <Button size="sm" onClick={() => { setNewReturnId(genId()); setShowForm((v) => !v); }}>
-          <Plus className="h-3 w-3 mr-1" />
-          Log Return
-        </Button>
+        <div className="flex items-center gap-2">
+          <Button size="sm" variant="outline" onClick={syncEbayReturns} disabled={syncing !== null}>
+            <RefreshCw className={`h-3 w-3 mr-1 ${syncing === 'ebay' ? 'animate-spin' : ''}`} />
+            Sync eBay
+          </Button>
+          <Button size="sm" variant="outline" onClick={syncAmazonReturns} disabled={syncing !== null}>
+            <RefreshCw className={`h-3 w-3 mr-1 ${syncing === 'amazon' ? 'animate-spin' : ''}`} />
+            Sync Amazon
+          </Button>
+          <Button size="sm" onClick={() => { setNewReturnId(genId()); setShowForm((v) => !v); }}>
+            <Plus className="h-3 w-3 mr-1" />
+            Log Return
+          </Button>
+        </div>
       </div>
 
       {/* Summary */}
@@ -634,7 +690,13 @@ export function ReturnsManager() {
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {filteredReturns.map((ret) => (
+                {filteredReturns.map((ret) => {
+                  const listing = returnListing(ret);
+                  // Replace/Swap/Refund fire eBay actions (and DPD/local for manual).
+                  // For Amazon/other marketplaces there's no action API, so hide them
+                  // rather than have a Refund button that silently does nothing.
+                  const canMarketplaceAction = !ret.platform || ret.platform === 'ebay' || ret.platform === 'manual';
+                  return (
                   <TableRow key={ret.id}>
                     <TableCell className="text-xs text-slate-500 whitespace-nowrap">
                       {new Date(ret.returnedAt).toLocaleDateString('en-GB')}
@@ -642,8 +704,27 @@ export function ReturnsManager() {
                     <TableCell className="font-mono text-xs">{ret.salesRecordNumber}</TableCell>
                     <TableCell className="font-mono text-xs text-slate-500">{ret.orderNumber || '—'}</TableCell>
                     <TableCell className="text-xs text-slate-600">{ret.buyerUsername || '—'}</TableCell>
-                    <TableCell className="text-xs max-w-[160px] truncate">{ret.itemTitle}</TableCell>
-                    <TableCell className="text-xs">{ret.reason}</TableCell>
+                    <TableCell className="max-w-[200px]">
+                      <div className="flex items-center gap-2">
+                        {listing.thumb ? (
+                          <img src={listing.thumb} alt="" className="h-8 w-8 rounded object-cover border border-slate-200 bg-slate-100 shrink-0" />
+                        ) : (
+                          <div className="h-8 w-8 rounded border border-slate-200 bg-slate-50 shrink-0" />
+                        )}
+                        {listing.listingUrl ? (
+                          <a href={listing.listingUrl} target="_blank" rel="noopener noreferrer" onClick={(e) => e.stopPropagation()} className="text-xs text-blue-600 hover:underline truncate flex items-center gap-0.5">
+                            <span className="truncate">{ret.itemTitle}</span><ExternalLink className="h-3 w-3 shrink-0" />
+                          </a>
+                        ) : (
+                          <span className="text-xs truncate">{ret.itemTitle}</span>
+                        )}
+                      </div>
+                    </TableCell>
+                    <TableCell>
+                      {ret.reason
+                        ? <Badge variant="outline" className="text-xs font-semibold bg-amber-50 text-amber-800 border-amber-300 whitespace-normal">{ret.reason}</Badge>
+                        : <span className="text-xs text-slate-400">—</span>}
+                    </TableCell>
                     <TableCell className="text-xs font-mono">{ret.returnTrackingNumber || '—'}</TableCell>
                     <TableCell className="text-xs font-medium">
                       {ret.refundAmount ? `£${ret.refundAmount.toFixed(2)}` : '—'}
@@ -691,10 +772,18 @@ export function ReturnsManager() {
                             {ret.platform}
                           </Badge>
                         )}
-                        {ret.ebayReturnId && (
-                          <Badge variant="outline" className="text-xs w-fit bg-slate-100 text-slate-600 border-slate-300">
-                            eBay #{ret.ebayReturnId}
-                          </Badge>
+                        {listing.caseNumber && (
+                          listing.caseUrl ? (
+                            <a href={listing.caseUrl} target="_blank" rel="noopener noreferrer" onClick={(e) => e.stopPropagation()}>
+                              <Badge variant="outline" className="text-xs w-fit bg-slate-100 text-slate-600 border-slate-300 hover:border-blue-400 flex items-center gap-0.5">
+                                Case #{listing.caseNumber}<ExternalLink className="h-2.5 w-2.5" />
+                              </Badge>
+                            </a>
+                          ) : (
+                            <Badge variant="outline" className="text-xs w-fit bg-slate-100 text-slate-600 border-slate-300">
+                              RMA {listing.caseNumber}
+                            </Badge>
+                          )
                         )}
                       </div>
                     </TableCell>
@@ -747,6 +836,7 @@ export function ReturnsManager() {
                             <Truck className="h-3 w-3 mr-1" />Received
                           </Button>
                         )}
+                        {canMarketplaceAction && (<>
                         {(ret.status === 'pending' || ret.status === 'received') && (
                           <Button size="sm" variant="outline" className="h-6 text-xs px-2 text-purple-700 border-purple-300"
                             disabled={!isEbayActionAvailable(ret, 'SELLER_MARK_REPLACEMENT_SHIPPED', ebayReturns)}
@@ -784,10 +874,12 @@ export function ReturnsManager() {
                             <CheckCircle className="h-3 w-3 mr-1" />Refund
                           </Button>
                         )}
+                        </>)}
                       </div>
                     </TableCell>
                   </TableRow>
-                ))}
+                  );
+                })}
               </TableBody>
             </Table>
           )}
