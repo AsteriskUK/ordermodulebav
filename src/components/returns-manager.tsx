@@ -103,6 +103,7 @@ export function ReturnsManager() {
     if (q) setSearch(q);
   }, [searchParams]);
   const [statusFilter, setStatusFilter] = useState<string>('all');
+  const [platformFilter, setPlatformFilter] = useState<string>('all');
   const [tab, setTab] = useState<'open' | 'closed'>('open');
   const [ebayReturns, setEbayReturns] = useState<Array<{ return_id: string; order_id: string | null; item_id: string | null; item_title: string | null; image_url: string | null; state: string | null; status: string | null; raw?: Record<string, unknown> }>>([]);
   // Quick-action deep link (?new=1&order=&buyer=&kind=&notes=) opens the form prefilled.
@@ -131,6 +132,9 @@ export function ReturnsManager() {
   // View linked original order
   const [viewOrderId, setViewOrderId] = useState<string | null>(null);
 
+  // Return details pane (opens on row / listing / case click)
+  const [detailReturn, setDetailReturn] = useState<ReturnRecord | null>(null);
+
   // Edit dialog
   const [editReturn, setEditReturn] = useState<ReturnRecord | null>(null);
   const [editReason, setEditReason] = useState('');
@@ -143,6 +147,21 @@ export function ReturnsManager() {
   const [editStatus, setEditStatus] = useState<ReturnRecord['status']>('pending');
   const [editImageUrls, setEditImageUrls] = useState<string[]>([]);
   const [editEbayReturnId, setEditEbayReturnId] = useState('');
+
+  // Populate + open the Edit dialog for a return (shared by table + details pane).
+  const openEdit = (ret: ReturnRecord) => {
+    setEditReturn(ret);
+    setEditReason(ret.reason);
+    setEditNotes(ret.notes);
+    setEditRefundAmount(ret.refundAmount?.toFixed(2) ?? '');
+    setEditResponsibleDepartment(ret.responsibleDepartment || '');
+    setEditResponsibleUserId(ret.responsibleUserId || '');
+    setEditReturnTrackingNumber(ret.returnTrackingNumber || '');
+    setEditReceivedNotes(ret.receivedNotes || '');
+    setEditStatus(ret.status);
+    setEditImageUrls(ret.imageUrls || []);
+    setEditEbayReturnId(ret.ebayReturnId || '');
+  };
 
   // New return form
   const [newReturnId, setNewReturnId] = useState('');
@@ -272,6 +291,7 @@ export function ReturnsManager() {
     let r = [...returns].sort((a, b) => b.returnedAt.localeCompare(a.returnedAt));
     r = r.filter((x) => (tab === 'open' ? openStatuses : closedStatuses).includes(x.status));
     if (statusFilter !== 'all') r = r.filter((x) => x.status === statusFilter);
+    if (platformFilter !== 'all') r = r.filter((x) => (x.platform || 'manual') === platformFilter);
     if (search.trim()) {
       const q = search.toLowerCase();
       r = r.filter(
@@ -287,7 +307,7 @@ export function ReturnsManager() {
       );
     }
     return r;
-  }, [returns, statusFilter, search, tab]);
+  }, [returns, statusFilter, platformFilter, search, tab]);
 
   const selectedOrder = orders.find((o) => o.id === selectedOrderId);
 
@@ -660,6 +680,18 @@ export function ReturnsManager() {
             ))}
           </SelectContent>
         </Select>
+        <Select value={platformFilter} onValueChange={(v) => v && setPlatformFilter(v)}>
+          <SelectTrigger className="w-32 h-8 text-sm"><SelectValue /></SelectTrigger>
+          <SelectContent>
+            <SelectItem value="all">All Platforms</SelectItem>
+            <SelectItem value="ebay">eBay</SelectItem>
+            <SelectItem value="amazon">Amazon</SelectItem>
+            <SelectItem value="backmarket">Back Market</SelectItem>
+            <SelectItem value="onbuy">OnBuy</SelectItem>
+            <SelectItem value="temu">Temu</SelectItem>
+            <SelectItem value="manual">Manual</SelectItem>
+          </SelectContent>
+        </Select>
         <span className="text-xs text-slate-400">Total refunded: <strong className="text-green-700">£{totalRefunded.toFixed(2)}</strong></span>
       </div>
 
@@ -697,7 +729,7 @@ export function ReturnsManager() {
                   // rather than have a Refund button that silently does nothing.
                   const canMarketplaceAction = !ret.platform || ret.platform === 'ebay' || ret.platform === 'manual';
                   return (
-                  <TableRow key={ret.id}>
+                  <TableRow key={ret.id} className="cursor-pointer hover:bg-slate-50" onClick={() => setDetailReturn(ret)}>
                     <TableCell className="text-xs text-slate-500 whitespace-nowrap">
                       {new Date(ret.returnedAt).toLocaleDateString('en-GB')}
                     </TableCell>
@@ -787,7 +819,7 @@ export function ReturnsManager() {
                         )}
                       </div>
                     </TableCell>
-                    <TableCell>
+                    <TableCell onClick={(e) => e.stopPropagation()}>
                       <div className="flex gap-1 flex-wrap">
                         {ret.orderId && (
                           <Button
@@ -812,19 +844,7 @@ export function ReturnsManager() {
                           size="sm"
                           variant="outline"
                           className="h-6 text-xs px-2 text-slate-600 border-slate-300"
-                          onClick={() => {
-                            setEditReturn(ret);
-                            setEditReason(ret.reason);
-                            setEditNotes(ret.notes);
-                            setEditRefundAmount(ret.refundAmount?.toFixed(2) ?? '');
-                            setEditResponsibleDepartment(ret.responsibleDepartment || '');
-                            setEditResponsibleUserId(ret.responsibleUserId || '');
-                            setEditReturnTrackingNumber(ret.returnTrackingNumber || '');
-                            setEditReceivedNotes(ret.receivedNotes || '');
-                            setEditStatus(ret.status);
-                            setEditImageUrls(ret.imageUrls || []);
-                            setEditEbayReturnId(ret.ebayReturnId || '');
-                          }}
+                          onClick={() => openEdit(ret)}
                         >
                           <Pencil className="h-3 w-3 mr-1" />Edit
                         </Button>
@@ -1245,6 +1265,106 @@ export function ReturnsManager() {
           </DialogContent>
         </Dialog>
       )}
+
+      {/* Return details pane — opens on row / listing / case click */}
+      {detailReturn && (() => {
+        const ret = detailReturn;
+        const listing = returnListing(ret);
+        const canMarketplaceAction = !ret.platform || ret.platform === 'ebay' || ret.platform === 'manual';
+        const orderExists = orders.some((o) => o.id === ret.orderId);
+        const close = () => setDetailReturn(null);
+        return (
+          <Dialog open onOpenChange={(open) => { if (!open) close(); }}>
+            <DialogContent className="sm:max-w-lg max-h-[90vh] overflow-y-auto">
+              <DialogHeader>
+                <DialogTitle className="flex items-center gap-2 text-base">
+                  Return #{ret.salesRecordNumber}
+                  <Badge variant="outline" className={`text-xs ${STATUS_CONFIG[ret.status].color}`}>{STATUS_CONFIG[ret.status].label}</Badge>
+                  {ret.platform && ret.platform !== 'manual' && (
+                    <Badge variant="outline" className="text-xs bg-slate-100 text-slate-600 border-slate-300 capitalize">{ret.platform}</Badge>
+                  )}
+                </DialogTitle>
+              </DialogHeader>
+              <div className="space-y-3 py-1 text-sm">
+                {/* Item */}
+                <div className="flex items-start gap-3">
+                  {listing.thumb
+                    ? <img src={listing.thumb} alt="" className="h-14 w-14 rounded object-cover border border-slate-200 bg-slate-100 shrink-0" />
+                    : <div className="h-14 w-14 rounded border border-slate-200 bg-slate-50 shrink-0" />}
+                  <div className="min-w-0">
+                    <p className="font-medium text-slate-800 leading-snug">{ret.itemTitle}</p>
+                    <div className="flex flex-wrap items-center gap-x-3 gap-y-1 mt-1 text-xs">
+                      {listing.listingUrl && (
+                        <a href={listing.listingUrl} target="_blank" rel="noopener noreferrer" className="text-blue-600 hover:underline flex items-center gap-0.5">
+                          View listing <ExternalLink className="h-3 w-3" />
+                        </a>
+                      )}
+                      {listing.caseNumber && (
+                        listing.caseUrl
+                          ? <a href={listing.caseUrl} target="_blank" rel="noopener noreferrer" className="text-blue-600 hover:underline flex items-center gap-0.5">Case #{listing.caseNumber} <ExternalLink className="h-3 w-3" /></a>
+                          : <span className="text-slate-500">RMA {listing.caseNumber}</span>
+                      )}
+                    </div>
+                  </div>
+                </div>
+                {/* Facts */}
+                <div className="grid grid-cols-2 gap-x-4 gap-y-1.5 text-xs bg-slate-50 border border-slate-200 rounded-lg p-3">
+                  <div><span className="text-slate-400">Buyer</span><p className="font-medium text-slate-700">{ret.buyerUsername || '—'}</p></div>
+                  <div><span className="text-slate-400">Order #</span><p className="font-mono text-slate-700">{ret.orderNumber || '—'}</p></div>
+                  <div><span className="text-slate-400">Opened</span><p className="text-slate-700">{new Date(ret.returnedAt).toLocaleDateString('en-GB')}</p></div>
+                  <div><span className="text-slate-400">Refund</span><p className="font-medium text-slate-700">{ret.refundAmount ? `£${ret.refundAmount.toFixed(2)}` : '—'}</p></div>
+                  {ret.returnTrackingNumber && <div className="col-span-2"><span className="text-slate-400">Return tracking</span><p className="font-mono text-slate-700">{ret.returnTrackingNumber}</p></div>}
+                </div>
+                {/* Reason */}
+                <div>
+                  <span className="text-xs text-slate-400">Reason</span>
+                  <div className="mt-1"><Badge variant="outline" className="text-xs font-semibold bg-amber-50 text-amber-800 border-amber-300 whitespace-normal">{ret.reason || '—'}</Badge></div>
+                </div>
+                {ret.notes && <div><span className="text-xs text-slate-400">Notes</span><p className="text-xs text-slate-600 mt-0.5 whitespace-pre-wrap">{ret.notes}</p></div>}
+                {!canMarketplaceAction && (
+                  <p className="text-xs text-slate-400 bg-slate-50 border border-slate-200 rounded px-2 py-1.5">
+                    Replace / Swap / Refund aren&apos;t available for {ret.platform} returns — those are handled in the {ret.platform === 'amazon' ? 'Amazon Seller Central' : 'marketplace'} console.
+                  </p>
+                )}
+              </div>
+              <DialogFooter className="flex-wrap gap-2 sm:justify-start">
+                {ret.orderId && (
+                  <Button size="sm" variant="outline" className="text-blue-600 border-blue-300"
+                    onClick={() => { if (!orderExists) { toast.info('Order not synced locally yet.'); return; } setViewOrderId(ret.orderId); close(); }}>
+                    <Eye className="h-3 w-3 mr-1" />Order
+                  </Button>
+                )}
+                <Button size="sm" variant="outline" onClick={() => { openEdit(ret); close(); }}>
+                  <Pencil className="h-3 w-3 mr-1" />Edit
+                </Button>
+                {(ret.status === 'pending' || ret.status === 'swap') && (
+                  <Button size="sm" variant="outline" onClick={() => { setReceiveReturn(ret); setReceiveNotes(ret.receivedNotes || ''); close(); }}>
+                    <Truck className="h-3 w-3 mr-1" />Received
+                  </Button>
+                )}
+                {canMarketplaceAction && (ret.status === 'pending' || ret.status === 'received') && (
+                  <Button size="sm" variant="outline" className="text-purple-700 border-purple-300"
+                    onClick={() => { const orig = orders.find(o => o.id === ret.orderId); setReplaceMode('replacement'); setReplaceReturn(ret); setReplacementItemTitle(orig?.itemTitle || ret.itemTitle); close(); }}>
+                    <Replace className="h-3 w-3 mr-1" />Replace
+                  </Button>
+                )}
+                {canMarketplaceAction && ret.status === 'pending' && (
+                  <Button size="sm" variant="outline" className="text-orange-700 border-orange-300"
+                    onClick={() => { const orig = orders.find(o => o.id === ret.orderId); setReplaceMode('swap'); setReplaceReturn(ret); setReplacementItemTitle(orig?.itemTitle || ret.itemTitle); close(); }}>
+                    <ArrowLeftRight className="h-3 w-3 mr-1" />Swap
+                  </Button>
+                )}
+                {canMarketplaceAction && (ret.status === 'pending' || ret.status === 'received') && (
+                  <Button size="sm" variant="outline" className="text-green-700 border-green-300"
+                    onClick={() => { setRefundReturn(ret); setRefundAmountConfirm(ret.refundAmount?.toFixed(2) ?? ''); close(); }}>
+                    <CheckCircle className="h-3 w-3 mr-1" />Refund
+                  </Button>
+                )}
+              </DialogFooter>
+            </DialogContent>
+          </Dialog>
+        );
+      })()}
 
       {/* Linked original order view */}
       {(() => {
