@@ -4,7 +4,7 @@ import Image from 'next/image';
 import { useCallback, useEffect, useState } from 'react';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
-import { BarChart3, RefreshCw, AlertTriangle, PoundSterling, ShoppingCart, RotateCcw, ThumbsDown, Gauge, PackageCheck, Clock, WifiOff } from 'lucide-react';
+import { BarChart3, RefreshCw, AlertTriangle, PoundSterling, ShoppingCart, RotateCcw, ThumbsDown, Gauge, PackageCheck, Clock, WifiOff, Megaphone } from 'lucide-react';
 import type { PlatformMetrics } from '@/app/api/platform-metrics/route';
 
 interface EbayMetrics {
@@ -14,6 +14,7 @@ interface EbayMetrics {
   refundsIssued: number;
   netEstimate: number;
   ebayFees: number | null;
+  ebayAdSpend: number | null;
   netPayout: number;
   financesAvailable: boolean;
   returnsOpenedToday: number;
@@ -239,6 +240,7 @@ export function OverviewDashboard() {
               <Stat label="Total Orders" value={ebay.totalOrders.toLocaleString()} icon={ShoppingCart} tone="blue" />
               <Stat label="Refunds Issued" value={money(ebay.refundsIssued)} icon={RotateCcw} tone="red" />
               <Stat label="eBay Selling Cost" value={ebay.ebayFees != null ? money(ebay.ebayFees) : '—'} sub={ebay.ebayFees == null ? (ebay.financesNeedsSignature ? 'needs API signature' : 'unavailable') : 'fees'} icon={PoundSterling} tone="amber" />
+              <Stat label="Ad Spend" value={ebay.ebayAdSpend != null ? money(ebay.ebayAdSpend) : '—'} sub={ebay.ebayAdSpend == null ? 'unavailable' : 'Promoted Listings (incl. in fees)'} icon={Megaphone} tone="amber" />
               <Stat label="Net Payout" value={money(ebay.netPayout)} sub={ebay.financesAvailable ? 'gross − refunds − fees' : 'gross − refunds (est.)'} icon={PoundSterling} tone="green" />
             </div>
           </div>

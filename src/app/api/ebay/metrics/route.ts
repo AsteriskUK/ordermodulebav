@@ -173,6 +173,7 @@ export async function GET(req: NextRequest) {
   // transactions. The Finances API requires an RFC 9421 digital signature.
   let ebayFees: number | null = null;
   let ebayGross: number | null = null;
+  let ebayAdSpend: number | null = null;   // Promoted Listings fees (a subset of ebayFees)
   let ebayOrderCount: number | null = null;
   let financesAvailable = false;
   let financesNeedsSignature = false;
@@ -184,6 +185,7 @@ export async function GET(req: NextRequest) {
       let offset = 0;
       let feeSum = 0;         // sum of totalFeeAmount = selling fees
       let grossSum = 0;       // sum of totalFeeBasisAmount = gross sale value
+      let adFeeSum = 0;       // Promoted Listings ad fees, from the per-line fee breakdown
       const saleOrderIds = new Set<string>();
       let total = Infinity;
       for (let page = 0; offset < total && page < 20; page++) {
@@ -201,7 +203,12 @@ export async function GET(req: NextRequest) {
         financesAvailable = true;
         const d = await fr.json() as {
           total?: number;
-          transactions?: { orderId?: string; totalFeeAmount?: { value?: string | number }; totalFeeBasisAmount?: { value?: string | number } }[];
+          transactions?: {
+            orderId?: string;
+            totalFeeAmount?: { value?: string | number };
+            totalFeeBasisAmount?: { value?: string | number };
+            orderLineItems?: { marketplaceFees?: { feeType?: string; amount?: { value?: string | number } }[] }[];
+          }[];
         };
         if (debug && page === 0) debugRaw.financesSample = { total: d.total, first: d.transactions?.[0] };
         const txns = d.transactions ?? [];
@@ -209,6 +216,12 @@ export async function GET(req: NextRequest) {
           feeSum += Number(t.totalFeeAmount?.value ?? 0) || 0;
           grossSum += Number(t.totalFeeBasisAmount?.value ?? 0) || 0;
           if (t.orderId) saleOrderIds.add(t.orderId);
+          // Promoted Listings fees carry an AD_FEE feeType in the per-line breakdown.
+          for (const li of t.orderLineItems ?? []) {
+            for (const mf of li.marketplaceFees ?? []) {
+              if (/ad|promot/i.test(mf.feeType ?? '')) adFeeSum += Number(mf.amount?.value ?? 0) || 0;
+            }
+          }
         }
         total = d.total ?? txns.length;
         offset += limit;
@@ -217,6 +230,7 @@ export async function GET(req: NextRequest) {
       if (financesAvailable) {
         ebayFees = Math.round(feeSum * 100) / 100;
         ebayGross = Math.round(grossSum * 100) / 100;
+        ebayAdSpend = Math.round(adFeeSum * 100) / 100;
         ebayOrderCount = saleOrderIds.size;
       }
     } catch (e) { console.warn('[eBay metrics] finances fetch error', e); if (debug) debugRaw.financesException = String(e); }
@@ -247,6 +261,7 @@ export async function GET(req: NextRequest) {
     totalOrders: displayOrders,
     salesSource,
     ebayFees,
+    ebayAdSpend,
     netPayout,
     performance,
     analyticsAvailable,
