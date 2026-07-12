@@ -457,13 +457,22 @@ export function NotesFeed() {
       const convo = map.get(key)!;
       convo.messages.push(msg);
       if (!convo.item_id && msg.item_id) convo.item_id = msg.item_id;
+      // Never show our own store id as the client: seller-sent messages were
+      // historically mis-attributed with buyer_username = us. If the current label
+      // is our own username and this message has a real buyer name, adopt it.
+      if (sellerUsername) {
+        const seller = sellerUsername.toLowerCase();
+        if (convo.buyer_username.toLowerCase() === seller && msg.buyer_username.toLowerCase() !== seller) {
+          convo.buyer_username = msg.buyer_username;
+        }
+      }
       if (new Date(msg.sent_at) > new Date(convo.lastAt)) convo.lastAt = msg.sent_at;
       if (!isOurs(msg, msg.buyer_username) && msg.status === 'unread') convo.unreadCount++;
     }
     return [...map.values()]
       .map(c => ({ ...c, messages: c.messages.sort((a, b) => a.sent_at.localeCompare(b.sent_at)) }))
       .sort((a, b) => b.lastAt.localeCompare(a.lastAt));
-  }, [allMessages, isOurs]);
+  }, [allMessages, isOurs, sellerUsername]);
 
   const activeConvo = useMemo(
     () => conversations.find((c) => c.key === activeKey) ?? null,

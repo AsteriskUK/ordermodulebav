@@ -118,8 +118,16 @@ interface MessageRow {
 
 // The seller's own eBay username, used to label message direction. Buyer-initiated
 // (FROM_MEMBERS) threads contain messages from both sides; without our username we
-// can't reliably tell them apart.
-const SELLER_USERNAME = (process.env.EBAY_SELLER_USERNAME ?? '').toLowerCase();
+// can't tell a reply we sent from a buyer message — and mislabel our own outgoing
+// replies as the "buyer", so our own store id shows up as the client. Prefer the
+// env var, else fall back to the auto-detected value stored in app_settings.
+let SELLER_USERNAME = (process.env.EBAY_SELLER_USERNAME ?? '').toLowerCase();
+
+async function ensureSellerUsername(supabase: ReturnType<typeof getSupabase>): Promise<void> {
+  if (SELLER_USERNAME) return;
+  const { data } = await supabase.from('app_settings').select('value').eq('key', 'ebay_seller_username').single();
+  if (data?.value) SELLER_USERNAME = String(data.value).toLowerCase();
+}
 
 function buildRow(
   msg: EbayApiMessage,
@@ -161,6 +169,7 @@ function buildRow(
 //   ?conversationId=<id>   → fetch that thread's full history from eBay, upsert, return it
 export async function GET(req: NextRequest) {
   const supabase = getSupabase();
+  await ensureSellerUsername(supabase);
   const conversationId = new URL(req.url).searchParams.get('conversationId');
 
   if (conversationId) {
@@ -346,6 +355,7 @@ export async function POST() {
   if (!token) return NextResponse.json({ error: 'not_connected' }, { status: 401 });
 
   const supabase = getSupabase();
+  await ensureSellerUsername(supabase);
   const startedAt = Date.now();
 
   const members = await syncConversationType(supabase, token, 'FROM_MEMBERS', startedAt);
