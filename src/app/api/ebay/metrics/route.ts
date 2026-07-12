@@ -173,7 +173,8 @@ export async function GET(req: NextRequest) {
   // transactions. The Finances API requires an RFC 9421 digital signature.
   let ebayFees: number | null = null;
   let ebayGross: number | null = null;
-  let ebayAdSpend: number | null = null;   // Promoted Listings fees (a subset of ebayFees)
+  let ebayAdSpend: number | null = null;   // total Promoted Listings spend (SALE lines + NON_SALE_CHARGE)
+  let ebayAdCharges = 0;                   // the NON_SALE_CHARGE portion — not in ebayFees, so net subtracts it
   let ebayOrderCount: number | null = null;
   let financesAvailable = false;
   let financesNeedsSignature = false;
@@ -185,7 +186,8 @@ export async function GET(req: NextRequest) {
       let offset = 0;
       let feeSum = 0;         // sum of totalFeeAmount = selling fees
       let grossSum = 0;       // sum of totalFeeBasisAmount = gross sale value
-      let adFeeSum = 0;       // Promoted Listings ad fees, from the per-line fee breakdown
+      let adFeeSum = 0;       // ad fees on SALE lines (already included in feeSum)
+      let adChargeSum = 0;    // ad fees billed as NON_SALE_CHARGE (NOT in feeSum)
       const saleOrderIds = new Set<string>();
       let total = Infinity;
       for (let page = 0; offset < total && page < 20; page++) {
@@ -227,10 +229,42 @@ export async function GET(req: NextRequest) {
         offset += limit;
         if (txns.length < limit) break;
       }
+      // Promoted Listings fees are mostly billed as separate NON_SALE_CHARGE
+      // transactions (feeType AD_FEE), not on the SALE lines — include those.
+      try {
+        const nscFilter = `transactionType:{NON_SALE_CHARGE},transactionDate:[${today.start}..${today.end}]`;
+        let nscOffset = 0;
+        let nscTotal = Infinity;
+        for (let page = 0; nscOffset < nscTotal && page < 20; page++) {
+          const url = `${FINANCES_BASE}/transaction?filter=${encodeURIComponent(nscFilter)}&limit=${limit}&offset=${nscOffset}`;
+          const sig = await signEbayRequest({ method: 'GET', url });
+          const fr = await fetch(url, {
+            headers: { Authorization: `Bearer ${finToken}`, 'X-EBAY-C-MARKETPLACE-ID': 'EBAY_GB', 'Content-Type': 'application/json', ...sig },
+          });
+          if (!fr.ok) { if (debug) debugRaw.nonSaleChargeError = { status: fr.status, body: (await fr.text()).slice(0, 400) }; break; }
+          const d = await fr.json() as {
+            total?: number;
+            transactions?: { feeType?: string; bookingEntry?: string; amount?: { value?: string | number } }[];
+          };
+          if (debug && page === 0) debugRaw.nonSaleChargeSample = { total: d.total, first: d.transactions?.[0] };
+          const txns = d.transactions ?? [];
+          for (const t of txns) {
+            if (!/ad|promot/i.test(t.feeType ?? '')) continue;
+            const v = Number(t.amount?.value ?? 0) || 0;
+            // DEBITs are charges; CREDITs are ad-fee refunds/adjustments.
+            adChargeSum += t.bookingEntry === 'CREDIT' ? -v : v;
+          }
+          nscTotal = d.total ?? txns.length;
+          nscOffset += limit;
+          if (txns.length < limit) break;
+        }
+      } catch (e) { console.warn('[eBay metrics] non-sale-charge fetch error', e); if (debug) debugRaw.nonSaleChargeException = String(e); }
+
       if (financesAvailable) {
         ebayFees = Math.round(feeSum * 100) / 100;
         ebayGross = Math.round(grossSum * 100) / 100;
-        ebayAdSpend = Math.round(adFeeSum * 100) / 100;
+        ebayAdCharges = Math.round(adChargeSum * 100) / 100;
+        ebayAdSpend = Math.round((adFeeSum + adChargeSum) * 100) / 100;
         ebayOrderCount = saleOrderIds.size;
       }
     } catch (e) { console.warn('[eBay metrics] finances fetch error', e); if (debug) debugRaw.financesException = String(e); }
@@ -244,8 +278,10 @@ export async function GET(req: NextRequest) {
   // back to our orders table.
   const displayGross = ebayGross != null ? ebayGross : db.grossSale;
   const displayOrders = ebayOrderCount != null ? ebayOrderCount : db.totalOrders;
+  // ebayAdCharges (NON_SALE_CHARGE ad fees) aren't inside ebayFees, so subtract
+  // them separately; SALE-line ad fees are already part of ebayFees.
   const netPayout = ebayFees != null
-    ? Math.round((displayGross - db.refundsIssued - ebayFees) * 100) / 100
+    ? Math.round((displayGross - db.refundsIssued - ebayFees - ebayAdCharges) * 100) / 100
     : db.netEstimate;
   const salesSource = financesAvailable ? 'ebay' : 'local';
 

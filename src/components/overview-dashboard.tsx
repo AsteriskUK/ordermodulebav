@@ -240,8 +240,8 @@ export function OverviewDashboard() {
               <Stat label="Total Orders" value={ebay.totalOrders.toLocaleString()} icon={ShoppingCart} tone="blue" />
               <Stat label="Refunds Issued" value={money(ebay.refundsIssued)} icon={RotateCcw} tone="red" />
               <Stat label="eBay Selling Cost" value={ebay.ebayFees != null ? money(ebay.ebayFees) : '—'} sub={ebay.ebayFees == null ? (ebay.financesNeedsSignature ? 'needs API signature' : 'unavailable') : 'fees'} icon={PoundSterling} tone="amber" />
-              <Stat label="Ad Spend" value={ebay.ebayAdSpend != null ? money(ebay.ebayAdSpend) : '—'} sub={ebay.ebayAdSpend == null ? 'unavailable' : 'Promoted Listings (incl. in fees)'} icon={Megaphone} tone="amber" />
-              <Stat label="Net Payout" value={money(ebay.netPayout)} sub={ebay.financesAvailable ? 'gross − refunds − fees' : 'gross − refunds (est.)'} icon={PoundSterling} tone="green" />
+              <Stat label="Ad Spend" value={ebay.ebayAdSpend != null ? money(ebay.ebayAdSpend) : '—'} sub={ebay.ebayAdSpend == null ? 'unavailable' : 'Promoted Listings'} icon={Megaphone} tone="amber" />
+              <Stat label="Net Payout" value={money(ebay.netPayout)} sub={ebay.financesAvailable ? 'gross − refunds − fees − ads' : 'gross − refunds (est.)'} icon={PoundSterling} tone="green" />
             </div>
           </div>
 
