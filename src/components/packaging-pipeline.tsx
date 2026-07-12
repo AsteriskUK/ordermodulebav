@@ -89,6 +89,7 @@ export function PackagingPipeline() {
   const bulkUpdateStatus = useOrderStore((s) => s.bulkUpdateStatus);
   const softCancelOrder = useOrderStore((s) => s.softCancelOrder);
   const acquireAssemblyLock = useOrderStore((s) => s.acquireAssemblyLock);
+  const releaseAssemblyLock = useOrderStore((s) => s.releaseAssemblyLock);
   const setOrderCleaned = useOrderStore((s) => s.setOrderCleaned);
   const setOrderVinylApplied = useOrderStore((s) => s.setOrderVinylApplied);
   const builds = useOrderStore((s) => s.builds);
@@ -499,23 +500,18 @@ export function PackagingPipeline() {
                       <div
                         key={order.id}
                         onClick={() => {
-                          // Pending / Assembling stage → open the full-screen parts/build picker.
-                          // Lock it to this assembler so two people don't build the same order.
-                          if (s.stage === 'pending' || s.stage === 'assembling') {
+                          // Only ASSEMBLING orders open the full build screen — and only for the
+                          // user who holds the lock (or an admin). Pending orders never open it;
+                          // they're claimed via the Start button, which moves them to Assembling.
+                          if (s.stage === 'assembling') {
                             const holder = assemblyLockHolder(order);
                             if (holder && holder.id !== currentUserId && !isAdmin) {
-                              toast.warning(`Being assembled by ${holder.name ?? 'another user'}`);
+                              toast.warning(`Locked by ${holder.name ?? 'another user'} — ask an admin to release it`);
                               return;
                             }
                             if (!acquireAssemblyLock(order.id, isAdmin)) {
-                              toast.warning('Someone else just started this build');
+                              toast.warning('Someone else just claimed this order');
                               return;
-                            }
-                            // Picking a pending order claims it into the assembling queue: it
-                            // leaves everyone else's Pending list and shows as locked to this
-                            // user in Assembling, so no one else can pick it.
-                            if (s.stage === 'pending') {
-                              updateOrderStatus(order.id, 'assembling');
                             }
                             setAssemblyOrderId(order.id);
                             return;
@@ -658,6 +654,29 @@ export function PackagingPipeline() {
                                   })()
                                 ) : (
                                   (() => {
+                                    const isPending = s.stage === 'pending';
+                                    // Pending → Start: claim (lock) + move to Assembling + open the
+                                    // build screen. This is the only way an order enters assembly.
+                                    if (isPending) {
+                                      const holder = assemblyLockHolder(order);
+                                      const lockedByOther = holder && holder.id !== currentUserId && !isAdmin;
+                                      return (
+                                        <Button
+                                          size="sm"
+                                          disabled={!!lockedByOther}
+                                          className="h-6 text-xs px-2 bg-lime-600 hover:bg-lime-700 disabled:opacity-50"
+                                          title={lockedByOther ? `Claimed by ${holder?.name ?? 'another user'}` : undefined}
+                                          onClick={() => {
+                                            if (!acquireAssemblyLock(order.id, isAdmin)) { toast.warning('Someone else just claimed this order'); return; }
+                                            updateOrderStatus(order.id, 'assembling');
+                                            setAssemblyOrderId(order.id);
+                                          }}
+                                        >
+                                          <Wrench className="h-3 w-3 mr-1" />
+                                          Start
+                                        </Button>
+                                      );
+                                    }
                                     const isChecking = s.stage === 'checking';
                                     const isAssembling = s.stage === 'assembling';
                                     const needsCleaning = isChecking && !order.cleanedAt;
@@ -673,6 +692,8 @@ export function PackagingPipeline() {
                                           if (needsCleaning) setOrderCleaned(order.id, true);
                                           if (needsVinyl) setOrderVinylApplied(order.id, true);
                                           moveToNext(order.id, next);
+                                          // Leaving assembling for checking finishes the claim → free the lock.
+                                          if (isAssembling && next === 'checking') releaseAssemblyLock(order.id);
                                         }}
                                       >
                                         <CheckCircle className="h-3 w-3 mr-1" />
@@ -686,10 +707,27 @@ export function PackagingPipeline() {
                                     size="sm"
                                     variant="outline"
                                     className="h-6 text-xs px-2 text-slate-600"
-                                    onClick={() => moveToPrev(order.id, s.prevStage!)}
+                                    onClick={() => {
+                                      // Sending an assembling order back to pending frees its lock.
+                                      if (s.stage === 'assembling') releaseAssemblyLock(order.id);
+                                      moveToPrev(order.id, s.prevStage!);
+                                    }}
                                   >
                                     <Undo2 className="h-3 w-3 mr-1" />
                                     Back
+                                  </Button>
+                                )}
+                                {/* Admin can force-release a lock so another user can take over. */}
+                                {s.stage === 'assembling' && isAdmin && assemblyLockHolder(order) && (
+                                  <Button
+                                    size="sm"
+                                    variant="outline"
+                                    className="h-6 text-xs px-2 text-amber-700 border-amber-300 hover:bg-amber-50"
+                                    onClick={() => { releaseAssemblyLock(order.id); toast.success(`Lock released — ${assemblyLockHolder(order)?.name ?? ''}`); }}
+                                    title="Release the assembly lock"
+                                  >
+                                    <Lock className="h-3 w-3 mr-1" />
+                                    Release
                                   </Button>
                                 )}
                                 <Button

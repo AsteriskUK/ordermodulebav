@@ -35,14 +35,14 @@ export function AssemblyBuilder({ order, onClose }: { order: Order; onClose: () 
   const recordBuildSwap = useOrderStore((s) => s.recordBuildSwap);
   const removeBuildSwap = useOrderStore((s) => s.removeBuildSwap);
   const attachSecurityBarcode = useOrderStore((s) => s.attachSecurityBarcode);
-  const releaseAssemblyLock = useOrderStore((s) => s.releaseAssemblyLock);
   const setOrderPicked = useOrderStore((s) => s.setOrderPicked);
   const setOrderVinylApplied = useOrderStore((s) => s.setOrderVinylApplied);
   const allOrders = useOrderStore((s) => s.orders);
   const liveOrder = allOrders.find((o) => o.id === order.id) ?? order;
 
-  // Release the assembly lock when this builder closes (whether completed or not).
-  useEffect(() => () => releaseAssemblyLock(order.id), [order.id, releaseAssemblyLock]);
+  // The assembly lock is intentionally NOT released when the builder closes — the
+  // order stays claimed by this user (so no one else can pick it up) until it moves
+  // to Checking, is sent Back to Pending, an admin releases it, or the lock expires.
   // Security barcode scanned onto the finished build (used at packing to find it).
   const [barcode, setBarcode] = useState(liveOrder.securityBarcode ?? '');
   // Items that need no parts/config (e.g. a monitor) can be completed with an
