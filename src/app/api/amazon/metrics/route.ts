@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
-import { isAmazonConfigured, fetchAmazonFinanceSummary } from '@/lib/amazon-client';
+import { isAmazonConfigured, fetchAmazonFinanceSummary, fetchLatestSettlementAdSpend, AmazonSettlementAdSpend } from '@/lib/amazon-client';
 
 // GET /api/amazon/metrics?date=YYYY-MM-DD
 // Amazon Overview metrics: gross / orders / refunds / fees / net for the day.
@@ -9,6 +9,34 @@ import { isAmazonConfigured, fetchAmazonFinanceSummary } from '@/lib/amazon-clie
 
 function getSupabase() {
   return createClient(process.env.NEXT_PUBLIC_SUPABASE_URL!, process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!);
+}
+
+// Ad spend comes from the latest settlement report — a large file that changes
+// only per disbursement (~2 weeks), so cache the parsed result for 12 hours.
+const AD_SPEND_CACHE_KEY = 'amazon_settlement_adspend';
+const AD_SPEND_TTL_MS = 12 * 60 * 60 * 1000;
+
+async function getSettlementAdSpendCached(force = false): Promise<AmazonSettlementAdSpend | null> {
+  const supabase = getSupabase();
+  if (!force) {
+    const { data } = await supabase.from('app_settings').select('value').eq('key', AD_SPEND_CACHE_KEY).single();
+    if (data?.value) {
+      try {
+        const cached = JSON.parse(data.value) as { fetchedAt?: number; result?: AmazonSettlementAdSpend | null };
+        if (cached.fetchedAt && Date.now() - cached.fetchedAt < AD_SPEND_TTL_MS) return cached.result ?? null;
+      } catch { /* refetch */ }
+    }
+  }
+  const result = await fetchLatestSettlementAdSpend().catch((e) => {
+    console.warn('[Amazon metrics] settlement ad spend fetch failed:', e);
+    return null;
+  });
+  await supabase.from('app_settings').upsert({
+    key: AD_SPEND_CACHE_KEY,
+    value: JSON.stringify({ fetchedAt: Date.now(), result }),
+    updated_at: new Date().toISOString(),
+  });
+  return result;
 }
 
 function dayRange(dateStr: string) {
@@ -48,12 +76,22 @@ export async function GET(req: NextRequest) {
   };
 
   if (!isAmazonConfigured()) {
-    return NextResponse.json({ ...base, hint: 'Amazon SP-API credentials not configured.' });
+    return NextResponse.json({ ...base, adSpend: null, adSpendPeriod: null, hint: 'Amazon SP-API credentials not configured.' });
   }
+
+  // Lagging per-settlement total (not tied to the picked date) — see cache note.
+  const forceAds = new URL(req.url).searchParams.get('refreshAds') === '1';
+  const settlement = await getSettlementAdSpendCached(forceAds);
+  const adFields = {
+    adSpend: settlement?.adSpend ?? null,
+    adSpendPeriod: settlement?.periodStart
+      ? `${settlement.periodStart.slice(0, 10)} → ${settlement.periodEnd?.slice(0, 10) ?? '…'}`
+      : null,
+  };
 
   // Nothing to post yet for a future/just-started day.
   if (Date.parse(cappedEnd) <= Date.parse(start)) {
-    return NextResponse.json(base);
+    return NextResponse.json({ ...base, ...adFields });
   }
 
   try {
@@ -61,6 +99,7 @@ export async function GET(req: NextRequest) {
     const netPayout = Math.round((fin.gross - fin.fees - fin.refunds - fin.promotions) * 100) / 100;
     return NextResponse.json({
       date: dateStr,
+      ...adFields,
       // Prefer Finances gross/orders when it returned data; else keep local.
       grossSale: fin.orderCount > 0 ? fin.gross : localGross,
       totalOrders: fin.orderCount > 0 ? fin.orderCount : localOrders.length,
@@ -81,6 +120,7 @@ export async function GET(req: NextRequest) {
     const forbidden = /403|unauthor|access to requested resource is denied|role/i.test(msg);
     return NextResponse.json({
       ...base,
+      ...adFields,
       hint: forbidden
         ? 'Amazon fees & net need the "Finance and Accounting" role on the SP-API app — re-authorise with that role granted.'
         : `Amazon finances unavailable: ${msg}`,

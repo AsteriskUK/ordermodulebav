@@ -340,6 +340,92 @@ export function parseReturnsReport(tsv: string): AmazonReturn[] {
   return out;
 }
 
+// ─── Ad spend (Settlement report) ─────────────────────────────────────────────
+// PPC spend isn't in SP-API's order/finance data (that needs the separate
+// Advertising API). The closest SP-API source is the settlement report, where ad
+// spend appears as "Cost of Advertising" lines. Settlement reports are generated
+// by Amazon automatically per disbursement (~2 weeks) and can only be listed,
+// not requested — so this is a lagging per-settlement total, not a daily figure.
+
+const SETTLEMENT_REPORT_TYPE = 'GET_V2_SETTLEMENT_REPORT_DATA_FLAT_FILE';
+
+export interface AmazonSettlementAdSpend {
+  adSpend: number;          // total advertising cost in the settlement, positive
+  currency: string;
+  periodStart?: string;     // raw settlement-start-date from the report
+  periodEnd?: string;
+  settlementId?: string;
+}
+
+export async function fetchLatestSettlementAdSpend(): Promise<AmazonSettlementAdSpend | null> {
+  const creds = getAmazonCredentials()!;
+  const token = await getAmazonAccessToken();
+
+  // Newest settlement reports first; take the most recent completed one.
+  const list = await spGet<{ reports?: { reportId?: string; processingStatus?: string; reportDocumentId?: string }[] }>(
+    `${REPORTS_BASE}/reports`,
+    { reportTypes: SETTLEMENT_REPORT_TYPE, pageSize: '10' },
+    token,
+    creds.endpoint,
+  );
+  const done = (list.reports ?? []).find((r) => r.processingStatus === 'DONE' && r.reportDocumentId);
+  if (!done?.reportDocumentId) return null;
+
+  const text = await getReportDocumentText(done.reportDocumentId);
+  const lines = text.split(/\r?\n/).filter((l) => l.trim().length > 0);
+  if (lines.length < 2) return null;
+
+  // The settlement flat file is a wide, fixed schema (no single "amount" column).
+  // Advertising charges land on rows where item-related-fee-type = "Cost of
+  // Advertising" (amount in item-related-fee-amount), and occasionally in the
+  // other-fee columns. Key by header name so column shifts don't break us.
+  const norm = (s: string) => s.trim().toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
+  const header = lines[0].split('\t').map(norm);
+  const idx = (name: string) => header.indexOf(name);
+  const col = {
+    itemFeeType: idx('item related fee type'),
+    itemFeeAmount: idx('item related fee amount'),
+    otherFeeReason: idx('other fee reason description'),
+    otherFeeAmount: idx('other fee amount'),
+    currency: idx('currency'),
+    settlementId: idx('settlement id'),
+    periodStart: idx('settlement start date'),
+    periodEnd: idx('settlement end date'),
+  };
+  if (col.itemFeeAmount === -1 && col.otherFeeAmount === -1) return null;
+
+  const cell = (parts: string[], i: number) => (i >= 0 && i < parts.length ? parts[i].trim() : '');
+  let adSpend = 0;
+  let currency = 'GBP';
+  let periodStart: string | undefined, periodEnd: string | undefined, settlementId: string | undefined;
+  for (let i = 1; i < lines.length; i++) {
+    const p = lines[i].split('\t');
+    // The summary row (first data row) carries the settlement period + currency.
+    if (!periodStart && cell(p, col.periodStart)) {
+      periodStart = cell(p, col.periodStart);
+      periodEnd = cell(p, col.periodEnd) || undefined;
+      settlementId = cell(p, col.settlementId) || undefined;
+    }
+    if (!currency && cell(p, col.currency)) currency = cell(p, col.currency);
+    // Ad cost is negative in the report (a charge).
+    if (/advertis/i.test(cell(p, col.itemFeeType))) {
+      const v = parseFloat(cell(p, col.itemFeeAmount));
+      if (!Number.isNaN(v)) adSpend += v;
+    }
+    if (/advertis/i.test(cell(p, col.otherFeeReason))) {
+      const v = parseFloat(cell(p, col.otherFeeAmount));
+      if (!Number.isNaN(v)) adSpend += v;
+    }
+  }
+  return {
+    adSpend: Math.abs(Math.round(adSpend * 100) / 100),
+    currency: currency || 'GBP',
+    periodStart,
+    periodEnd,
+    settlementId,
+  };
+}
+
 // ─── Finances (fees, refunds, net) ────────────────────────────────────────────
 // SP-API Finances v0. financialEvents are keyed by *posted* date (when the money
 // moved), analogous to eBay's transactionDate. We aggregate the day's shipment and

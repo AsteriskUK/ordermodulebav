@@ -52,6 +52,8 @@ interface AmazonMetrics {
   currency: string;
   salesSource: 'amazon' | 'local';
   hint: string | null;
+  adSpend: number | null;
+  adSpendPeriod: string | null;
 }
 
 const PLATFORM_TABS = [
@@ -290,16 +292,29 @@ export function OverviewDashboard() {
             </div>
           </div>
 
+          {/* Advertising — lagging per-settlement total, not tied to the picked date */}
+          <div>
+            <h3 className="text-xs font-semibold text-slate-500 uppercase tracking-wide mb-2">Advertising</h3>
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+              <Stat
+                label="Ad Spend (last settlement)"
+                value={amazon.adSpend != null ? money(amazon.adSpend, amazon.currency) : '—'}
+                sub={amazon.adSpend != null ? (amazon.adSpendPeriod ?? 'latest settlement') : 'no settlement report yet'}
+                icon={Megaphone}
+                tone="amber"
+              />
+            </div>
+            <p className="text-xs text-slate-400 mt-2">
+              Total &quot;Cost of Advertising&quot; from Amazon&apos;s latest settlement (~2-week period). Daily PPC breakdown needs the Amazon Advertising API.
+            </p>
+          </div>
+
           {amazon.hint && (
             <div className="flex items-start gap-2 text-xs bg-amber-50 border border-amber-200 text-amber-700 rounded-lg px-3 py-2">
               <AlertTriangle className="h-4 w-4 shrink-0 mt-0.5" />
               <span>{amazon.hint}</span>
             </div>
           )}
-
-          <p className="text-xs text-slate-400">
-            Ad spend (PPC) isn&apos;t available in SP-API — it needs the Amazon Advertising API, or the Settlement report for total spend.
-          </p>
         </>
       )}
 
