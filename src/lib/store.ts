@@ -1,7 +1,7 @@
 import { create } from 'zustand';
 import { persist, createJSONStorage } from 'zustand/middleware';
 import { get, set as idbSet, del } from 'idb-keyval';
-import { Order, OrderNote, OrderStatus, Batch, DeliveryCarrier, DeliveryType, AppUser, EodEvent, ReturnRecord, ReplacementItem, MissingItemRecord, Department, AttendanceRecord, LeaveRequest, LeaveBalance, TicketRecord, TicketActivity, InventoryPart, StockUnit, StockLevel, GoodsReceipt, Build, BuildSwap, AccessConfig } from './types';
+import { Order, OrderNote, OrderStatus, Batch, DeliveryCarrier, DeliveryType, AppUser, EodEvent, ReturnRecord, ReplacementItem, MissingItemRecord, Department, AttendanceRecord, LeaveRequest, LeaveBalance, TicketRecord, TicketActivity, InventoryPart, StockUnit, StockLevel, GoodsReceipt, Build, BuildLine, BuildSwap, AccessConfig } from './types';
 import { syncAttendance, syncLeaveRequest, syncLeaveBalance, syncOrder, syncBatch, syncUser, deleteUserFromSupabase, syncReturn, syncTicket, deleteTicketFromSupabase, syncMissingItem, syncInventoryPart, syncStockUnit, syncStockLevel, syncGoodsReceipt, syncBuild, softDeleteOrderInSupabase, hardDeleteOrderFromSupabase } from './supabase-store';
 import { buildSku, INVENTORY_CATEGORY_MAP } from './inventory-config';
 import { allPackItemsConfirmed } from './inventory-build';
@@ -130,6 +130,7 @@ interface OrderStore {
   saveBuild: (build: Build) => void;          // create/update + reserve serialized units
   cancelBuild: (buildId: string) => void;     // release the hold
   consumeBuild: (buildId: string) => void;    // deduct from stock (negative allowed)
+  pickOrderComponents: (orderId: string, specs: { category: string; label: string; attributes: Record<string, string | number>; quantity: number }[]) => void;  // order picker: build lines from tapped components, deduct stock, mark picked
   recordBuildSwap: (orderId: string, swap: BuildSwap) => void;   // out→stock, in→consumed
   removeBuildSwap: (orderId: string, swapId: string) => void;    // reverse a recorded swap
   // HR Actions
@@ -1086,6 +1087,57 @@ export const useOrderStore = create<OrderStore>()(
         syncBuild(consumed).catch(console.error);
         touchedLevels.forEach((l) => syncStockLevel(l).catch(console.error));
         get().stockUnits.filter((u) => consumedUnitIds.includes(u.id)).forEach((u) => syncStockUnit(u).catch(console.error));
+      },
+      pickOrderComponents: (orderId, specs) => {
+        const state = get();
+        // Idempotent: if this order already has a consumed pick, just (re)mark it
+        // picked — never deduct the same order's components twice.
+        if (state.builds.some((b) => b.orderId === orderId && b.status === 'consumed')) {
+          get().setOrderPicked(orderId, true);
+          return;
+        }
+        const now = new Date().toISOString();
+        const user = state.users.find((u) => u.id === state.currentUserId);
+
+        // Resolve each tapped component to an inventory part by SKU (find-or-create),
+        // so picking deducts and a later Goods Inward of the same spec balances it.
+        const parts = [...state.inventoryParts];
+        const newParts: InventoryPart[] = [];
+        const lines: BuildLine[] = [];
+        for (const spec of specs) {
+          if (!spec.quantity || spec.quantity < 1) continue;
+          const sku = buildSku(spec.category, spec.attributes);
+          let part = parts.find((p) => p.sku === sku && p.category === spec.category);
+          if (!part) {
+            part = {
+              id: generateUUID(), sku, name: spec.label, category: spec.category,
+              tracking: 'bulk', attributes: spec.attributes, createdAt: now, updatedAt: now,
+            };
+            parts.push(part);
+            newParts.push(part);
+          }
+          lines.push({ partId: part.id, category: spec.category, description: spec.label, quantity: spec.quantity });
+        }
+
+        if (lines.length === 0) { get().setOrderPicked(orderId, true); return; }
+
+        const build: Build = {
+          id: generateUUID(), orderId, status: 'reserved', lines,
+          createdById: user?.id, createdByName: user?.name,
+          reservedAt: now, createdAt: now, updatedAt: now,
+        };
+        set((s) => ({
+          inventoryParts: [...s.inventoryParts, ...newParts],
+          // Drop any prior non-consumed build for this order, keep the new one.
+          builds: [...s.builds.filter((b) => b.orderId !== orderId || b.status === 'consumed'), build],
+        }));
+        get().setOrderPicked(orderId, true);
+        // Persist the new parts BEFORE deducting: consumeBuild syncs stock_levels,
+        // whose FK references inventory_parts, so the parts must exist in Supabase
+        // first or the level insert is rejected (local negative stock is unaffected).
+        Promise.all(newParts.map((p) => syncInventoryPart(p)))
+          .catch((e) => console.error('[pick] part sync failed', e))
+          .finally(() => get().consumeBuild(build.id));   // deduct now — negative allowed
       },
       createReplacementOrder: (returnId, overrides) => {
         const state = get();
