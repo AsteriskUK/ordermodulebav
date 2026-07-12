@@ -188,6 +188,7 @@ export async function fetchOrders(): Promise<Order[]> {
     paidOnDate: o.paid_on_date,
     postByDate: o.post_by_date,
     dispatchedOnDate: o.dispatched_on_date,
+    maxEstimatedDeliveryDate: o.metadata?.max_estimated_delivery_date,
     importedAt: o.imported_at,
     returnId: o.return_id,
     labelPrintedAt: o.label_printed_at,
@@ -301,6 +302,7 @@ export async function syncOrder(order: Order): Promise<void> {
         buyer_county: order.buyerCounty,
         buyer_postcode: order.buyerPostcode,
         buyer_country: order.buyerCountry,
+        max_estimated_delivery_date: order.maxEstimatedDeliveryDate,
       },
       // label_printed_at: order.labelPrintedAt, // TODO: Add column to Supabase
       // label_carrier: order.labelCarrier, // TODO: Add column to Supabase
@@ -323,16 +325,18 @@ export async function syncOrder(order: Order): Promise<void> {
       console.error('Error deleting order notes before sync:', JSON.stringify(deleteError, null, 2));
     }
 
+    // Upsert (not insert) so concurrent syncOrder calls for the same order can't
+    // collide on order_notes_pkey — a re-sync of the same note just updates it.
     const { error: notesError } = await supabase
       .from('order_notes')
-      .insert(order.notes.map((n) => ({
+      .upsert(order.notes.map((n) => ({
         id: isValidUUID(n.id) ? n.id : undefined,
         order_id: order.id,
         author_id: n.authorId && isValidUUID(n.authorId) ? n.authorId : undefined,
         author_name: n.authorName,
         text: n.text,
         created_at: n.createdAt,
-      })));
+      })), { onConflict: 'id' });
     if (notesError) {
       console.error('Error syncing order notes:', JSON.stringify(notesError, null, 2));
     }
