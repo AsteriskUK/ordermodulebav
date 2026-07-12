@@ -46,7 +46,9 @@ export function OrderDetailDialog({ order, onClose }: Props) {
   const addOrderNote = useOrderStore((s) => s.addOrderNote);
   const deleteOrderNote = useOrderStore((s) => s.deleteOrderNote);
   const currentUser = useOrderStore((s) => s.users.find(u => u.id === s.currentUserId));
-  const liveOrder = useOrderStore((s) => s.orders.find(o => o.id === order.id)) ?? order;
+  // order?.id: callers have passed undefined here (e.g. a return whose order
+  // isn't in the local store), which crashed inside the selector.
+  const liveOrder = useOrderStore((s) => s.orders.find(o => o.id === order?.id)) ?? order;
 
   const isCommsTeam = currentUser?.role === 'comms' || currentUser?.departments?.includes('comms');
 

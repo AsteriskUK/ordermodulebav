@@ -705,7 +705,16 @@ export function ReturnsManager() {
                             size="sm"
                             variant="outline"
                             className="h-6 text-xs px-2 text-blue-600 border-blue-300 hover:bg-blue-50"
-                            onClick={() => setViewOrderId(ret.orderId)}
+                            onClick={() => {
+                              // Returns can reference orders that aren't in the local
+                              // store yet (auto-created from platform syncs while the
+                              // orders backfill is still running).
+                              if (!orders.some((o) => o.id === ret.orderId)) {
+                                toast.info('Order not synced locally yet — try again after the next order sync.');
+                                return;
+                              }
+                              setViewOrderId(ret.orderId);
+                            }}
                           >
                             <Eye className="h-3 w-3 mr-1" />Order
                           </Button>
@@ -1146,12 +1155,15 @@ export function ReturnsManager() {
       )}
 
       {/* Linked original order view */}
-      {viewOrderId && (
-        <OrderDetailDialog
-          order={orders.find((o) => o.id === viewOrderId)!}
-          onClose={() => setViewOrderId(null)}
-        />
-      )}
+      {(() => {
+        const viewOrder = viewOrderId ? orders.find((o) => o.id === viewOrderId) : undefined;
+        return viewOrder ? (
+          <OrderDetailDialog
+            order={viewOrder}
+            onClose={() => setViewOrderId(null)}
+          />
+        ) : null;
+      })()}
     </div>
   );
 }
