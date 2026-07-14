@@ -1,0 +1,33 @@
+# Deploy in Portainer → Stacks → Add stack.
+#   - If Portainer has this repo/folder: leave "build: ." (Portainer builds it).
+#   - Or prebuild the image elsewhere and replace "build: ." with your image ref.
+#
+# After it's up:
+#   1. Open the CUPS admin UI at http://<host>:631  (login with CUPS_ADMIN_USER/PASSWORD).
+#   2. Administration → Add Printer → add each network printer by IP and NAME them
+#      exactly:  invoice , fedex , dpd
+#        - Label printers: device "AppSocket/HP JetDirect", URI socket://<printer-ip>:9100, make/model "Raw Queue (en)".
+#        - Invoice laser:  IPP  ipp://<printer-ip>/ipp/print  (driverless), or pick its Gutenprint driver.
+#   3. Put an HTTPS reverse proxy (e.g. Synology) in front of port 17777 with a real
+#      cert, so the HTTPS web app can call it without a mixed-content block.
+services:
+  print-agent:
+    build: .
+    image: warehouse-print-agent:latest
+    container_name: print-agent
+    restart: unless-stopped
+    ports:
+      - "17777:17777"   # print-agent API — reverse-proxy this behind HTTPS
+      - "631:631"       # CUPS admin web UI — add the 3 printers here
+    environment:
+      # Shared secret — set the SAME value in the app (Settings → Printers → Token).
+      PRINT_AGENT_TOKEN: "change-me-to-a-long-random-secret"
+      # Login for the CUPS admin web UI on :631.
+      CUPS_ADMIN_USER: "print"
+      CUPS_ADMIN_PASSWORD: "change-me"
+    volumes:
+      # Persist printer definitions across restarts/redeploys.
+      - cups-config:/etc/cups
+
+volumes:
+  cups-config:

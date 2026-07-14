@@ -55,7 +55,9 @@ async function htmlToPdf(html) {
   } catch {
     throw new Error('puppeteer not installed — run `npm install` in print-agent/ to enable invoice (HTML) printing');
   }
-  const browser = await puppeteer.launch({ headless: 'new', args: ['--no-sandbox'] });
+  // --disable-dev-shm-usage: containers default to a tiny /dev/shm, which crashes
+  // Chromium on larger invoices; this makes it use /tmp instead.
+  const browser = await puppeteer.launch({ headless: 'new', args: ['--no-sandbox', '--disable-dev-shm-usage'] });
   try {
     const page = await browser.newPage();
     await page.setContent(html, { waitUntil: 'networkidle0' });
