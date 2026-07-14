@@ -508,8 +508,12 @@ export function NotesFeed() {
       if (!oid) return null;
       return orders.find((o) => !o.deletedAt && (o.salesRecordNumber === oid || o.orderNumber === oid || o.id === `backmarket-${oid}`)) ?? null;
     }
-    return orders.find((o) => !o.deletedAt && o.itemNumber && o.itemNumber === activeConvo.item_id && o.buyerUsername === activeConvo.buyer_username)
-      ?? orders.find((o) => !o.deletedAt && o.buyerUsername === activeConvo.buyer_username) ?? null;
+    const buyer = (activeConvo.buyer_username || '').toLowerCase();
+    const oid = activeConvo.order_id;
+    return orders.find((o) => !o.deletedAt && o.itemNumber && o.itemNumber === activeConvo.item_id && (o.buyerUsername || '').toLowerCase() === buyer)
+      ?? (buyer ? orders.find((o) => !o.deletedAt && (o.buyerUsername || '').toLowerCase() === buyer) : undefined)
+      ?? (oid ? orders.find((o) => !o.deletedAt && (o.salesRecordNumber === oid || o.orderNumber === oid)) : undefined)
+      ?? null;
   }, [activeConvo, orders]);
 
   const activeIsBm = activeConvo?.conversation_type === 'BACKMARKET';
