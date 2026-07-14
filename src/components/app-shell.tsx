@@ -332,7 +332,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
                     <p className="text-xs font-semibold text-slate-700">{currentUser.name}</p>
                     <p className="text-[10px] text-slate-400 capitalize">{currentUser.role}</p>
                   </div>
-                  <div className="px-2 py-1.5">
+                  <div className="px-2 py-1.5 max-h-64 overflow-y-auto">
                     <p className="text-[10px] font-semibold text-slate-400 uppercase tracking-wide px-1 mb-1">Switch user</p>
                     {users.map((u) => (
                       <button key={u.id} onClick={() => { setCurrentUser(u.id); setMenuOpen(false); }}

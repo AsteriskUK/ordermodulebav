@@ -162,10 +162,23 @@ export function PackagingPipeline() {
     () => searchedOrders.filter((o) => o.status === 'pending'),
     [searchedOrders]
   );
+  // An assembling order claimed by another user is hidden from everyone else
+  // (admins still see all) — only the holder works on it until it's freed.
   const assemblingOrders = useMemo(
-    () => searchedOrders.filter((o) => o.status === 'assembling'),
-    [searchedOrders]
+    () => searchedOrders.filter((o) => {
+      if (o.status !== 'assembling') return false;
+      if (isAdmin) return true;
+      const holder = assemblyLockHolder(o);
+      return !holder || holder.id === currentUserId;
+    }),
+    [searchedOrders, isAdmin, currentUserId]
   );
+  // How many orders this user currently has claimed (in progress) — capped at 10.
+  const myActiveAssemblyCount = useMemo(
+    () => orders.filter((o) => o.status === 'assembling' && assemblyLockHolder(o)?.id === currentUserId).length,
+    [orders, currentUserId]
+  );
+  const MAX_ACTIVE_PER_USER = 10;
   const checkingOrders = useMemo(
     () => searchedOrders.filter((o) => o.status === 'checking'),
     [searchedOrders]
@@ -667,6 +680,10 @@ export function PackagingPipeline() {
                                           className="h-6 text-xs px-2 bg-lime-600 hover:bg-lime-700 disabled:opacity-50"
                                           title={lockedByOther ? `Claimed by ${holder?.name ?? 'another user'}` : undefined}
                                           onClick={() => {
+                                            if (!isAdmin && myActiveAssemblyCount >= MAX_ACTIVE_PER_USER) {
+                                              toast.warning(`You already have ${MAX_ACTIVE_PER_USER} orders in progress — finish some before starting more`);
+                                              return;
+                                            }
                                             if (!acquireAssemblyLock(order.id, isAdmin)) { toast.warning('Someone else just claimed this order'); return; }
                                             updateOrderStatus(order.id, 'assembling');
                                             setAssemblyOrderId(order.id);

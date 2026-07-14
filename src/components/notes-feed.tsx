@@ -617,6 +617,7 @@ export function NotesFeed() {
         }
         toast.success('Message sent via Amazon');
         setReplyText('');
+        markRead(activeConvo);   // replying clears the unread flag
         await loadAmazonMessages();
         return;
       }
@@ -636,6 +637,7 @@ export function NotesFeed() {
         toast.success('Reply sent');
         setReplyText('');
         setReplyImages([]);
+        markRead(activeConvo);   // replying clears the unread flag
         await loadBmMessages();
         return;
       }
@@ -666,6 +668,7 @@ export function NotesFeed() {
       toast.success('Reply sent');
       setReplyText('');
       setReplyImages([]);
+      markRead(activeConvo);   // replying clears the unread flag
       await loadEbayMessages();
     } catch {
       toast.error('Failed to send reply');
