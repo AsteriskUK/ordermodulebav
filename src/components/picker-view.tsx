@@ -4,30 +4,16 @@ import { useMemo, useState } from 'react';
 import { useOrderStore } from '@/lib/store';
 import { Department, DEPARTMENT_CONFIG, Order } from '@/lib/types';
 import { Button } from '@/components/ui/button';
-import { ListChecks, Check, Undo2, Tag, Minus, ChevronLeft, Cpu, MemoryStick, HardDrive, Boxes } from 'lucide-react';
+import { ListChecks, Check, Undo2, Tag, Minus, Plus, ChevronLeft, Cpu, MemoryStick, HardDrive, Boxes } from 'lucide-react';
+import { swapConfigForCategory, customSwapPreset, SwapPreset, INVENTORY_CATEGORY_MAP } from '@/lib/inventory-config';
 import { toast } from 'sonner';
 
 // Only these order categories are assembled from components. Monitors, networking,
 // etc. ship as-is — the picker just confirms them.
 const NEEDS_COMPONENTS = new Set(['LAPTOP', 'PC-GAMING', 'PC-AIO-MINI']);
 
-// A component the picker adds. Drill categories (cpu/ram/storage) flip to a spec
-// panel; generic ones add on a single tap.
+// A fully-specced component the picker has gathered, with a running count.
 interface PickedSpec { category: string; label: string; attributes: Record<string, string | number>; count: number; }
-
-const CPU_FAMILIES: { label: string; value: string; brand: string }[] = [
-  { label: 'i3', value: 'Core i3', brand: 'Intel' },
-  { label: 'i5', value: 'Core i5', brand: 'Intel' },
-  { label: 'i7', value: 'Core i7', brand: 'Intel' },
-  { label: 'i9', value: 'Core i9', brand: 'Intel' },
-  { label: 'Xeon', value: 'Xeon', brand: 'Intel' },
-  { label: 'Ryzen 5', value: 'Ryzen 5', brand: 'AMD' },
-  { label: 'Ryzen 7', value: 'Ryzen 7', brand: 'AMD' },
-];
-const CPU_GENS = ['2nd', '3rd', '4th', '6th', '7th', '8th', '9th', '10th', '11th', '12th', '13th', '14th'];
-const RAM_CAPS = [4, 8, 16, 32, 64];
-const STORAGE_TYPES = ['SSD', 'HDD', 'NVMe'];
-const STORAGE_CAPS = ['128GB', '256GB', '512GB', '1TB', '2TB'];
 
 // Which component slots each order category needs, in order.
 function slotsFor(cat: string): string[] {
@@ -36,10 +22,16 @@ function slotsFor(cat: string): string[] {
   if (cat === 'PC-GAMING') return ['cpu', 'ram', 'storage', 'gpu', 'motherboard', 'psu', 'case', 'cooler'];
   return [];
 }
-const GENERIC_LABELS: Record<string, string> = { motherboard: 'Motherboard', gpu: 'GPU', psu: 'PSU', case: 'Case', cooler: 'CPU Cooler' };
-const DRILL = new Set(['cpu', 'ram', 'storage']);
 const SLOT_ICON: Record<string, typeof Cpu> = { cpu: Cpu, ram: MemoryStick, storage: HardDrive };
-const SLOT_LABEL: Record<string, string> = { cpu: 'Processor', ram: 'RAM', storage: 'Storage' };
+// Card label — prefer the inventory schema's own label, fall back to the raw key.
+const slotLabel = (slot: string) => INVENTORY_CATEGORY_MAP[slot]?.label ?? slot;
+
+// Merge the picked dimension tile (e.g. 16GB) with the active config tiles
+// (e.g. DDR4 · DIMM) into one labelled spec — mirrors assembly-builder's swap flow.
+function withConfig(base: SwapPreset, config: Record<string, string>): SwapPreset {
+  const extras = Object.values(config).filter(Boolean);
+  return { label: [base.label, ...extras].join(' '), attributes: { ...base.attributes, ...config } };
+}
 
 // Categories a set of departments may pick; null = all (open dept like management).
 function catsForDepts(depts: Department[]): string[] | null {
@@ -56,21 +48,83 @@ function catsForDepts(depts: Department[]): string[] | null {
 const chip = (active: boolean) =>
   `px-2.5 py-1.5 rounded-lg border text-xs font-medium transition-colors ${active ? 'bg-lime-600 text-white border-lime-600' : 'bg-white text-slate-700 border-slate-200 hover:border-lime-400'}`;
 
-// One order's pick card: tap a component tile; Processor/RAM/Storage flip to a
-// spec panel. Picked specs collect below with counters.
+// Drill panel for one component slot: config tiles (e.g. RAM type DDR3/DDR4/DDR5,
+// form factor) set the active spec, then tapping a dimension tile (e.g. 16GB) adds
+// one fully-specced unit. All options come from the inventory schema via
+// swapConfigForCategory, so they never drift from goods-inward / assembly.
+function SlotDrill({ slot, onAdd, onBack }: { slot: string; onAdd: (spec: SwapPreset) => void; onBack: () => void }) {
+  const cfg = swapConfigForCategory(slot);
+  const [config, setConfig] = useState<Record<string, string>>({});
+  const [custom, setCustom] = useState('');
+  const context = Object.values(config).filter(Boolean).join(' · ');
+
+  const commit = (base: SwapPreset) => onAdd(withConfig(base, config));
+
+  return (
+    <div className="mt-3 rounded-lg border border-slate-200 p-2.5">
+      <button onClick={onBack} className="text-xs text-slate-500 hover:text-slate-800 flex items-center gap-1 mb-2">
+        <ChevronLeft className="h-3.5 w-3.5" /> {slotLabel(slot)}{context ? ` · ${context}` : ''} — tap to add
+      </button>
+
+      {/* Secondary spec tiles (type / form factor) — set the context first */}
+      {cfg.configs.map((c) => (
+        <div key={c.key} className="flex flex-wrap items-center gap-1.5 mb-1.5">
+          <span className="text-[11px] text-slate-400 w-20 shrink-0">{c.label}</span>
+          {c.options.map((opt) => {
+            const selected = config[c.key] === opt;
+            return (
+              <button
+                key={opt}
+                onClick={() => setConfig({ ...config, [c.key]: selected ? '' : opt })}
+                className={`text-xs px-2 py-0.5 rounded-md border font-medium transition-colors ${selected ? 'bg-amber-600 text-white border-amber-600' : 'bg-white text-slate-600 border-slate-300 hover:bg-slate-50'}`}
+              >{opt}</button>
+            );
+          })}
+        </div>
+      ))}
+
+      {/* Primary dimension tiles — each tap adds/increments one specced unit */}
+      {cfg.presets.length > 0 && (
+        <div className="flex flex-wrap gap-1.5">
+          {cfg.presets.map((p) => (
+            <button key={p.label} className={chip(false)} onClick={() => commit(p)}>{p.label}</button>
+          ))}
+        </div>
+      )}
+
+      {/* Free-text for odd values not in the presets */}
+      <div className="flex items-center gap-1.5 mt-2">
+        <input
+          value={custom}
+          onChange={(e) => setCustom(e.target.value)}
+          onKeyDown={(e) => { if (e.key === 'Enter' && custom.trim()) { commit(customSwapPreset(slot, custom)); setCustom(''); } }}
+          placeholder={`Custom ${cfg.dimensionLabel.toLowerCase()}…`}
+          className="flex-1 min-w-0 px-2 py-1.5 border border-slate-300 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-lime-500"
+        />
+        <button
+          onClick={() => { if (custom.trim()) { commit(customSwapPreset(slot, custom)); setCustom(''); } }}
+          className="p-1.5 rounded-md border border-slate-300 text-slate-500 hover:bg-slate-50"
+          title="Add custom"
+        ><Plus className="h-4 w-4" /></button>
+      </div>
+    </div>
+  );
+}
+
+// One order's pick card: tap a component tile to open its spec drill; picked specs
+// collect below with +/- counters.
 function PickerCard({ order, onSubmit }: { order: Order; onSubmit: (specs: PickedSpec[]) => void }) {
   const [open, setOpen] = useState<string | null>(null);       // which drill panel is flipped open
   const [picked, setPicked] = useState<Record<string, PickedSpec>>({});
-  const [cpuFamily, setCpuFamily] = useState<typeof CPU_FAMILIES[number] | null>(null);
-  const [storageType, setStorageType] = useState('SSD');
 
   const slots = slotsFor(order.category);
   const total = Object.values(picked).reduce((s, p) => s + p.count, 0);
 
-  const add = (category: string, label: string, attributes: Record<string, string | number>) => {
-    const key = `${category}:${label}`;
-    setPicked((p) => ({ ...p, [key]: { category, label, attributes, count: (p[key]?.count ?? 0) + 1 } }));
+  const add = (category: string, spec: SwapPreset) => {
+    const key = `${category}:${spec.label}`;
+    setPicked((p) => ({ ...p, [key]: { category, label: spec.label, attributes: spec.attributes, count: (p[key]?.count ?? 0) + 1 } }));
   };
+  const inc = (key: string) => setPicked((p) => (p[key] ? { ...p, [key]: { ...p[key], count: p[key].count + 1 } } : p));
   const dec = (key: string) => setPicked((p) => {
     const n = { ...p };
     if (!n[key]) return n;
@@ -97,87 +151,38 @@ function PickerCard({ order, onSubmit }: { order: Order; onSubmit: (specs: Picke
         <p className="text-xs text-amber-800 bg-amber-50 border border-amber-200 rounded px-2 py-1 mt-2 font-medium">{order.variation}</p>
       )}
 
-      {/* Spec panel (flipped open) or the component tiles */}
+      {/* Spec drill (flipped open) or the component tiles */}
       {open ? (
-        <div className="mt-3 rounded-lg border border-slate-200 p-2.5">
-          <button onClick={() => { setOpen(null); setCpuFamily(null); }} className="text-xs text-slate-500 hover:text-slate-800 flex items-center gap-1 mb-2">
-            <ChevronLeft className="h-3.5 w-3.5" /> {SLOT_LABEL[open]} — tap a spec
-          </button>
-
-          {open === 'ram' && (
-            <div className="flex flex-wrap gap-1.5">
-              {RAM_CAPS.map((cap) => (
-                <button key={cap} className={chip(false)} onClick={() => add('ram', `${cap}GB RAM`, { capacity: cap })}>{cap}GB</button>
-              ))}
-            </div>
-          )}
-
-          {open === 'storage' && (
-            <>
-              <div className="flex flex-wrap gap-1.5 mb-2">
-                {STORAGE_TYPES.map((t) => (
-                  <button key={t} className={chip(storageType === t)} onClick={() => setStorageType(t)}>{t}</button>
-                ))}
-              </div>
-              <div className="flex flex-wrap gap-1.5">
-                {STORAGE_CAPS.map((cap) => (
-                  <button key={cap} className={chip(false)} onClick={() => add('storage', `${cap} ${storageType}`, { type: storageType, capacity: cap })}>{cap}</button>
-                ))}
-              </div>
-            </>
-          )}
-
-          {open === 'cpu' && (
-            <>
-              <div className="flex flex-wrap gap-1.5 mb-2">
-                {CPU_FAMILIES.map((f) => (
-                  <button key={f.value} className={chip(cpuFamily?.value === f.value)} onClick={() => setCpuFamily(f)}>{f.label}</button>
-                ))}
-              </div>
-              <p className="text-[11px] text-slate-400 mb-1">{cpuFamily ? `${cpuFamily.label} — tap a generation` : 'Pick a family first'}</p>
-              <div className="flex flex-wrap gap-1.5">
-                {CPU_GENS.map((g) => (
-                  <button
-                    key={g}
-                    disabled={!cpuFamily}
-                    className={`${chip(false)} disabled:opacity-40`}
-                    onClick={() => cpuFamily && add('cpu', `${cpuFamily.label} ${g} gen`, { brand: cpuFamily.brand, family: cpuFamily.value, generation: g })}
-                  >{g}</button>
-                ))}
-              </div>
-            </>
-          )}
-        </div>
+        <SlotDrill slot={open} onAdd={(spec) => add(open, spec)} onBack={() => setOpen(null)} />
       ) : (
         <div className="mt-3 grid grid-cols-4 gap-1.5">
           {slots.map((slot) => {
-            const isDrill = DRILL.has(slot);
             const n = countFor(slot);
             const Icon = SLOT_ICON[slot] ?? Boxes;
-            const label = SLOT_LABEL[slot] ?? GENERIC_LABELS[slot] ?? slot;
             return (
               <button
                 key={slot}
-                onClick={() => isDrill ? setOpen(slot) : add(slot, label, {})}
+                onClick={() => setOpen(slot)}
                 className={`relative rounded-lg border px-1 py-2.5 flex flex-col items-center gap-1 transition-colors ${n > 0 ? 'border-lime-400 bg-lime-50' : 'border-slate-200 bg-white hover:border-lime-400'}`}
               >
                 <Icon className="h-4 w-4 text-slate-500" />
-                <span className="text-[11px] font-medium text-slate-700 leading-tight text-center">{label}</span>
+                <span className="text-[11px] font-medium text-slate-700 leading-tight text-center">{slotLabel(slot)}</span>
                 {n > 0 && <span className="absolute -top-1.5 -right-1.5 h-5 min-w-5 px-1 rounded-full bg-lime-600 text-white text-[10px] font-bold flex items-center justify-center">{n}</span>}
-                {isDrill && <span className="text-[9px] text-slate-400">tap to spec</span>}
+                <span className="text-[9px] text-slate-400">tap to spec</span>
               </button>
             );
           })}
         </div>
       )}
 
-      {/* Picked components summary */}
+      {/* Picked components summary — +/- to adjust each spec's count */}
       {total > 0 && (
         <div className="mt-3 flex flex-wrap gap-1.5">
           {Object.entries(picked).map(([key, p]) => (
             <span key={key} className="inline-flex items-center gap-1 rounded-full bg-slate-100 border border-slate-200 pl-2 pr-1 py-0.5 text-xs text-slate-700">
               {p.label} ×{p.count}
               <button onClick={() => dec(key)} className="h-4 w-4 rounded-full bg-slate-300 hover:bg-slate-400 text-white flex items-center justify-center" title="Remove one"><Minus className="h-2.5 w-2.5" /></button>
+              <button onClick={() => inc(key)} className="h-4 w-4 rounded-full bg-lime-600 hover:bg-lime-700 text-white flex items-center justify-center" title="Add one"><Plus className="h-2.5 w-2.5" /></button>
             </span>
           ))}
         </div>
