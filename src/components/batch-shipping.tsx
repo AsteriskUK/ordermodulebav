@@ -2,7 +2,7 @@
 
 import { useState, useMemo } from 'react';
 import { useOrderStore } from '@/lib/store';
-import { ORDER_STATUS_CONFIG, DeliveryCarrier, DeliveryType, DPDService } from '@/lib/types';
+import { ORDER_STATUS_CONFIG, DeliveryCarrier, DeliveryType, DPDService, Order, OrderNote } from '@/lib/types';
 import { generateBatchShipCSV, generateBundledShipCSV, generateCarrierCSV, generateCarrierBundleCSV, groupOrdersByBuyer, BundleGroup, deriveShipping } from '@/lib/csv-parser';
 import { getOrderRowClass } from '@/lib/order-utils';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -23,7 +23,7 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table';
-import { Download, Truck, CheckSquare, MinusSquare, Square, PackageOpen, ChevronDown, ChevronRight, Layers, Sparkles, AlertTriangle, X, Loader2, CheckCircle2, Check, Lock as LockIcon, PoundSterling } from 'lucide-react';
+import { Download, Truck, CheckSquare, MinusSquare, Square, PackageOpen, ChevronDown, ChevronRight, Layers, Sparkles, AlertTriangle, X, Loader2, CheckCircle2, Check, Lock as LockIcon, PoundSterling, MessageSquare } from 'lucide-react';
 import { DeliveryBadge } from './delivery-badge';
 import { Input } from '@/components/ui/input';
 import { toast } from 'sonner';
@@ -46,17 +46,64 @@ const CARRIER_PILL: Record<string, string> = {
   Other:      'bg-slate-100 text-slate-600 border-slate-300',
 };
 
+const EBAY_CARRIER_CODE: Record<DeliveryCarrier, string> = {
+  DPD: 'DPD',
+  FedEx: 'FedEx',
+  Parcelforce: 'Parcelforce',
+  'Royal Mail': 'RoyalMail',
+  Other: 'Other',
+};
+
+// Keep false until you are ready to push tracking to the live eBay API.
+const EBAY_TRACKING_UPLOAD_ENABLED = false;
+
+function isEbayOrder(order: Order): boolean {
+  return /^\d{2}-\d{5}-\d{5}$/.test(order.orderNumber) || order.batchId.startsWith('ebay-');
+}
+
+function isWithinEbayTrackingWindow(order: Order, dispatchDate: string): boolean {
+  const max = order.maxEstimatedDeliveryDate || order.postByDate;
+  if (!max) return false;
+  const maxDate = new Date(max);
+  if (isNaN(maxDate.getTime())) return false;
+  const ship = new Date(dispatchDate);
+  if (isNaN(ship.getTime())) return false;
+  const windowStart = new Date(maxDate.getTime() - 24 * 60 * 60 * 1000);
+  return ship >= windowStart && ship <= maxDate;
+}
+
+async function uploadEbayTracking(order: Order, trackingNumber: string, shippedDate: string) {
+  const res = await fetch('/api/ebay/tracking', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      orderId: order.orderNumber,
+      lineItemId: order.itemNumber,
+      quantity: order.quantity,
+      trackingNumber,
+      shippingCarrierCode: EBAY_CARRIER_CODE[order.deliveryCarrier] || 'Other',
+      shippedDate,
+    }),
+  });
+  if (!res.ok) {
+    const data = await res.json().catch(() => ({}));
+    throw new Error(data.message || `eBay API error ${res.status}`);
+  }
+}
+
 function TrackingCell({
   orderId,
   trackingNumber,
   labelCarrier,
   deliveryCarrier,
+  notes,
   updateOrderTracking,
 }: {
   orderId: string;
   trackingNumber: string;
   labelCarrier?: string;
   deliveryCarrier?: string;
+  notes?: OrderNote[];
   updateOrderTracking: (id: string, tracking: string) => void;
 }) {
   const users = useOrderStore((s) => s.users);
@@ -182,6 +229,8 @@ function TrackingCell({
     );
   }
 
+  const hasTrackingNote = notes?.some((n) => n.text.includes('Tracking number assigned'));
+
   // ── Read-only (locked) ───────────────────────────────────────────
   return (
     <div className="flex flex-col gap-0.5">
@@ -197,6 +246,11 @@ function TrackingCell({
         >
           {value || '—'}
         </span>
+        {hasTrackingNote && (
+          <span className="text-green-600" title="Tracking note added">
+            <MessageSquare className="h-3.5 w-3.5" />
+          </span>
+        )}
         {canEdit && (
           <button
             onClick={handleUnlockClick}
@@ -594,8 +648,23 @@ export function BatchShipping() {
       for (const s of succeeded) {
         console.log('[Book Labels] processing result:', s.orderId, 'tracking=', s.trackingNumber, 'labelPdfs=', s.labelPdfs?.length, 'allLabels=', s.allLabels?.length, 'labelBase64=', !!s.labelBase64, 'labelHtmls=', s.labelHtmls?.length);
         const tracking = s.trackingNumber || s.parcelNumber || s.consignmentNumber || '';
-        if (tracking) updateOrderTracking(s.orderId, tracking);
-        const carrier = ordersToBook.find((o) => o.id === s.orderId)?.deliveryCarrier ?? 'DPD';
+        const order = ordersToBook.find((o) => o.id === s.orderId);
+        if (tracking) {
+          const dispatchDate = new Date().toISOString();
+          updateOrderTracking(s.orderId, tracking);
+          if (EBAY_TRACKING_UPLOAD_ENABLED && order && isEbayOrder(order) && isWithinEbayTrackingWindow(order, dispatchDate)) {
+            try {
+              await uploadEbayTracking(order, tracking, dispatchDate);
+              toast.success(`Tracking uploaded to eBay for #${order.salesRecordNumber}`);
+            } catch (err) {
+              console.error('eBay tracking upload failed:', err);
+              toast.error(`eBay tracking upload failed for #${order.salesRecordNumber}: ${err instanceof Error ? err.message : 'Unknown error'}`);
+            }
+          } else if (order && isEbayOrder(order) && isWithinEbayTrackingWindow(order, dispatchDate)) {
+            console.log(`[eBay tracking] upload skipped for #${order.salesRecordNumber} (disabled)`);
+          }
+        }
+        const carrier = order?.deliveryCarrier ?? 'DPD';
         const storageLabels = s.labelHtmls?.length ? s.labelHtmls
           : s.labelPdfs?.length ? s.labelPdfs
           : s.allLabels?.length ? s.allLabels
@@ -1093,6 +1162,7 @@ export function BatchShipping() {
                             trackingNumber={primary.trackingNumber}
                             labelCarrier={primary.labelCarrier}
                             deliveryCarrier={primary.deliveryCarrier}
+                            notes={primary.notes}
                             updateOrderTracking={updateOrderTracking}
                           />
                         </TableCell>

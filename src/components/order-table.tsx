@@ -45,6 +45,8 @@ import {
   CheckCircle2,
   Trash,
   ShoppingBag,
+  MessageSquare,
+  Truck,
 } from 'lucide-react';
 import { generateBatchShipCSV } from '@/lib/csv-parser';
 import { DeliveryBadge } from './delivery-badge';
@@ -543,10 +545,15 @@ export function OrderTable() {
                 onClick={() => handleSort('buyerNote')}
               >
                 <div className="flex items-center gap-1">
-                  Note
+                  Buyer Note
                   {sortField === 'buyerNote' && (
                     sortDir === 'desc' ? <ArrowDown className="h-3 w-3" /> : <ArrowUp className="h-3 w-3" />
                   )}
+                </div>
+              </TableHead>
+              <TableHead className="text-xs bg-slate-50">
+                <div className="flex items-center gap-1">
+                  Notes
                 </div>
               </TableHead>
               <TableHead 
@@ -599,7 +606,7 @@ export function OrderTable() {
           <TableBody>
             {pageOrders.length === 0 ? (
               <TableRow>
-                <TableCell colSpan={10} className="text-center py-8 text-slate-500">
+                <TableCell colSpan={12} className="text-center py-8 text-slate-500">
                   {orders.length === 0
                     ? 'No orders imported yet. Go to Import Orders to get started.'
                     : 'No orders match your filters.'}
@@ -664,6 +671,24 @@ export function OrderTable() {
                   </TableCell>
                   <TableCell className="text-xs max-w-[150px] truncate text-slate-500">
                     {order.buyerNote || '-'}
+                  </TableCell>
+                  <TableCell className="text-xs">
+                    <div className="flex items-center gap-2">
+                      {(order.notes?.length ?? 0) > 0 ? (
+                        <span className="flex items-center gap-1 text-slate-600" title={`${order.notes!.length} internal note${order.notes!.length === 1 ? '' : 's'}`}>
+                          <MessageSquare className="h-3.5 w-3.5" />
+                          {order.notes!.length}
+                        </span>
+                      ) : (
+                        <span className="text-slate-300">-</span>
+                      )}
+                      {order.notes?.some((n) => n.text.includes('Tracking number assigned')) && (
+                        <span className="flex items-center gap-1 text-green-700 bg-green-50 border border-green-200 rounded px-1.5 py-0.5" title="Tracking number note added">
+                          <Truck className="h-3 w-3" />
+                          <span className="text-[10px] font-medium">Track</span>
+                        </span>
+                      )}
+                    </div>
                   </TableCell>
                   <TableCell className={`text-xs text-center font-medium ${order.quantity > 2 ? 'text-red-600 bg-red-50' : ''}`}>
                     {order.quantity}

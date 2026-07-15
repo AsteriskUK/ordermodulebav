@@ -234,19 +234,20 @@ export const useOrderStore = create<OrderStore>()(
           const order = state.orders.find((o) => o.id === orderId);
           if (!order) return {};
           const user = state.users.find((u) => u.id === state.currentUserId);
+          const changedAt = new Date().toISOString();
           const event: EodEvent = {
             orderId,
             salesRecordNumber: order.salesRecordNumber,
             itemTitle: order.itemTitle,
             fromStatus: order.status,
             toStatus: status,
-            changedAt: new Date().toISOString(),
+            changedAt,
             userId: user?.id,
             userName: user?.name,
             department: user?.department,
           };
           const updatedOrders = state.orders.map((o) =>
-            o.id === orderId ? { ...o, status } : o
+            o.id === orderId ? { ...o, status, dispatchedOnDate: status === 'shipped' && !o.dispatchedOnDate ? changedAt : o.dispatchedOnDate } : o
           );
           const updatedOrder = updatedOrders.find(o => o.id === orderId);
           if (updatedOrder) syncOrder(updatedOrder).catch(console.error);
@@ -290,9 +291,29 @@ export const useOrderStore = create<OrderStore>()(
         })),
       updateOrderTracking: (orderId, trackingNumber) =>
         set((state) => {
-          const updatedOrders = state.orders.map((o) =>
-            o.id === orderId ? { ...o, trackingNumber } : o
-          );
+          const order = state.orders.find((o) => o.id === orderId);
+          const user = state.users.find((u) => u.id === state.currentUserId);
+          const now = new Date().toISOString();
+          const shouldStamp = !!trackingNumber && !order?.dispatchedOnDate;
+          const note = shouldStamp
+            ? {
+                text: `Tracking number assigned: ${order?.deliveryCarrier || 'Carrier'} ${trackingNumber}`,
+                authorId: user?.id ?? 'system',
+                authorName: user?.name ?? 'System',
+              }
+            : null;
+          const updatedOrders = state.orders.map((o) => {
+            if (o.id !== orderId) return o;
+            const newNote = note
+              ? { ...note, id: generateUUID(), createdAt: now }
+              : undefined;
+            return {
+              ...o,
+              trackingNumber,
+              dispatchedOnDate: shouldStamp ? now : o.dispatchedOnDate,
+              notes: newNote ? [...(o.notes ?? []), newNote] : o.notes,
+            };
+          });
           const updatedOrder = updatedOrders.find(o => o.id === orderId);
           if (updatedOrder) syncOrder(updatedOrder).catch(console.error);
           return { orders: updatedOrders };
@@ -537,7 +558,7 @@ export const useOrderStore = create<OrderStore>()(
               department: user?.department,
             }));
           const updatedOrders = state.orders.map((o) =>
-            orderIds.includes(o.id) ? { ...o, status } : o
+            orderIds.includes(o.id) ? { ...o, status, dispatchedOnDate: status === 'shipped' && !o.dispatchedOnDate ? now : o.dispatchedOnDate } : o
           );
           // Sync all updated orders to Supabase
           updatedOrders.filter(o => orderIds.includes(o.id)).forEach(o => {

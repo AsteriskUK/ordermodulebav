@@ -672,6 +672,12 @@ export function OrderDetailDialog({ order, onClose }: Props) {
                 ? new Date(order.dispatchedOnDate).toLocaleString('en-GB')
                 : '-'}
             </p>
+            {liveOrder.maxEstimatedDeliveryDate && (
+              <p className="col-span-2">
+                Max Est Delivery:{' '}
+                {new Date(liveOrder.maxEstimatedDeliveryDate).toLocaleString('en-GB')}
+              </p>
+            )}
           </div>
 
           {/* eBay Buyer Messaging */}

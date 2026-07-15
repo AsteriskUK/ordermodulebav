@@ -83,6 +83,7 @@ export function mapEbayOrderToOrder(ebayOrder: EbayOrder, batchId: string): Orde
   const postageAndPackaging = parseFloat(pricing?.deliveryCost?.value || '0');
   const saleDate = ebayOrder.creationDate;
   const shipByDate = ebayOrder.fulfillmentStartInstructions?.[0]?.shipByDate || '';
+  const maxEstimatedDeliveryDate = ebayOrder.fulfillmentStartInstructions?.[0]?.maxEstimatedDeliveryDate || '';
 
   const { deliveryCarrier, deliveryType } = deriveShipping(postToPostcode, totalPrice, postageAndPackaging);
 
@@ -133,6 +134,7 @@ export function mapEbayOrderToOrder(ebayOrder: EbayOrder, batchId: string): Orde
       saleDate,
       paidOnDate: saleDate,
       postByDate: shipByDate,
+      maxEstimatedDeliveryDate,
       dispatchedOnDate: '',
       deliveryService: ebayOrder.fulfillmentStartInstructions?.[0]?.shippingStep?.shippingServiceCode || '',
       trackingNumber: '',
