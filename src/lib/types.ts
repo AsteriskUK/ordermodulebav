@@ -463,6 +463,7 @@ export interface Order {
   paidOnDate: string;
   postByDate: string;
   dispatchedOnDate: string;
+  maxEstimatedDeliveryDate?: string;
   // Shipping
   deliveryService: string;
   trackingNumber: string;
