@@ -96,23 +96,38 @@ export async function GET(req: NextRequest) {
   const debugRaw: Record<string, unknown> = {};
 
   // A getCustomerServiceMetric response breaks the seller's rate down per
-  // dimension (listing category for INAD, shipping region for INR). Each
-  // dimension carries a metric with metricKey "RATE" whose `value` is the
-  // seller's rate for that slice. Surface the worst (highest) slice as the
-  // headline figure. Returns null when eBay has no data (empty, or 54200).
+  // dimension (listing category for INAD, shipping region for INR). Each slice
+  // carries RATE, COUNT (claims) and TRANSACTION_COUNT metrics. The headline
+  // figure is the OVERALL rate = Σcount / Σtransactions — NOT the worst slice
+  // (a tiny category with 2 claims out of 17 sales showed as "11.76%" while the
+  // real overall rate was ~4%). Falls back to the worst slice rate only when
+  // eBay omits the counts. Returns null when eBay has no data (empty, or 54200).
   interface SspMetric { metricKey?: string; name?: string; value?: { value?: string | number } }
   interface CsmResponse { dimensionMetrics?: { metrics?: { metricKey?: string; value?: string | number }[] }[] }
-  const csmWorstRate = (d: CsmResponse): string | number | null => {
+  const csmOverallRate = (d: CsmResponse): string | number | null => {
+    let claims = 0;
+    let transactions = 0;
+    let haveCounts = false;
     let worst: number | null = null;
     let worstRaw: string | number | null = null;
     for (const dm of d.dimensionMetrics ?? []) {
+      let sliceClaims: number | null = null;
+      let sliceTx: number | null = null;
       for (const mm of dm.metrics ?? []) {
-        if (mm.metricKey !== 'RATE' || mm.value == null) continue;
+        if (mm.value == null) continue;
         const n = Number(mm.value);
         if (!Number.isFinite(n)) continue;
-        if (worst == null || n > worst) { worst = n; worstRaw = mm.value; }
+        if (mm.metricKey === 'COUNT') sliceClaims = n;
+        else if (mm.metricKey === 'TRANSACTION_COUNT') sliceTx = n;
+        else if (mm.metricKey === 'RATE' && (worst == null || n > worst)) { worst = n; worstRaw = mm.value; }
+      }
+      if (sliceClaims != null && sliceTx != null) {
+        haveCounts = true;
+        claims += sliceClaims;
+        transactions += sliceTx;
       }
     }
+    if (haveCounts && transactions > 0) return Number(((claims / transactions) * 100).toFixed(2));
     return worstRaw;
   };
 
@@ -153,7 +168,7 @@ export async function GET(req: NextRequest) {
             analyticsAvailable = true;
             const d = await m.json() as CsmResponse;
             if (debug) debugRaw[`csm_${type}_${evalType}`] = d;
-            performance[field] = csmWorstRate(d);
+            performance[field] = csmOverallRate(d);
           } else if (debug) {
             debugRaw[`csm_${type}_${evalType}_error`] = { status: m.status, body: await m.text() };
           }

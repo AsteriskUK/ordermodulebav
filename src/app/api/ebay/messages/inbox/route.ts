@@ -376,16 +376,31 @@ export async function POST() {
   });
 }
 
-// PATCH /api/ebay/messages/inbox — mark conversation(s) as read (both eBay + Supabase)
+// PATCH /api/ebay/messages/inbox — mark conversation(s) read/unread, or
+// archive / unarchive / soft-delete them (app-side only; nothing changes on eBay
+// for archive/delete — deleted rows stay in the DB as status 'deleted' so a
+// re-sync can't resurrect them).
 export async function PATCH(req: Request) {
-  const { ids, conversationIds, conversationType, read = true } = await req.json() as {
+  const { ids, conversationIds, conversationType, read = true, action } = await req.json() as {
     ids: string[];                 // Supabase row IDs
     conversationIds?: string[];    // eBay conversation IDs (optional)
     conversationType?: string;     // FROM_MEMBERS or FROM_EBAY
     read?: boolean;                // true = mark read, false = mark unread
+    action?: 'archive' | 'unarchive' | 'delete';
   };
 
   const supabase = getSupabase();
+
+  if (action) {
+    if (action === 'archive' || action === 'delete') {
+      await supabase.from('ebay_messages').update({ status: action === 'archive' ? 'archived' : 'deleted' }).in('id', ids);
+    } else {
+      // unarchive → restore direction-appropriate statuses
+      await supabase.from('ebay_messages').update({ status: 'read' }).in('id', ids).eq('direction', 'received');
+      await supabase.from('ebay_messages').update({ status: 'sent' }).in('id', ids).eq('direction', 'sent');
+    }
+    return NextResponse.json({ success: true });
+  }
 
   // Update Supabase — received messages toggle unread/read; our sent stay 'sent'.
   await supabase.from('ebay_messages').update({ status: read ? 'read' : 'unread' }).in('id', ids).eq('direction', 'received');

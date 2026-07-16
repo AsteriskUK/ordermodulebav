@@ -4,7 +4,7 @@ import { useMemo, useState, useEffect, useCallback } from 'react';
 import { useOrderStore } from '@/lib/store';
 import { OrderNote, ORDER_STATUS_CONFIG } from '@/lib/types';
 import { can } from '@/lib/access';
-import { MessageSquare, Search, Trash2, Plus, ShoppingBag, Send, RefreshCw, Inbox, ArrowLeft, Mail, MailOpen, ExternalLink, FileText, X } from 'lucide-react';
+import { MessageSquare, Search, Trash2, Plus, ShoppingBag, Send, RefreshCw, Inbox, ArrowLeft, Mail, MailOpen, ExternalLink, FileText, X, Archive, ArchiveRestore } from 'lucide-react';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 import { OrderDetailDialog } from './order-detail-dialog';
@@ -186,6 +186,7 @@ interface Conversation {
   messages: EbayMessage[];
   lastAt: string;
   unreadCount: number;
+  archived: boolean;   // every message in the thread archived → hidden from the main list
 }
 
 const PLATFORM_LOGOS: Record<string, string> = {
@@ -195,6 +196,21 @@ const PLATFORM_LOGOS: Record<string, string> = {
   onbuy:      '/onbuy.svg',
   temu:       '/temu.png',
 };
+
+// Compact "time lapsed" for the conversation list (now, 5m, 2h, 3d, 2w…).
+function timeAgo(iso: string): string {
+  const diff = Date.now() - new Date(iso).getTime();
+  if (!Number.isFinite(diff) || diff < 60_000) return 'now';
+  const mins = Math.floor(diff / 60_000);
+  if (mins < 60) return `${mins}m`;
+  const hours = Math.floor(mins / 60);
+  if (hours < 24) return `${hours}h`;
+  const days = Math.floor(hours / 24);
+  if (days < 7) return `${days}d`;
+  const weeks = Math.floor(days / 7);
+  if (weeks < 5) return `${weeks}w`;
+  return new Date(iso).toLocaleDateString('en-GB', { day: '2-digit', month: 'short' });
+}
 
 const REASON_LABELS: Record<string, string> = {
   SHIPPING: 'Shipping update',
@@ -230,7 +246,7 @@ export function NotesFeed() {
   const [ebayLoading, setEbayLoading] = useState(false);
   const [ebaySyncing, setEbaySyncing] = useState(false);
   const [activeKey, setActiveKey] = useState<string | null>(null);
-  const [ebayFilter, setEbayFilter] = useState<'all' | 'unread' | 'client' | 'ebay' | 'backmarket' | 'amazon'>('all');
+  const [ebayFilter, setEbayFilter] = useState<'all' | 'unread' | 'client' | 'ebay' | 'backmarket' | 'amazon' | 'archived'>('all');
   const [bmMessages, setBmMessages] = useState<EbayMessage[]>([]);
   const [bmSyncing, setBmSyncing] = useState(false);
   const [amazonMessages, setAmazonMessages] = useState<EbayMessage[]>([]);
@@ -347,6 +363,9 @@ export function NotesFeed() {
   async function openConversation(convo: Conversation) {
     setActiveKey(convo.key);
     if (!convo.conversation_id) return;
+    // Don't refetch archived threads — the sync upsert would overwrite their
+    // archived status with read/unread and silently unarchive them.
+    if (convo.archived) return;
 
     if (convo.conversation_type === 'AMAZON') {
       // Nothing to refetch (send-only history), but ask Amazon which message
@@ -438,6 +457,7 @@ export function NotesFeed() {
   const conversations = useMemo<Conversation[]>(() => {
     const map = new Map<string, Conversation>();
     for (const msg of allMessages) {
+      if (msg.status === 'deleted') continue;   // soft-deleted rows never surface
       const key = msg.conversation_id ?? `${msg.buyer_username}::${msg.order_id}`;
       if (!map.has(key)) {
         map.set(key, {
@@ -452,6 +472,7 @@ export function NotesFeed() {
           messages: [],
           lastAt: msg.sent_at,
           unreadCount: 0,
+          archived: false,
         });
       }
       const convo = map.get(key)!;
@@ -470,7 +491,11 @@ export function NotesFeed() {
       if (!isOurs(msg, msg.buyer_username) && msg.status === 'unread') convo.unreadCount++;
     }
     return [...map.values()]
-      .map(c => ({ ...c, messages: c.messages.sort((a, b) => a.sent_at.localeCompare(b.sent_at)) }))
+      .map(c => ({
+        ...c,
+        messages: c.messages.sort((a, b) => a.sent_at.localeCompare(b.sent_at)),
+        archived: c.messages.length > 0 && c.messages.every((m) => m.status === 'archived'),
+      }))
       .sort((a, b) => b.lastAt.localeCompare(a.lastAt));
   }, [allMessages, isOurs, sellerUsername]);
 
@@ -533,7 +558,7 @@ export function NotesFeed() {
     ? (relatedOrder?.itemTitle || activeConvo?.item_title || (activeIsAmazon ? 'Amazon order' : 'BackMarket order'))
     : (listing?.title || activeConvo?.item_title || relatedOrder?.itemTitle || 'Listing');
 
-  const unreadTotal = useMemo(() => conversations.reduce((s, c) => s + c.unreadCount, 0), [conversations]);
+  const unreadTotal = useMemo(() => conversations.reduce((s, c) => s + (c.archived ? 0 : c.unreadCount), 0), [conversations]);
 
   async function setConversationRead(convo: Conversation, read: boolean) {
     const ids = convo.messages.filter(m => m.direction === 'received').map(m => m.id);
@@ -578,6 +603,47 @@ export function NotesFeed() {
     const convos = conversations.filter((c) => selectedKeys.has(c.key));
     clearSelection();
     await Promise.all(convos.map((c) => setConversationRead(c, read)));
+  }
+
+  // Archive / unarchive / delete a conversation. Archive hides it from the main
+  // list (viewable under the "Archived" filter); delete removes it from the app
+  // (soft-delete in our DB — nothing is deleted on the marketplace).
+  async function setConversationHidden(convo: Conversation, action: 'archive' | 'unarchive' | 'delete') {
+    const ids = convo.messages.map((m) => m.id);
+    if (ids.length === 0) return;
+
+    const isBm = convo.conversation_type === 'BACKMARKET';
+    const isAmazon = convo.conversation_type === 'AMAZON';
+    const setter = isAmazon ? setAmazonMessages : isBm ? setBmMessages : setEbayMessages;
+    if (action === 'delete') {
+      setter((prev) => prev.filter((m) => !ids.includes(m.id)));
+    } else {
+      setter((prev) => prev.map((m) => ids.includes(m.id)
+        ? { ...m, status: action === 'archive' ? 'archived' : (m.direction === 'received' ? 'read' : 'sent') }
+        : m));
+    }
+    if (activeKey === convo.key && action !== 'unarchive') setActiveKey(null);
+
+    const endpoint = isAmazon ? '/api/amazon/messages' : isBm ? '/api/backmarket/messages' : '/api/ebay/messages/inbox';
+    await fetch(endpoint, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ ids, action }),
+    });
+    toast.success(action === 'archive' ? 'Conversation archived' : action === 'unarchive' ? 'Conversation restored' : 'Conversation deleted');
+  }
+
+  const deleteConversation = (convo: Conversation) => {
+    if (!window.confirm('Delete this conversation from the inbox? It is only removed from this app — nothing is deleted on the marketplace.')) return;
+    setConversationHidden(convo, 'delete');
+  };
+
+  // Bulk archive/delete the selected conversations.
+  async function bulkHide(action: 'archive' | 'delete') {
+    const convos = conversations.filter((c) => selectedKeys.has(c.key));
+    if (action === 'delete' && !window.confirm(`Delete ${convos.length} conversation${convos.length !== 1 ? 's' : ''} from the inbox? They are only removed from this app.`)) return;
+    clearSelection();
+    await Promise.all(convos.map((c) => setConversationHidden(c, action)));
   }
 
   async function handleReply() {
@@ -882,20 +948,27 @@ export function NotesFeed() {
             {(() => {
               const filtered = conversations.filter((c) => {
                 if (search && !(c.buyer_username.toLowerCase().includes(search.toLowerCase()) || c.order_id.toLowerCase().includes(search.toLowerCase()) || (c.buyer_name ?? '').toLowerCase().includes(search.toLowerCase()))) return false;
+                // Archived threads live only under the "Archived" filter.
+                if (ebayFilter === 'archived') return c.archived;
+                if (c.archived) return false;
                 if (ebayFilter === 'unread') return c.unreadCount > 0;
-                if (ebayFilter === 'client') return c.conversation_type === 'FROM_MEMBERS';
-                if (ebayFilter === 'ebay') return c.conversation_type === 'FROM_EBAY';
+                // "Client" = buyer messages from EVERY platform (eBay members,
+                // BackMarket, Amazon) — everything except eBay system mail.
+                if (ebayFilter === 'client') return c.conversation_type !== 'FROM_EBAY';
+                // Per-platform filters: eBay covers both buyer threads and system mail.
+                if (ebayFilter === 'ebay') return c.conversation_type === 'FROM_MEMBERS' || c.conversation_type === 'FROM_EBAY';
                 if (ebayFilter === 'backmarket') return c.conversation_type === 'BACKMARKET';
                 if (ebayFilter === 'amazon') return c.conversation_type === 'AMAZON';
                 return true;
               });
-              const bmCount = conversations.filter((c) => c.conversation_type === 'BACKMARKET').length;
-              const amazonCount = conversations.filter((c) => c.conversation_type === 'AMAZON').length;
+              const archivedCount = conversations.filter((c) => c.archived).length;
               const FILTERS: { key: typeof ebayFilter; label: string }[] = [
                 { key: 'all', label: 'All' }, { key: 'unread', label: 'Unread' },
-                { key: 'client', label: 'Client' }, { key: 'ebay', label: 'eBay' },
-                ...(bmCount > 0 ? [{ key: 'backmarket' as const, label: 'BackMarket' }] : []),
-                ...(amazonCount > 0 ? [{ key: 'amazon' as const, label: 'Amazon' }] : []),
+                { key: 'client', label: 'Client' },
+                { key: 'ebay', label: 'eBay' },
+                { key: 'amazon', label: 'Amazon' },
+                { key: 'backmarket', label: 'BackMarket' },
+                ...(archivedCount > 0 || ebayFilter === 'archived' ? [{ key: 'archived' as const, label: archivedCount > 0 ? `Archived ${archivedCount}` : 'Archived' }] : []),
               ];
               return (
                 <>
@@ -912,6 +985,14 @@ export function NotesFeed() {
                             className="flex items-center gap-1 text-xs px-2 py-1 rounded hover:bg-white/15">
                             <Mail className="h-3.5 w-3.5" /> Unread
                           </button>
+                          <button onClick={() => bulkHide('archive')} title="Archive selected"
+                            className="flex items-center gap-1 text-xs px-2 py-1 rounded hover:bg-white/15">
+                            <Archive className="h-3.5 w-3.5" /> Archive
+                          </button>
+                          <button onClick={() => bulkHide('delete')} title="Delete selected"
+                            className="flex items-center gap-1 text-xs px-2 py-1 rounded hover:bg-white/15 text-red-300 hover:text-red-200">
+                            <Trash2 className="h-3.5 w-3.5" /> Delete
+                          </button>
                           <button onClick={clearSelection} title="Clear selection"
                             className="text-xs px-2 py-1 rounded hover:bg-white/15">✕</button>
                         </div>
@@ -924,7 +1005,7 @@ export function NotesFeed() {
                       </button>
                     </div>
                     )}
-                    <div className="flex gap-1 px-2 pb-2">
+                    <div className="flex flex-wrap gap-1 px-2 pb-2">
                       {FILTERS.map((f) => (
                         <button key={f.key} onClick={() => setEbayFilter(f.key)}
                           className={`text-xs px-2.5 py-1 rounded-full font-medium transition-colors ${ebayFilter === f.key ? 'bg-slate-800 text-white' : 'bg-slate-100 text-slate-500 hover:bg-slate-200'}`}>
@@ -985,7 +1066,17 @@ export function NotesFeed() {
                                     className="opacity-0 group-hover:opacity-100 text-slate-400 hover:text-slate-700">
                                     {convo.unreadCount > 0 ? <MailOpen className="h-3.5 w-3.5" /> : <Mail className="h-3.5 w-3.5" />}
                                   </button>
-                                  <span className="text-[10px] text-slate-400">{new Date(convo.lastAt).toLocaleDateString('en-GB', { day: '2-digit', month: 'short' })}</span>
+                                  <button onClick={(e) => { e.stopPropagation(); setConversationHidden(convo, convo.archived ? 'unarchive' : 'archive'); }}
+                                    title={convo.archived ? 'Restore from archive' : 'Archive conversation'}
+                                    className="opacity-0 group-hover:opacity-100 text-slate-400 hover:text-slate-700">
+                                    {convo.archived ? <ArchiveRestore className="h-3.5 w-3.5" /> : <Archive className="h-3.5 w-3.5" />}
+                                  </button>
+                                  <button onClick={(e) => { e.stopPropagation(); deleteConversation(convo); }}
+                                    title="Delete conversation"
+                                    className="opacity-0 group-hover:opacity-100 text-slate-400 hover:text-red-500">
+                                    <Trash2 className="h-3.5 w-3.5" />
+                                  </button>
+                                  <span className="text-[10px] text-slate-400" title={new Date(convo.lastAt).toLocaleString('en-GB')}>{timeAgo(convo.lastAt)}</span>
                                 </span>
                               </div>
                               <p className="text-[11px] text-slate-400 truncate">{convo.order_id ? `Order #${convo.order_id}` : 'No order reference'}{convo.item_title ? ` · ${convo.item_title.slice(0, 40)}` : ''}</p>
@@ -1028,6 +1119,21 @@ export function NotesFeed() {
                   >
                     {activeConvo.unreadCount > 0 ? <MailOpen className="h-4 w-4" /> : <Mail className="h-4 w-4" />}
                     <span className="hidden sm:inline">{activeConvo.unreadCount > 0 ? 'Mark read' : 'Mark unread'}</span>
+                  </button>
+                  <button
+                    onClick={() => setConversationHidden(activeConvo, activeConvo.archived ? 'unarchive' : 'archive')}
+                    title={activeConvo.archived ? 'Restore from archive' : 'Archive conversation'}
+                    className="shrink-0 text-slate-400 hover:text-slate-700 flex items-center gap-1 text-xs"
+                  >
+                    {activeConvo.archived ? <ArchiveRestore className="h-4 w-4" /> : <Archive className="h-4 w-4" />}
+                    <span className="hidden sm:inline">{activeConvo.archived ? 'Restore' : 'Archive'}</span>
+                  </button>
+                  <button
+                    onClick={() => deleteConversation(activeConvo)}
+                    title="Delete conversation"
+                    className="shrink-0 text-slate-400 hover:text-red-500 flex items-center gap-1 text-xs"
+                  >
+                    <Trash2 className="h-4 w-4" />
                   </button>
                 </div>
 
@@ -1145,10 +1251,10 @@ export function NotesFeed() {
                       <div className="flex items-end gap-2">
                         <textarea
                           className="flex-1 border rounded-xl px-3 py-2 text-sm min-h-[40px] max-h-32 resize-none focus:ring-2 focus:ring-orange-400 focus:border-transparent"
-                          placeholder="Type your reply…"
+                          placeholder="Type your reply… (Ctrl+Enter to send)"
                           value={replyText}
                           onChange={(e) => setReplyText(e.target.value)}
-                          onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleReply(); } }}
+                          onKeyDown={(e) => { if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) { e.preventDefault(); handleReply(); } }}
                           rows={1}
                           maxLength={4000}
                         />
@@ -1188,7 +1294,7 @@ export function NotesFeed() {
                             placeholder="Type your message to the buyer…"
                             value={replyText}
                             onChange={(e) => setReplyText(e.target.value)}
-                            onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleReply(); } }}
+                            onKeyDown={(e) => { if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) { e.preventDefault(); handleReply(); } }}
                             rows={1}
                             maxLength={2000}
                           />
@@ -1216,10 +1322,10 @@ export function NotesFeed() {
                     )}
                     <textarea
                       className="flex-1 border rounded-xl px-3 py-2 text-sm min-h-[40px] max-h-32 resize-none focus:ring-2 focus:ring-amber-400 focus:border-transparent"
-                      placeholder="Type your reply…"
+                      placeholder="Type your reply… (Ctrl+Enter to send)"
                       value={replyText}
                       onChange={(e) => setReplyText(e.target.value)}
-                      onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleReply(); } }}
+                      onKeyDown={(e) => { if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) { e.preventDefault(); handleReply(); } }}
                       rows={1}
                       maxLength={2000}
                     />

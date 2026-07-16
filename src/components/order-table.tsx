@@ -48,6 +48,7 @@ import {
 } from 'lucide-react';
 import { generateBatchShipCSV } from '@/lib/csv-parser';
 import { DeliveryBadge } from './delivery-badge';
+import { ItemThumb } from './item-thumb';
 import { toast } from 'sonner';
 import { OrderDetailDialog } from './order-detail-dialog';
 import { EbayMessageDialog } from './ebay-message-dialog';
@@ -659,8 +660,16 @@ export function OrderTable() {
                       </div>
                     )}
                   </TableCell>
-                  <TableCell className="text-xs max-w-[200px] truncate">
-                    {order.itemTitle}
+                  <TableCell className="text-xs max-w-[240px]">
+                    <div className="flex items-center gap-2">
+                      <ItemThumb itemNumber={order.itemNumber} />
+                      <div className="min-w-0">
+                        <div className="truncate">{order.itemTitle}</div>
+                        {order.variation && (
+                          <div className="text-[10px] text-slate-400 truncate" title={order.variation}>{order.variation}</div>
+                        )}
+                      </div>
+                    </div>
                   </TableCell>
                   <TableCell className="text-xs max-w-[150px] truncate text-slate-500">
                     {order.buyerNote || '-'}

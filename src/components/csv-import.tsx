@@ -63,72 +63,6 @@ function buildLabelsHtml(orders: Order[]): string {
   </style></head><body>${labels.join('')}</body></html>`;
 }
 
-function buildInvoicesHtml(orders: Order[]): string {
-  const pages = orders.map((o) => `
-    <div class="invoice">
-      <div class="header">
-        <div class="title">INVOICE / PACKING SLIP</div>
-        <div class="ref">Order #${o.salesRecordNumber}</div>
-      </div>
-      <div class="section">
-        <div class="col">
-          <p class="label">Ship To</p>
-          <p><strong>${o.postToName}</strong></p>
-          <p>${o.postToAddress1}</p>
-          ${o.postToAddress2 ? `<p>${o.postToAddress2}</p>` : ''}
-          <p>${o.postToCity}${o.postToCounty ? ', ' + o.postToCounty : ''}</p>
-          <p>${o.postToPostcode}</p>
-          ${o.postToCountry && o.postToCountry !== 'United Kingdom' ? `<p>${o.postToCountry}</p>` : ''}
-        </div>
-        <div class="col">
-          <p class="label">Order Details</p>
-          <p>Sale Date: ${o.saleDate || o.paidOnDate || '—'}</p>
-          <p>Source: ${o.batchId}</p>
-          ${o.customLabel ? `<p>SKU: ${o.customLabel}</p>` : ''}
-          ${o.trackingNumber ? `<p>Tracking: ${o.trackingNumber}</p>` : ''}
-        </div>
-      </div>
-      <table>
-        <thead><tr><th>Item</th><th>Variation</th><th>Qty</th><th>Unit Price</th><th>Total</th></tr></thead>
-        <tbody>
-          <tr>
-            <td>${o.itemTitle}</td>
-            <td>${o.variation || '—'}</td>
-            <td>${o.quantity}</td>
-            <td>£${o.soldFor.toFixed(2)}</td>
-            <td>£${(o.soldFor * o.quantity).toFixed(2)}</td>
-          </tr>
-        </tbody>
-        <tfoot>
-          <tr><td colspan="3"></td><td>Postage</td><td>£${o.postageAndPackaging.toFixed(2)}</td></tr>
-          <tr class="total"><td colspan="3"></td><td>Total</td><td>£${o.totalPrice.toFixed(2)}</td></tr>
-        </tfoot>
-      </table>
-      ${o.buyerNote ? `<div class="note"><strong>Buyer Note:</strong> ${o.buyerNote}</div>` : ''}
-    </div>`);
-  return `<!DOCTYPE html><html><head><meta charset="utf-8"/><title>Invoices</title>
-  <style>
-    * { margin:0; padding:0; box-sizing:border-box; }
-    body { font-family: Arial, sans-serif; font-size: 11px; color:#111; }
-    .invoice { padding:20px; max-width:18cm; margin:0 auto; page-break-after:always; }
-    .invoice:last-child { page-break-after:auto; }
-    .header { display:flex; justify-content:space-between; align-items:flex-start; border-bottom:2px solid #111; padding-bottom:10px; margin-bottom:14px; }
-    .title { font-size:18px; font-weight:bold; }
-    .ref { font-size:13px; color:#555; }
-    .section { display:flex; gap:30px; margin-bottom:16px; }
-    .col { flex:1; }
-    .col p { line-height:1.6; }
-    p.label { font-weight:bold; text-transform:uppercase; font-size:9px; color:#888; margin-bottom:4px; }
-    table { width:100%; border-collapse:collapse; margin-bottom:12px; }
-    th, td { border:1px solid #ccc; padding:5px 7px; text-align:left; font-size:11px; }
-    th { background:#f0f0f0; font-weight:bold; }
-    tfoot td { border-top:1px solid #999; }
-    tr.total td { font-weight:bold; }
-    .note { background:#fffbe6; border:1px solid #f0c040; padding:8px; border-radius:4px; font-size:11px; }
-    @media print { body { margin:0; } }
-  </style></head><body>${pages.join('')}</body></html>`;
-}
-
 function downloadLabelsCSV(orders: Order[]) {
   const rows = orders.flatMap((o) => {
     const qty = o.labelQty || 1;
@@ -769,7 +703,7 @@ export function CSVImport() {
               <Button
                 variant="outline"
                 className="gap-2"
-                onClick={() => printHtml(buildInvoicesHtml(preview.orders))}
+                onClick={() => printHtml(buildInvoicesHtmlUtil(preview.orders))}
               >
                 <Printer className="h-4 w-4" />
                 Print Invoices
@@ -804,9 +738,10 @@ export function CSVImport() {
               <table className="w-full text-xs">
                 <thead className="bg-slate-100">
                   <tr>
-                    <th className="p-2 text-left">Amazon Order ID</th>
+                    <th className="p-2 text-left">Order #</th>
                     <th className="p-2 text-left">Customer</th>
                     <th className="p-2 text-left">Item</th>
+                    <th className="p-2 text-center">Qty</th>
                     <th className="p-2 text-left">Amount</th>
                     <th className="p-2 text-left">Status</th>
                     <th className="p-2 text-center">Label Qty</th>
@@ -821,6 +756,9 @@ export function CSVImport() {
                       <td className="p-2">{order.postToName}</td>
                       <td className="p-2 max-w-[180px] truncate">
                         {order.itemTitle}
+                      </td>
+                      <td className={`p-2 text-center font-medium ${order.quantity > 1 ? 'text-red-600 bg-red-50' : ''}`}>
+                        {order.quantity}
                       </td>
                       <td className="p-2">£{order.soldFor.toFixed(2)}</td>
                       <td className="p-2">

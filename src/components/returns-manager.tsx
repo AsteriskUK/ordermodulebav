@@ -7,6 +7,7 @@ import { ReturnRecord, ReplacementItem, Department, DEPARTMENT_CONFIG } from '@/
 import { ImageUpload } from '@/components/image-upload';
 import { RETURN_IMAGE_BUCKET, REPLACEMENT_IMAGE_BUCKET } from '@/lib/image-upload';
 import { OrderDetailDialog } from '@/components/order-detail-dialog';
+import { ReturnLabelDialog } from '@/components/return-label-dialog';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -311,7 +312,10 @@ export function ReturnsManager() {
 
   const selectedOrder = orders.find((o) => o.id === selectedOrderId);
 
-  const handleSubmit = () => {
+  // DPD return-label dialog opened from the Log Return form / returns table.
+  const [labelTarget, setLabelTarget] = useState<{ order: (typeof orders)[number]; returnId: string } | null>(null);
+
+  const handleSubmit = (opts?: { generateLabel?: boolean }) => {
     if (!selectedOrderId) { toast.error('Select an order'); return; }
     const order = orders.find((o) => o.id === selectedOrderId);
     if (!order) return;
@@ -340,6 +344,8 @@ export function ReturnsManager() {
     };
     addReturn(ret);
     toast.success(`Return logged for order #${order.salesRecordNumber}`);
+    // Optionally go straight into issuing a DPD return label for this return.
+    if (opts?.generateLabel) setLabelTarget({ order, returnId: ret.id });
     setShowForm(false);
     setOrderSearch('');
     setSelectedOrderId('');
@@ -657,8 +663,19 @@ export function ReturnsManager() {
                 onChange={setReturnImageUrls}
               />
             </div>
-            <div className="flex gap-2">
-              <Button size="sm" onClick={handleSubmit}>Log Return</Button>
+            <div className="flex gap-2 flex-wrap">
+              <Button size="sm" onClick={() => handleSubmit()}>Log Return</Button>
+              <Button
+                size="sm"
+                variant="outline"
+                className="text-blue-700 border-blue-300 hover:bg-blue-50"
+                onClick={() => handleSubmit({ generateLabel: true })}
+                disabled={!selectedOrderId}
+                title={selectedOrderId ? 'Log the return and issue a DPD return label' : 'Select an order first'}
+              >
+                <Truck className="h-3.5 w-3.5 mr-1" />
+                Log Return + Generate Label
+              </Button>
               <Button size="sm" variant="outline" onClick={() => setShowForm(false)}>Cancel</Button>
             </div>
           </CardContent>
@@ -854,6 +871,16 @@ export function ReturnsManager() {
                             title={!isEbayActionAvailable(ret, 'SELLER_MARK_AS_RECEIVED', ebayReturns) ? 'Not available on eBay right now' : undefined}
                             onClick={() => { setReceiveReturn(ret); setReceiveNotes(ret.receivedNotes || ''); }}>
                             <Truck className="h-3 w-3 mr-1" />Received
+                          </Button>
+                        )}
+                        {(ret.status === 'pending' || ret.status === 'swap') && !ret.returnTrackingNumber && (
+                          <Button size="sm" variant="outline" className="h-6 text-xs px-2 text-blue-700 border-blue-300"
+                            onClick={() => {
+                              const orig = orders.find((o) => o.id === ret.orderId);
+                              if (!orig) { toast.info('Order not synced locally yet — a DPD label needs the customer address from the order.'); return; }
+                              setLabelTarget({ order: orig, returnId: ret.id });
+                            }}>
+                            <Truck className="h-3 w-3 mr-1" />Label
                           </Button>
                         )}
                         {canMarketplaceAction && (<>
@@ -1376,6 +1403,15 @@ export function ReturnsManager() {
           />
         ) : null;
       })()}
+
+      {/* DPD return label for a just-logged / existing return */}
+      {labelTarget && (
+        <ReturnLabelDialog
+          order={labelTarget.order}
+          returnId={labelTarget.returnId}
+          onClose={() => setLabelTarget(null)}
+        />
+      )}
     </div>
   );
 }

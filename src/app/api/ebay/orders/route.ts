@@ -15,9 +15,16 @@ export async function GET(req: NextRequest) {
 
   const { searchParams } = new URL(req.url);
   const daysBack = parseInt(searchParams.get('days') || '7');
-  const filter = searchParams.get('filter') || 'orderfulfillmentstatus:{NOT_STARTED|IN_PROGRESS}';
-
   const fromDate = new Date(Date.now() - daysBack * 24 * 60 * 60 * 1000).toISOString();
+
+  // Pull EVERY order in the window, including ones already FULFILLED — orders
+  // dispatched on eBay before a pull ran used to be skipped forever, leaving
+  // permanent gaps in the order sheet (e.g. records 82093–82228). Fulfilled
+  // orders import as 'shipped' (see ebay-mapper) so the queue isn't polluted.
+  // A date-only filter returns all fulfillment statuses (eBay error 30800
+  // rejects a three-value orderfulfillmentstatus set, and the old code appended
+  // creationdate OUTSIDE the filter param, so eBay silently ignored it).
+  const filter = searchParams.get('filter') || `creationdate:[${fromDate}..]`;
 
   const allOrders: Order[] = [];
   let offset = 0;
@@ -33,7 +40,7 @@ export async function GET(req: NextRequest) {
   };
 
   while (true) {
-    const url = `${BASE_URL}/sell/fulfillment/v1/order?filter=${encodeURIComponent(filter)}&creationdate:[${fromDate}..]&limit=${limit}&offset=${offset}`;
+    const url = `${BASE_URL}/sell/fulfillment/v1/order?filter=${encodeURIComponent(filter)}&limit=${limit}&offset=${offset}`;
 
     const res = await fetch(url, {
       headers: {

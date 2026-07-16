@@ -26,8 +26,11 @@ interface ReturnResult {
 const fieldCls = 'w-full px-3 py-2 border border-slate-300 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-blue-500';
 const labelCls = 'text-xs font-medium text-slate-500 block mb-1';
 
-export function ReturnLabelDialog({ order, onClose }: { order: Order; onClose: () => void }) {
+// When `returnId` is passed the label is attached to that existing return
+// (tracking number updated) instead of auto-creating a new open return.
+export function ReturnLabelDialog({ order, returnId, onClose }: { order: Order; returnId?: string; onClose: () => void }) {
   const addReturn = useOrderStore((s) => s.addReturn);
+  const updateReturn = useOrderStore((s) => s.updateReturn);
   const currentUser = useOrderStore((s) => s.users.find((u) => u.id === s.currentUserId));
 
   const [weight, setWeight] = useState(order.numberOfBoxes ?? 1);
@@ -65,22 +68,27 @@ export function ReturnLabelDialog({ order, onClose }: { order: Order; onClose: (
 
       const tracking: string = data.trackingNumber;
 
-      // Auto-create an OPEN return linked to the original order.
-      addReturn({
-        id: generateId(),
-        orderId: order.id,
-        salesRecordNumber: order.salesRecordNumber,
-        orderNumber: order.orderNumber ?? '',
-        buyerUsername: order.buyerUsername ?? order.buyerName ?? '',
-        itemTitle: order.itemTitle,
-        reason: 'Customer return',
-        notes: `Return label issued via DPD${data.emailed ? ' (emailed to customer)' : ''}.`,
-        returnedAt: new Date().toISOString(),
-        createdByUserId: currentUser?.id,
-        createdByUserName: currentUser?.name,
-        status: 'pending',
-        returnTrackingNumber: tracking,
-      });
+      if (returnId) {
+        // Attach the label to the already-logged return.
+        updateReturn(returnId, { returnTrackingNumber: tracking });
+      } else {
+        // Auto-create an OPEN return linked to the original order.
+        addReturn({
+          id: generateId(),
+          orderId: order.id,
+          salesRecordNumber: order.salesRecordNumber,
+          orderNumber: order.orderNumber ?? '',
+          buyerUsername: order.buyerUsername ?? order.buyerName ?? '',
+          itemTitle: order.itemTitle,
+          reason: 'Customer return',
+          notes: `Return label issued via DPD${data.emailed ? ' (emailed to customer)' : ''}.`,
+          returnedAt: new Date().toISOString(),
+          createdByUserId: currentUser?.id,
+          createdByUserName: currentUser?.name,
+          status: 'pending',
+          returnTrackingNumber: tracking,
+        });
+      }
 
       setResult({
         trackingNumber: tracking,
@@ -89,7 +97,7 @@ export function ReturnLabelDialog({ order, onClose }: { order: Order; onClose: (
         barcodes: data.barcodes ?? [],
         emailed: !!data.emailed,
       });
-      toast.success('Return created & open return logged');
+      toast.success(returnId ? 'Return label created & attached to the return' : 'Return created & open return logged');
     } catch {
       toast.error('Failed to reach DPD');
     } finally {

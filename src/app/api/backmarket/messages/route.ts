@@ -130,8 +130,21 @@ export async function POST(req: NextRequest) {
 
 // PATCH /api/backmarket/messages — mark received messages in a thread as read
 export async function PATCH(req: Request) {
-  const { ids, read = true } = await req.json() as { ids: string[]; read?: boolean };
+  const { ids, read = true, action } = await req.json() as {
+    ids: string[];
+    read?: boolean;
+    action?: 'archive' | 'unarchive' | 'delete';   // app-side archive / soft-delete
+  };
   const supabase = getSupabase();
+  if (action) {
+    if (action === 'archive' || action === 'delete') {
+      await supabase.from('backmarket_messages').update({ status: action === 'archive' ? 'archived' : 'deleted' }).in('id', ids);
+    } else {
+      await supabase.from('backmarket_messages').update({ status: 'read' }).in('id', ids).eq('direction', 'received');
+      await supabase.from('backmarket_messages').update({ status: 'sent' }).in('id', ids).eq('direction', 'sent');
+    }
+    return NextResponse.json({ success: true });
+  }
   await supabase.from('backmarket_messages').update({ status: read ? 'read' : 'unread' }).in('id', ids).eq('direction', 'received');
   return NextResponse.json({ success: true });
 }

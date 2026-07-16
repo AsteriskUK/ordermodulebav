@@ -71,7 +71,7 @@ export function OrderDetailDialog({ order, onClose }: Props) {
   const [showBuild, setShowBuild] = useState(false);
   const [showInvoice, setShowInvoice] = useState(false);
   // Listing photo for the order (eBay item id → cached listing image).
-  const [listing, setListing] = useState<{ image_url?: string | null; web_url?: string | null } | null>(null);
+  const [listing, setListing] = useState<{ image_url?: string | null; web_url?: string | null; additional_images?: string[] | null } | null>(null);
   const [ebayMsgText, setEbayMsgText] = useState('');
   const [ebayMsgReason, setEbayMsgReason] = useState('SHIPPING');
   const [ebayMsgSending, setEbayMsgSending] = useState(false);
@@ -436,6 +436,16 @@ export function OrderDetailDialog({ order, onClose }: Props) {
                   <span className="text-slate-500">P&P:</span> £
                   {order.postageAndPackaging.toFixed(2)}
                 </p>
+              )}
+              {(listing?.additional_images?.length ?? 0) > 0 && (
+                <div className="flex flex-wrap gap-1.5 pt-2 clear-both">
+                  {listing!.additional_images!.slice(0, 6).map((url) => (
+                    <a key={url} href={listing?.web_url ?? url} target="_blank" rel="noopener noreferrer">
+                      {/* eslint-disable-next-line @next/next/no-img-element */}
+                      <img src={url} alt="listing" className="h-14 w-14 object-cover rounded border border-slate-200" loading="lazy" />
+                    </a>
+                  ))}
+                </div>
               )}
             </div>
           </div>

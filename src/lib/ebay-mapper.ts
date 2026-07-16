@@ -16,6 +16,8 @@ interface EbayAddress {
 
 interface EbayLineItem {
   lineItemId: string;
+  /** The listing's item id — what /api/ebay/listing and message threads reference */
+  legacyItemId?: string;
   title: string;
   sku?: string;
   quantity: number;
@@ -120,7 +122,9 @@ export function mapEbayOrderToOrder(ebayOrder: EbayOrder, batchId: string): Orde
       postToCounty,
       postToPostcode,
       postToCountry,
-      itemNumber: item.lineItemId,
+      // The legacy listing item id (NOT lineItemId) — it's what the listing-image
+      // API and eBay message threads key on; lineItemId is only a fallback.
+      itemNumber: item.legacyItemId || item.lineItemId,
       itemTitle: item.title,
       customLabel: item.sku || '',
       variation,
@@ -138,7 +142,9 @@ export function mapEbayOrderToOrder(ebayOrder: EbayOrder, batchId: string): Orde
       trackingNumber: '',
       deliveryCarrier,
       deliveryType,
-      status: 'pending',
+      // Orders already fulfilled on eBay (e.g. imported after the fact to fill a
+      // sync gap) come in as shipped so they don't re-enter the packing queue.
+      status: ebayOrder.orderFulfillmentStatus === 'FULFILLED' ? 'shipped' : 'pending',
       category,
       comments: '',
       labelQty: 1,

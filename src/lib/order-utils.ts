@@ -52,13 +52,50 @@ export function getOrderUrgencyLabel(order: Order): string | null {
   }
 }
 
+export type OrderPlatform = 'ebay' | 'amazon' | 'backmarket' | 'onbuy' | 'temu' | 'manual';
+
+/** Which marketplace an order came from — by Amazon id pattern, then batch prefix. */
+export function getOrderPlatform(order: Order): OrderPlatform {
+  const amazonPattern = /^\d{3}-\d{7}-\d{7}$/;
+  if (order.amazonOrderId || [order.orderNumber, order.salesRecordNumber].some((v) => v && amazonPattern.test(v))) return 'amazon';
+  const prefix = (order.batchId || '').split('-')[0]?.toLowerCase();
+  if (['ebay', 'amazon', 'backmarket', 'onbuy', 'temu'].includes(prefix)) return prefix as OrderPlatform;
+  // eBay API order numbers look like 12-34567-89012; sales record numbers are short numerics.
+  if (/^\d{2}-\d{5}-\d{5}$/.test(order.orderNumber || '')) return 'ebay';
+  if (/^\d{4,6}$/.test(order.salesRecordNumber || '')) return 'ebay';
+  return 'manual';
+}
+
+// Per-platform invoice branding — so an eBay invoice is visibly different from
+// an Amazon one (name, accent colour, and the right order-reference label).
+const INVOICE_BRANDS: Record<OrderPlatform, { name: string; color: string; refLabel: string }> = {
+  ebay:       { name: 'eBay',        color: '#b45309', refLabel: 'eBay Order' },
+  amazon:     { name: 'Amazon',      color: '#c2410c', refLabel: 'Amazon Order ID' },
+  backmarket: { name: 'Back Market', color: '#0f766e', refLabel: 'Back Market Order' },
+  onbuy:      { name: 'OnBuy',       color: '#0e7490', refLabel: 'OnBuy Order' },
+  temu:       { name: 'Temu',        color: '#7e22ce', refLabel: 'Temu Order' },
+  manual:     { name: 'Direct Sale', color: '#334155', refLabel: 'Order' },
+};
+
 /** Build printable invoice HTML for one or more orders. */
 export function buildInvoicesHtml(orders: Order[]): string {
-  const pages = orders.map((o) => `
-    <div class="invoice">
-      <div class="header">
-        <div class="title">INVOICE / PACKING SLIP</div>
-        <div class="ref">Order #${o.salesRecordNumber}</div>
+  const pages = orders.map((o) => {
+    const platform = getOrderPlatform(o);
+    const brand = INVOICE_BRANDS[platform];
+    const orderRef = platform === 'amazon' ? (o.amazonOrderId || o.orderNumber || o.salesRecordNumber) : o.salesRecordNumber;
+    return `
+    <div class="invoice" style="border-top:6px solid ${brand.color};">
+      <div class="header" style="border-bottom-color:${brand.color};">
+        <div>
+          <div class="title">INVOICE / PACKING SLIP</div>
+          <div class="platform" style="color:${brand.color};">${brand.name} order</div>
+        </div>
+        <div class="ref">
+          <span class="platform-badge" style="background:${brand.color};">${brand.name}</span><br/>
+          ${brand.refLabel} #${orderRef}
+          ${platform === 'amazon' && o.salesRecordNumber && o.salesRecordNumber !== orderRef ? `<br/><span class="subref">Ref ${o.salesRecordNumber}</span>` : ''}
+          ${platform === 'ebay' && o.orderNumber && o.orderNumber !== o.salesRecordNumber ? `<br/><span class="subref">eBay order ${o.orderNumber}</span>` : ''}
+        </div>
       </div>
       <div class="section">
         <div class="col">
@@ -73,7 +110,7 @@ export function buildInvoicesHtml(orders: Order[]): string {
         <div class="col">
           <p class="label">Order Details</p>
           <p>Sale Date: ${o.saleDate || o.paidOnDate || '—'}</p>
-          <p>Source: ${o.batchId || '—'}</p>
+          <p>Sold via: ${brand.name}</p>
           ${o.customLabel ? `<p>SKU: ${o.customLabel}</p>` : ''}
           ${o.trackingNumber ? `<p>Tracking: ${o.trackingNumber}</p>` : ''}
         </div>
@@ -95,7 +132,8 @@ export function buildInvoicesHtml(orders: Order[]): string {
         </tfoot>
       </table>
       ${o.buyerNote ? `<div class="note"><strong>Buyer Note:</strong> ${o.buyerNote}</div>` : ''}
-    </div>`);
+    </div>`;
+  });
   return `<!DOCTYPE html><html><head><meta charset="utf-8"/><title>Invoices</title>
   <style>
     * { margin:0; padding:0; box-sizing:border-box; }
@@ -104,7 +142,10 @@ export function buildInvoicesHtml(orders: Order[]): string {
     .invoice:last-child { page-break-after:auto; }
     .header { display:flex; justify-content:space-between; align-items:flex-start; border-bottom:2px solid #111; padding-bottom:10px; margin-bottom:14px; }
     .title { font-size:18px; font-weight:bold; }
-    .ref { font-size:13px; color:#555; }
+    .platform { font-size:11px; font-weight:bold; text-transform:uppercase; letter-spacing:0.5px; margin-top:2px; }
+    .ref { font-size:13px; color:#555; text-align:right; }
+    .platform-badge { display:inline-block; color:#fff; font-size:10px; font-weight:bold; padding:2px 8px; border-radius:3px; text-transform:uppercase; letter-spacing:0.5px; margin-bottom:3px; }
+    .subref { font-size:10px; color:#999; }
     .section { display:flex; gap:30px; margin-bottom:16px; }
     .col { flex:1; }
     .col p { line-height:1.6; }
