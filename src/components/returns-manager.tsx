@@ -75,6 +75,14 @@ function isEbayActionAvailable(
   return options.some((o) => o.actionType === actionType);
 }
 
+// eBay-synced reasons arrive as ALL-CAPS enums (e.g. "DEFECTIVE ITEM") —
+// sentence-case those for display; manually-entered reasons pass through as-is.
+function prettyReason(r?: string): string {
+  if (!r) return '';
+  const t = r.replace(/_/g, ' ').trim();
+  return /^[A-Z0-9 ]+$/.test(t) ? t.charAt(0) + t.slice(1).toLowerCase() : t;
+}
+
 function genId() {
   return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, (c) => {
     const r = Math.random() * 16 | 0;
@@ -771,7 +779,7 @@ export function ReturnsManager() {
                     </TableCell>
                     <TableCell>
                       {ret.reason
-                        ? <Badge variant="outline" className="text-xs font-semibold bg-amber-50 text-amber-800 border-amber-300 whitespace-normal">{ret.reason}</Badge>
+                        ? <Badge variant="outline" className="text-xs font-semibold bg-amber-50 text-amber-800 border-amber-300 whitespace-normal h-auto min-h-5 py-0.5 leading-tight text-center max-w-[160px]">{prettyReason(ret.reason)}</Badge>
                         : <span className="text-xs text-slate-400">—</span>}
                     </TableCell>
                     <TableCell className="text-xs font-mono">{ret.returnTrackingNumber || '—'}</TableCell>
@@ -1056,7 +1064,7 @@ export function ReturnsManager() {
             <div className="space-y-3 py-2">
               <div className="bg-slate-50 border border-slate-200 rounded-lg p-3 text-xs">
                 <p className="font-medium">{receiveReturn.itemTitle}</p>
-                <p className="text-slate-500 mt-0.5">Reason: {receiveReturn.reason}</p>
+                <p className="text-slate-500 mt-0.5">Reason: {prettyReason(receiveReturn.reason)}</p>
                 {receiveReturn.status === 'swap' && (
                   <p className="text-orange-700 mt-1 font-medium">
                     Swap — receiving the faulty item back completes this swap.
@@ -1345,7 +1353,7 @@ export function ReturnsManager() {
                 {/* Reason */}
                 <div>
                   <span className="text-xs text-slate-400">Reason</span>
-                  <div className="mt-1"><Badge variant="outline" className="text-xs font-semibold bg-amber-50 text-amber-800 border-amber-300 whitespace-normal">{ret.reason || '—'}</Badge></div>
+                  <div className="mt-1"><Badge variant="outline" className="text-xs font-semibold bg-amber-50 text-amber-800 border-amber-300 whitespace-normal h-auto min-h-5 py-0.5 leading-tight text-center">{prettyReason(ret.reason) || '—'}</Badge></div>
                 </div>
                 {ret.notes && <div><span className="text-xs text-slate-400">Notes</span><p className="text-xs text-slate-600 mt-0.5 whitespace-pre-wrap">{ret.notes}</p></div>}
                 {!canMarketplaceAction && (
