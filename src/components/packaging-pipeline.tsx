@@ -60,6 +60,17 @@ const PRIORITY_BADGE: Record<number, { label: string; cls: string }> = {
   3: { label: 'P3 · Medium', cls: 'bg-amber-100 text-amber-700 border-amber-300' },
 };
 
+// Show at most this many orders per queue column — the rest stay hidden until
+// the visible ones move on (highest priority / earliest post-by first).
+const MAX_VISIBLE_PER_STAGE = 10;
+
+function genTicketId(): string {
+  return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, (c) => {
+    const r = Math.random() * 16 | 0;
+    return (c === 'x' ? r : (r & 0x3 | 0x8)).toString(16);
+  });
+}
+
 function getAllowedCategories(depts: Department[]): string[] | null {
   const cats: string[] = [];
   let hasOpenDept = false;
@@ -108,6 +119,9 @@ export function PackagingPipeline() {
   const [cancelledAlert, setCancelledAlert] = useState<{ orderId: string; salesRecordNumber: string; itemTitle: string } | null>(null);
   const [lastRefresh, setLastRefresh] = useState(new Date());
   const [search, setSearch] = useState('');
+
+  const tickets = useOrderStore((s) => s.tickets);
+  const addTicket = useOrderStore((s) => s.addTicket);
 
   const currentUser = users.find((u) => u.id === currentUserId);
   const isAdmin = currentUser?.role === 'admin' || currentUser?.role === 'manager';
@@ -237,6 +251,67 @@ export function PackagingPipeline() {
   function moveToNext(orderId: string, nextStatus: OrderStatus) {
     updateOrderStatus(orderId, nextStatus);
     toast.success(`Moved to ${ORDER_STATUS_CONFIG[nextStatus].label}`);
+  }
+
+  // An order may only enter Packing with a tracking number (collections excepted).
+  const needsTracking = (o: Order) => !o.trackingNumber && o.deliveryType !== 'collection';
+
+  // Raise an URGENT Comms ticket to book the label/tracking for an order stuck
+  // at Checking. Deduped per order so repeated attempts don't spam Comms.
+  // Returns true when a new ticket was created.
+  function raiseTrackingTicket(order: Order): boolean {
+    const dup = tickets.find((t) => t.orderId === order.id && t.category === 'tracking' && t.status !== 'closed' && t.status !== 'resolved');
+    if (dup) return false;
+    const now = new Date().toISOString();
+    addTicket({
+      id: genTicketId(),
+      subject: `Book label/tracking — #${order.salesRecordNumber}`,
+      body: `Order is ready at Checking but has no tracking number. Book the carrier label (Batch Shipping) so it can move to Packing. Carrier: ${order.deliveryCarrier || 'unknown'} · Service: ${order.deliveryType || 'standard'}.`,
+      category: 'tracking',
+      status: 'open',
+      priority: 'urgent',
+      department: 'comms',
+      orderId: order.id,
+      salesRecordNumber: order.salesRecordNumber,
+      orderNumber: order.orderNumber,
+      buyerUsername: order.buyerUsername,
+      buyerName: order.buyerName,
+      itemTitle: order.itemTitle,
+      createdById: currentUser?.id,
+      createdByName: currentUser?.name,
+      activity: [{ at: now, byId: currentUser?.id, byName: currentUser?.name, type: 'create', text: 'Raised from Queue — no tracking number at Checking' }],
+      createdAt: now,
+      updatedAt: now,
+    });
+    return true;
+  }
+
+  // Checking → Packing for one order, gated on tracking.
+  function tryMoveToPacking(order: Order): boolean {
+    if (needsTracking(order)) {
+      const created = raiseTrackingTicket(order);
+      toast.warning(created
+        ? `#${order.salesRecordNumber} has no tracking — kept at Checking; urgent ticket raised to Comms to book the label`
+        : `#${order.salesRecordNumber} has no tracking — kept at Checking (Comms already ticketed)`);
+      return false;
+    }
+    moveToNext(order.id, 'packing');
+    return true;
+  }
+
+  // Bulk Checking → Packing: move the tracked ones, hold + ticket the rest.
+  function moveCheckingToPacking(list: Order[]) {
+    const ready = list.filter((o) => !needsTracking(o));
+    const blocked = list.filter(needsTracking);
+    if (ready.length > 0) {
+      bulkUpdateStatus(ready.map((o) => o.id), 'packing');
+      toast.success(`Moved ${ready.length} order${ready.length !== 1 ? 's' : ''} to Packing`);
+    }
+    if (blocked.length > 0) {
+      let raised = 0;
+      for (const o of blocked) if (raiseTrackingTicket(o)) raised++;
+      toast.warning(`${blocked.length} order${blocked.length !== 1 ? 's' : ''} kept at Checking — no tracking${raised > 0 ? `; ${raised} urgent Comms ticket${raised !== 1 ? 's' : ''} raised` : ''}`);
+    }
   }
 
   function confirmHold() {
@@ -488,7 +563,9 @@ export function PackagingPipeline() {
                         size="sm"
                         variant="outline"
                         className="text-xs h-7"
-                        onClick={() => moveAllToNext(s.orders.map((o) => o.id), s.nextStage)}
+                        onClick={() => s.stage === 'checking'
+                          ? moveCheckingToPacking(s.orders)
+                          : moveAllToNext(s.orders.map((o) => o.id), s.nextStage)}
                       >
                         All Next
                         <ArrowRight className="h-3 w-3 ml-1" />
@@ -509,7 +586,7 @@ export function PackagingPipeline() {
                   </p>
                 ) : (
                   <div className="space-y-2">
-                    {s.orders.map((order) => (
+                    {s.orders.slice(0, MAX_VISIBLE_PER_STAGE).map((order) => (
                       <div
                         key={order.id}
                         onClick={() => {
@@ -654,7 +731,7 @@ export function PackagingPipeline() {
                                           title={!allFitted ? 'Fit all outstanding accessories/monitors first' : !hasTracking && !isCollection ? 'Tracking number required before printing label' : undefined}
                                         >
                                           <Printer className="h-3 w-3 mr-1" />
-                                          {isCollection ? 'Pack' : (hasTracking ? 'Print Label' : 'No Tracking')}
+                                          {isCollection ? 'Pack' : (hasTracking ? 'Label + Invoice' : 'No Tracking')}
                                         </Button>
                                         {!hasTracking && !isCollection && (
                                           <p className="text-[10px] text-amber-600">Add tracking first</p>
@@ -702,20 +779,30 @@ export function PackagingPipeline() {
                                     const label = needsCleaning ? 'Cleaning done' : needsVinyl ? 'Vinyl applied' : readyForPacking ? 'To packing' : 'Done';
                                     const next = needsCleaning ? 'assembling' : needsVinyl ? 'checking' : s.nextStage;
                                     return (
-                                      <Button
-                                        size="sm"
-                                        className={`h-6 text-xs px-2 ${needsCleaning ? 'bg-cyan-600 hover:bg-cyan-700' : needsVinyl ? 'bg-purple-600 hover:bg-purple-700' : readyForPacking ? 'bg-indigo-600 hover:bg-indigo-700' : ''}`}
-                                        onClick={() => {
-                                          if (needsCleaning) setOrderCleaned(order.id, true);
-                                          if (needsVinyl) setOrderVinylApplied(order.id, true);
-                                          moveToNext(order.id, next);
-                                          // Leaving assembling for checking finishes the claim → free the lock.
-                                          if (isAssembling && next === 'checking') releaseAssemblyLock(order.id);
-                                        }}
-                                      >
-                                        <CheckCircle className="h-3 w-3 mr-1" />
-                                        {label}
-                                      </Button>
+                                      <>
+                                        {isChecking && needsTracking(order) && (
+                                          <span className="inline-flex items-center gap-0.5 text-[10px] font-bold px-1 py-0.5 rounded border bg-red-50 text-red-600 border-red-200" title="No tracking number — book the label in Batch Shipping before this order can move to Packing">
+                                            <Truck className="h-2.5 w-2.5" /> No tracking
+                                          </span>
+                                        )}
+                                        <Button
+                                          size="sm"
+                                          className={`h-6 text-xs px-2 ${needsCleaning ? 'bg-cyan-600 hover:bg-cyan-700' : needsVinyl ? 'bg-purple-600 hover:bg-purple-700' : readyForPacking ? 'bg-indigo-600 hover:bg-indigo-700' : ''}`}
+                                          onClick={() => {
+                                            if (needsCleaning) setOrderCleaned(order.id, true);
+                                            if (needsVinyl) setOrderVinylApplied(order.id, true);
+                                            // Entering Packing requires a tracking number — otherwise the
+                                            // order stays at Checking and Comms gets an urgent ticket.
+                                            if (next === 'packing') { tryMoveToPacking(order); return; }
+                                            moveToNext(order.id, next);
+                                            // Leaving assembling for checking finishes the claim → free the lock.
+                                            if (isAssembling && next === 'checking') releaseAssemblyLock(order.id);
+                                          }}
+                                        >
+                                          <CheckCircle className="h-3 w-3 mr-1" />
+                                          {label}
+                                        </Button>
+                                      </>
                                     );
                                   })()
                                 )}
@@ -817,6 +904,12 @@ export function PackagingPipeline() {
                         </div>
                       </div>
                     ))}
+                    {s.orders.length > MAX_VISIBLE_PER_STAGE && (
+                      <p className="text-[11px] text-slate-400 text-center py-2 border-t border-dashed border-slate-200">
+                        +{s.orders.length - MAX_VISIBLE_PER_STAGE} more waiting — top {MAX_VISIBLE_PER_STAGE} by priority shown.
+                        They appear here as these move on (or use search).
+                      </p>
+                    )}
                   </div>
                 )}
               </CardContent>

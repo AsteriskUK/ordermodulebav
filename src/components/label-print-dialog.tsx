@@ -4,9 +4,10 @@ import { Order } from '@/lib/types';
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { toast } from 'sonner';
-import { Printer, Package, CheckCircle } from 'lucide-react';
+import { Printer, Package, CheckCircle, FileText } from 'lucide-react';
 import { useOrderStore } from '@/lib/store';
-import { fetchPrinterConfig, printLabel, printerForCarrier } from '@/lib/print-agent';
+import { fetchPrinterConfig, printLabel, printerForCarrier, printInvoicesFor } from '@/lib/print-agent';
+import { buildInvoicesHtml, printHtml } from '@/lib/order-utils';
 import { useEffect, useState } from 'react';
 
 interface Props {
@@ -81,6 +82,31 @@ export function LabelPrintDialog({ order, onClose }: Props) {
     });
   }
 
+  // Invoice — via the print-agent invoice printer when configured, otherwise
+  // the browser print dialog (same fallback as InvoicePreviewDialog).
+  async function printInvoice() {
+    try {
+      const cfg = await fetchPrinterConfig();
+      if (cfg.agentUrl && cfg.invoicePrinter && (await printInvoicesFor([order], cfg))) {
+        toast.success('Invoice sent to invoice printer');
+        return;
+      }
+      printHtml(buildInvoicesHtml([order]));
+    } catch {
+      printHtml(buildInvoicesHtml([order]));
+    }
+  }
+
+  // One tap at the packing bench: label to the carrier printer + invoice to the
+  // invoice printer (each falling back to a browser print window).
+  async function printBoth() {
+    if (canPrint) {
+      if (agentPrinter) await printViaAgent();
+      else printLabels();
+    }
+    await printInvoice();
+  }
+
   function markPacked() {
     updateOrderStatus(order.id, 'packed');
     toast.success('Order moved to Packed');
@@ -93,7 +119,7 @@ export function LabelPrintDialog({ order, onClose }: Props) {
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
             <Printer className="h-4 w-4" />
-            Print Label — #{order.salesRecordNumber}
+            Print Label &amp; Invoice — #{order.salesRecordNumber}
           </DialogTitle>
         </DialogHeader>
 
@@ -149,19 +175,33 @@ export function LabelPrintDialog({ order, onClose }: Props) {
             </div>
           )}
 
-          {/* Actions */}
+          {/* Actions — one combined tap for the packing bench, or each separately */}
           <div className="flex flex-col gap-2 pt-1">
-            {canPrint && agentPrinter && (
-              <Button onClick={printViaAgent} className="w-full">
+            {canPrint && (
+              <Button onClick={printBoth} className="w-full bg-green-600 hover:bg-green-700">
                 <Printer className="h-4 w-4 mr-2" />
-                Print to {carrier} printer ({agentPrinter})
+                Print Label + Invoice
               </Button>
             )}
-            {canPrint && (
-              <Button onClick={printLabels} variant={agentPrinter ? 'outline' : 'default'} className="w-full">
+            <div className="grid grid-cols-2 gap-2">
+              <Button
+                onClick={() => (canPrint && agentPrinter ? printViaAgent() : printLabels())}
+                variant="outline"
+                disabled={!canPrint}
+                title={!canPrint ? 'No label booked yet — book it in Batch Shipping' : agentPrinter ? `Sends to ${agentPrinter}` : 'Opens the browser print dialog'}
+              >
                 <Printer className="h-4 w-4 mr-2" />
-                {agentPrinter ? 'Print via browser instead' : `Print ${order.labelData!.length > 1 ? `${order.labelData!.length} Labels` : 'Label'}`}
+                Label only
               </Button>
+              <Button onClick={printInvoice} variant="outline">
+                <FileText className="h-4 w-4 mr-2" />
+                Invoice only
+              </Button>
+            </div>
+            {canPrint && agentPrinter && (
+              <button onClick={printLabels} className="text-xs text-slate-400 hover:text-slate-600 underline w-fit mx-auto">
+                Print label via browser instead
+              </button>
             )}
 
             <Button
