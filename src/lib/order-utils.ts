@@ -77,12 +77,112 @@ const INVOICE_BRANDS: Record<OrderPlatform, { name: string; color: string; refLa
   manual:     { name: 'Direct Sale', color: '#334155', refLabel: 'Order' },
 };
 
+// Amazon Marketplace seller display name shown on packing slips.
+const AMAZON_SELLER_NAME = 'BIRMINGHAM AV';
+
+const AMAZON_DELIVERY_SERVICE: Record<string, string> = {
+  standard: 'Standard', next_day: 'Next Day', two_day: 'Two Day', express: 'Expedited', collection: 'Collection',
+};
+
+// Amazon packing slip — matches the official Amazon Marketplace slip layout:
+// "Dispatch to" block, dashed rule, Order ID + thank-you line, the bordered
+// delivery/order-details box, the Quantity/Product Details/Unit price/Order
+// Totals table (VAT-inclusive figures), grand total and the Amazon footer.
+function buildAmazonSlipPage(o: Order): string {
+  const orderId = o.amazonOrderId || o.orderNumber || o.salesRecordNumber;
+  const orderDate = o.saleDate
+    ? new Date(o.saleDate).toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric', year: 'numeric' })
+    : '—';
+  const service = AMAZON_DELIVERY_SERVICE[o.deliveryType] ?? 'Standard';
+  const qty = o.quantity || 1;
+  const unitPrice = o.soldFor / qty;
+  const itemSubtotal = o.soldFor;
+  const grandTotal = o.totalPrice || o.soldFor;
+  // UK prices are VAT-inclusive — the slip shows the VAT portion (20% ⇒ ÷6).
+  const vat = (n: number) => n / 6;
+  const gbp = (n: number) => `£${n.toFixed(2)}`;
+  const addressLines = [
+    o.postToName,
+    o.postToAddress1,
+    o.postToAddress2,
+    o.postToCity,
+    o.postToCounty,
+    o.postToPostcode,
+    o.postToCountry || 'United Kingdom',
+  ].filter((l): l is string => !!l && l.trim() !== '');
+
+  return `
+    <div class="invoice amz">
+      <p class="amz-dispatch-label">Dispatch to:</p>
+      <div class="amz-dispatch">${addressLines.map((l) => `<p>${l}</p>`).join('')}</div>
+      <div class="amz-dash"></div>
+      <p class="amz-order-id">Order ID: ${orderId}</p>
+      <p class="amz-thanks">Thank you for buying from ${AMAZON_SELLER_NAME} on Amazon Marketplace.</p>
+      <table class="amz-details">
+        <tr>
+          <td class="amz-details-address" rowspan="4">
+            <p><strong>Delivery address:</strong></p>
+            ${addressLines.map((l) => `<p>${l}</p>`).join('')}
+          </td>
+          <td class="amz-details-label">Order Date:</td>
+          <td>${orderDate}</td>
+        </tr>
+        <tr><td class="amz-details-label">Delivery Service:</td><td>${service}</td></tr>
+        <tr><td class="amz-details-label">Buyer Name:</td><td>${o.buyerName || o.buyerUsername || '—'}</td></tr>
+        <tr><td class="amz-details-label">Seller Name:</td><td>${AMAZON_SELLER_NAME}</td></tr>
+      </table>
+      <table class="amz-items">
+        <thead>
+          <tr>
+            <th class="amz-c">Quantity</th>
+            <th class="amz-c">Quantity Included</th>
+            <th>Product Details</th>
+            <th>Unit price</th>
+            <th class="amz-c">Order Totals</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td class="amz-c amz-top">${qty}</td>
+            <td class="amz-c amz-top">${qty}</td>
+            <td class="amz-top">
+              <p class="amz-item-title">${o.itemTitle}</p>
+              ${o.variation ? `<p><strong>Variation:</strong> ${o.variation}</p>` : ''}
+              ${o.customLabel ? `<p><strong>SKU:</strong> ${o.customLabel}</p>` : ''}
+              ${o.itemNumber ? `<p><strong>ASIN:</strong> ${o.itemNumber}</p>` : ''}
+              <p><strong>Condition:</strong> New</p>
+            </td>
+            <td class="amz-top">${gbp(unitPrice)}</td>
+            <td class="amz-top amz-r">
+              <table class="amz-totals">
+                <tr><td></td><td></td><td class="amz-vat-head">Included VAT</td></tr>
+                <tr class="amz-rule"><td><strong>Item subtotal</strong></td><td>${gbp(itemSubtotal)}</td><td>${gbp(vat(itemSubtotal))}</td></tr>
+                ${o.postageAndPackaging > 0 ? `<tr class="amz-rule"><td><strong>Postage &amp; Packing</strong></td><td>${gbp(o.postageAndPackaging)}</td><td>${gbp(vat(o.postageAndPackaging))}</td></tr>` : ''}
+                <tr class="amz-rule"><td><strong>Item total</strong></td><td><strong>${gbp(grandTotal)}</strong></td><td><strong>${gbp(vat(grandTotal))}</strong></td></tr>
+              </table>
+            </td>
+          </tr>
+        </tbody>
+      </table>
+      <p class="amz-grand">Grand total: ${gbp(grandTotal)}</p>
+      ${o.buyerNote ? `<div class="note"><strong>Buyer Note:</strong> ${o.buyerNote}</div>` : ''}
+      <p class="amz-footer">
+        <strong>Thanks for buying on Amazon Marketplace.</strong> To provide feedback for the seller please visit
+        <span class="amz-link">www.amazon.co.uk/feedback</span>. To contact the seller, go to Your Orders in Your Account. Click the seller's name under the
+        appropriate product. Then, in the "Further Information" section, click "Contact the Seller."
+      </p>
+      <div class="amz-dash"></div>
+    </div>`;
+}
+
 /** Build printable invoice HTML for one or more orders. */
 export function buildInvoicesHtml(orders: Order[]): string {
   const pages = orders.map((o) => {
     const platform = getOrderPlatform(o);
+    // Amazon orders print the official Amazon Marketplace packing slip layout.
+    if (platform === 'amazon') return buildAmazonSlipPage(o);
     const brand = INVOICE_BRANDS[platform];
-    const orderRef = platform === 'amazon' ? (o.amazonOrderId || o.orderNumber || o.salesRecordNumber) : o.salesRecordNumber;
+    const orderRef = o.salesRecordNumber;
     return `
     <div class="invoice" style="border-top:6px solid ${brand.color};">
       <div class="header" style="border-bottom-color:${brand.color};">
@@ -93,7 +193,6 @@ export function buildInvoicesHtml(orders: Order[]): string {
         <div class="ref">
           <span class="platform-badge" style="background:${brand.color};">${brand.name}</span><br/>
           ${brand.refLabel} #${orderRef}
-          ${platform === 'amazon' && o.salesRecordNumber && o.salesRecordNumber !== orderRef ? `<br/><span class="subref">Ref ${o.salesRecordNumber}</span>` : ''}
           ${platform === 'ebay' && o.orderNumber && o.orderNumber !== o.salesRecordNumber ? `<br/><span class="subref">eBay order ${o.orderNumber}</span>` : ''}
         </div>
       </div>
@@ -156,6 +255,40 @@ export function buildInvoicesHtml(orders: Order[]): string {
     tfoot td { border-top:1px solid #999; }
     tr.total td { font-weight:bold; }
     .note { background:#fffbe6; border:1px solid #f0c040; padding:8px; border-radius:4px; font-size:11px; }
+
+    /* ---- Amazon Marketplace packing slip ---- */
+    .amz { font-family: Arial, Helvetica, sans-serif; font-size:12px; color:#000; padding-top:40px; }
+    .amz p { line-height:1.5; }
+    .amz-dispatch-label { font-size:11px; margin-bottom:2px; }
+    .amz-dispatch p { font-size:15px; font-weight:bold; line-height:1.35; }
+    .amz-dash { border-top:2px dashed #444; margin:14px 0; }
+    .amz-order-id { font-size:15px; font-weight:bold; margin-bottom:2px; }
+    .amz-thanks { font-size:11px; margin-bottom:10px; }
+    .amz-details { width:100%; border:1px solid #000; border-collapse:collapse; margin-bottom:14px; }
+    .amz-details td { border:none; padding:3px 10px; font-size:12px; vertical-align:top; }
+    .amz-details td:first-child { padding-top:8px; }
+    .amz-details tr:first-child td { padding-top:8px; }
+    .amz-details tr:last-child td { padding-bottom:8px; }
+    .amz-details-address { width:38%; padding-bottom:8px !important; }
+    .amz-details-address p { line-height:1.6; }
+    .amz-details-label { width:22%; white-space:nowrap; }
+    .amz-items { width:100%; border-collapse:collapse; margin-bottom:6px; }
+    .amz-items th, .amz-items td { border:1px solid #000; padding:6px 8px; font-size:12px; }
+    .amz-items th { background:#fff; font-weight:bold; text-align:left; }
+    .amz-items th.amz-c { text-align:center; }
+    .amz-c { text-align:center; }
+    .amz-r { text-align:right; }
+    .amz-top { vertical-align:top; }
+    .amz-item-title { font-weight:bold; margin-bottom:6px; }
+    .amz-items td p { line-height:1.6; }
+    .amz-totals { width:100%; border-collapse:collapse; margin-left:auto; }
+    .amz-totals td { border:none !important; padding:2px 4px; font-size:12px; text-align:right; white-space:nowrap; }
+    .amz-totals td:first-child { text-align:left; }
+    .amz-vat-head { color:#555; }
+    .amz-rule td { border-bottom:1px solid #bbb !important; }
+    .amz-grand { text-align:right; font-size:13px; font-weight:bold; margin:8px 0 18px; }
+    .amz-footer { font-size:11.5px; line-height:1.6; margin-top:6px; }
+    .amz-link { color:#0066c0; }
     @media print { body { margin:0; } }
   </style></head><body>${pages.join('')}</body></html>`;
 }

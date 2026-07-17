@@ -15,6 +15,34 @@ function generateUUID(): string {
   });
 }
 
+// When an order ships from the warehouse, upload its tracking to eBay as a
+// shipping fulfilment. Until dispatch the buyer only has the tracking number
+// via an order message (sent at label booking) — this is the moment it goes
+// live on eBay. Fire-and-forget; the endpoint is idempotent (skips orders that
+// already have a fulfilment), and a session-level set avoids repeat calls.
+const fulfilmentPushed = new Set<string>();
+function pushMarketplaceFulfillment(order: Order): void {
+  if (typeof window === 'undefined') return;
+  if (!order.trackingNumber || !order.orderNumber) return;
+  // eBay order ids look like 12-34567-89012 (or the batch says eBay).
+  const isEbay = /^\d{2}-\d{5}-\d{5}$/.test(order.orderNumber) || order.batchId?.startsWith('ebay-');
+  if (!isEbay || fulfilmentPushed.has(order.orderNumber)) return;
+  fulfilmentPushed.add(order.orderNumber);
+  fetch('/api/ebay/orders/fulfillment', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ orderNumber: order.orderNumber, trackingNumber: order.trackingNumber, carrier: order.deliveryCarrier }),
+  }).then(async (res) => {
+    if (!res.ok) {
+      fulfilmentPushed.delete(order.orderNumber); // allow a retry on the next shipped move
+      console.warn('[fulfilment] eBay tracking upload failed', order.salesRecordNumber, (await res.text()).slice(0, 200));
+    }
+  }).catch((e) => {
+    fulfilmentPushed.delete(order.orderNumber);
+    console.warn('[fulfilment] eBay tracking upload error', order.salesRecordNumber, e);
+  });
+}
+
 // Advisory assembly locks auto-expire so a closed tab / abandoned build doesn't
 // block the order forever.
 export const ASSEMBLY_LOCK_TTL_MS = 30 * 60 * 1000;
@@ -259,6 +287,11 @@ export const useOrderStore = create<OrderStore>()(
         if (status === 'packed' && before && before.status !== 'packed') {
           const build = get().builds.find((b) => b.orderId === orderId && b.status === 'reserved');
           if (build) get().consumeBuild(build.id);
+        }
+        // Shipped from the warehouse → put the tracking live on eBay.
+        if (status === 'shipped' && before && before.status !== 'shipped') {
+          const shipped = get().orders.find((o) => o.id === orderId);
+          if (shipped) pushMarketplaceFulfillment(shipped);
         }
       },
       updateOrderComment: (orderId, comment) =>
@@ -542,6 +575,8 @@ export const useOrderStore = create<OrderStore>()(
           // Sync all updated orders to Supabase
           updatedOrders.filter(o => orderIds.includes(o.id)).forEach(o => {
             syncOrder(o).catch(console.error);
+            // Shipped from the warehouse → put the tracking live on eBay.
+            if (status === 'shipped') pushMarketplaceFulfillment(o);
           });
           return {
             orders: updatedOrders,

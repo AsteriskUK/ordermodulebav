@@ -6,6 +6,7 @@ import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { parseCSV } from '@/lib/csv-parser';
 import { buildInvoicesHtml as buildInvoicesHtmlUtil, printHtml as printHtmlUtil } from '@/lib/order-utils';
+import { autoBookLabels } from '@/lib/auto-book';
 import { useOrderStore } from '@/lib/store';
 import { Batch, Order } from '@/lib/types';
 import { OrderSourceLogo } from '@/components/order-source-logo';
@@ -435,6 +436,11 @@ export function CSVImport() {
     const importedOrders = preview.orders;
     addOrders(importedOrders, batch);
     toast.success(`Imported ${importedOrders.length} orders successfully!`);
+    // Book carrier labels straight away (book only — printed at packing);
+    // tracking is messaged to the buyer, eBay fulfilment happens on ship.
+    autoBookLabels(importedOrders)
+      .then((booked) => { if (booked > 0) toast.success(`Auto-booked ${booked} label${booked !== 1 ? 's' : ''} — tracking sent to buyer${booked !== 1 ? 's' : ''}`, { icon: '🏷️' }); })
+      .catch((e) => console.error('[import] label auto-booking failed', e));
     printHtmlUtil(buildInvoicesHtmlUtil(importedOrders));
     setPreview(null);
     setImporting(false);

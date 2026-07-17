@@ -5,6 +5,7 @@ import { useOrderStore } from '@/lib/store';
 import { supabase, isSupabaseConfigured } from '@/lib/supabase-client';
 import { Order, Batch } from '@/lib/types';
 import { fetchPrinterConfig, printInvoicesFor } from '@/lib/print-agent';
+import { autoBookLabels } from '@/lib/auto-book';
 import { toast } from 'sonner';
 
 // Automatic order pulling. Every open client checks a shared timestamp and, if
@@ -62,6 +63,14 @@ export function useAutoPull() {
         for (const src of SOURCES) fresh.push(...await pullSource(src, addOrders));
         if (fresh.length > 0 && !cancelled) {
           toast.success(`Auto-pulled ${fresh.length} new order${fresh.length !== 1 ? 's' : ''}`, { icon: '🔄' });
+          // Book carrier labels straight away (book only — printed at packing).
+          // Tracking is messaged to the buyer; eBay fulfilment happens on ship.
+          try {
+            const booked = await autoBookLabels(fresh);
+            if (booked > 0) toast.success(`Auto-booked ${booked} label${booked !== 1 ? 's' : ''} — tracking sent to buyer${booked !== 1 ? 's' : ''}`, { icon: '🏷️' });
+          } catch (e) {
+            console.error('[auto-pull] label auto-booking failed', e);
+          }
           // Auto-print invoices for the new orders (if a printer is configured).
           try {
             const cfg = await fetchPrinterConfig();
