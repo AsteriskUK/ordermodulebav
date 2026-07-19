@@ -76,9 +76,11 @@ export async function POST(req: Request) {
   });
 }
 
-// PATCH { userId, sessionId } → { valid } — false means this device was superseded
+// PATCH { userId, sessionId, deviceLabel? } → { valid } — false means superseded
 export async function PATCH(req: Request) {
-  const { userId, sessionId } = await req.json().catch(() => ({})) as { userId?: string; sessionId?: string };
+  const { userId, sessionId, deviceLabel } = await req.json().catch(() => ({})) as {
+    userId?: string; sessionId?: string; deviceLabel?: string;
+  };
   if (!userId || !sessionId) return NextResponse.json({ valid: true });
 
   const supabase = getServiceClient();
@@ -91,16 +93,24 @@ export async function PATCH(req: Request) {
   const row = (data ?? null) as SessionRow | null;
   if (!row) {
     // No row (released or cleared) — re-claim rather than log the user out.
+    // Carry the device label through, or a later conflict message degrades to
+    // a useless "another device".
     const now = new Date().toISOString();
-    await supabase.from('user_sessions').upsert({ user_id: userId, session_id: sessionId, claimed_at: now, last_seen_at: now });
+    await supabase.from('user_sessions').upsert({
+      user_id: userId, session_id: sessionId, device_label: deviceLabel ?? null,
+      claimed_at: now, last_seen_at: now,
+    });
     return NextResponse.json({ valid: true, enforced: true });
   }
   if (row.session_id !== sessionId) {
     return NextResponse.json({ valid: false, takenBy: row.device_label ?? 'another device' });
   }
 
+  // Backfill the label if this row predates it (e.g. created by a heartbeat).
+  const patch: Record<string, string> = { last_seen_at: new Date().toISOString() };
+  if (!row.device_label && deviceLabel) patch.device_label = deviceLabel;
   await supabase.from('user_sessions')
-    .update({ last_seen_at: new Date().toISOString() })
+    .update(patch)
     .eq('user_id', userId).eq('session_id', sessionId);
   return NextResponse.json({ valid: true, enforced: true });
 }

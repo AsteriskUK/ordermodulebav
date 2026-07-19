@@ -84,7 +84,7 @@ export function useSessionLock() {
         const res = await fetch('/api/session', {
           method: 'PATCH',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ userId: currentUserId, sessionId: getSessionId() }),
+          body: JSON.stringify({ userId: currentUserId, sessionId: getSessionId(), deviceLabel: getDeviceLabel() }),
         });
         if (!res.ok) return;                       // fail open
         const d = await res.json() as { valid: boolean; takenBy?: string };
