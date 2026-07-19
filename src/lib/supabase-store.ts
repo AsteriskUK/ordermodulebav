@@ -1,6 +1,8 @@
 import { supabase } from './supabase-client';
 import { Order, Batch, AppUser, AttendanceRecord, LeaveRequest, LeaveBalance, EodEvent, ReturnRecord, TicketRecord, Department, TicketStatus, TicketPriority, TicketContactMethod, TicketActivity, MissingItemRecord, MissingPart, InventoryPart, StockUnit, StockLevel, GoodsReceipt, GoodsReceiptLine, GoodsReceiptStatus, Build, BuildLine, BuildSwap, AccessConfig } from './types';
 import { StockTracking, StockUnitStatus, BuildStatus } from './inventory-config';
+import { SettingsValues, SETTINGS_STORAGE_KEY } from './settings';
+import { SettingValue } from './settings-schema';
 
 // Helper to check if string is valid UUID
 function isValidUUID(str: string): boolean {
@@ -890,11 +892,64 @@ export async function saveAccessControl(config: AccessConfig): Promise<void> {
   if (error) console.error('Error saving access control:', { message: error.message, code: error.code });
 }
 
+// ==================== APP SETTINGS ====================
+// Admin-configured app configuration, stored as one JSON document in
+// app_settings (same pattern as access control). Only genuine overrides are
+// stored — everything else comes from the defaults in settings-schema.ts.
+
+export async function fetchAppSettings(): Promise<SettingsValues | null> {
+  const { data, error } = await supabase
+    .from('app_settings')
+    .select('value')
+    .eq('key', SETTINGS_STORAGE_KEY)
+    .maybeSingle();
+  if (error) {
+    console.error('Error fetching app settings:', { message: error.message, code: error.code });
+    return null;
+  }
+  if (!data?.value) return null;
+  try {
+    return typeof data.value === 'string' ? (JSON.parse(data.value) as SettingsValues) : (data.value as SettingsValues);
+  } catch {
+    return null;
+  }
+}
+
+export async function saveAppSettings(values: SettingsValues): Promise<void> {
+  const { error } = await supabase
+    .from('app_settings')
+    .upsert({ key: SETTINGS_STORAGE_KEY, value: JSON.stringify(values), updated_at: new Date().toISOString() });
+  if (error) {
+    console.error('Error saving app settings:', { message: error.message, code: error.code });
+    throw new Error(error.message);
+  }
+}
+
+/** Append-only audit of settings changes (best-effort — never blocks a save). */
+export async function recordSettingsAudit(
+  entries: { key: string; from: SettingValue | null; to: SettingValue | null }[],
+  user: { id?: string; name?: string },
+): Promise<void> {
+  if (entries.length === 0) return;
+  const { error } = await supabase.from('settings_audit').insert(
+    entries.map((e) => ({
+      setting_key: e.key,
+      old_value: e.from === null || e.from === undefined ? null : JSON.stringify(e.from),
+      new_value: e.to === null || e.to === undefined ? null : JSON.stringify(e.to),
+      changed_by_id: user.id ?? null,
+      changed_by_name: user.name ?? null,
+      changed_at: new Date().toISOString(),
+    })),
+  );
+  // The audit table may not exist yet (migration not applied) — don't fail the save.
+  if (error) console.warn('[settings] audit not recorded:', error.message);
+}
+
 // ==================== FULL SYNC ====================
 
 export async function loadAllFromSupabase() {
   const [users, batches, orders, returns, attendanceRecords, leaveRequests, leaveBalances, tickets, missingItems,
-         inventoryParts, stockUnits, stockLevels, goodsReceipts, builds, accessControl] = await Promise.all([
+         inventoryParts, stockUnits, stockLevels, goodsReceipts, builds, accessControl, appSettings] = await Promise.all([
     fetchUsers(),
     fetchBatches(),
     fetchOrders(),
@@ -910,6 +965,7 @@ export async function loadAllFromSupabase() {
     fetchGoodsReceipts(),
     fetchBuilds(),
     fetchAccessControl(),
+    fetchAppSettings(),
   ]);
 
   return {
@@ -928,5 +984,6 @@ export async function loadAllFromSupabase() {
     goodsReceipts,
     builds,
     accessControl,
+    appSettings,
   };
 }

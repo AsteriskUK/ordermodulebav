@@ -5,6 +5,7 @@ import { Order, OrderNote, OrderStatus, Batch, DeliveryCarrier, DeliveryType, Ap
 import { syncAttendance, syncLeaveRequest, syncLeaveBalance, syncOrder, syncBatch, syncUser, deleteUserFromSupabase, syncReturn, syncTicket, deleteTicketFromSupabase, syncMissingItem, syncInventoryPart, syncStockUnit, syncStockLevel, syncGoodsReceipt, syncBuild, softDeleteOrderInSupabase, hardDeleteOrderFromSupabase } from './supabase-store';
 import { buildSku, INVENTORY_CATEGORY_MAP } from './inventory-config';
 import { allPackItemsConfirmed } from './inventory-build';
+import { SettingsValues } from './settings';
 
 // Generate proper UUID v4 for PostgreSQL compatibility
 function generateUUID(): string {
@@ -91,6 +92,9 @@ interface OrderStore {
   emailConfig: EmailConfig;
   accessControl: AccessConfig | null;
   setAccessControl: (config: AccessConfig | null) => void;
+  /** Admin-configured app settings — overrides only; defaults live in settings-schema.ts. */
+  appSettings: SettingsValues | null;
+  setAppSettings: (values: SettingsValues | null) => void;
   addOrders: (orders: Order[], batch: Batch) => void;
   updateOrderStatus: (orderId: string, status: OrderStatus) => void;
   updateOrderComment: (orderId: string, comment: string) => void;
@@ -197,6 +201,7 @@ export const useOrderStore = create<OrderStore>()(
       ] as AppUser[],
       currentUserId: null as string | null,
       accessControl: null as AccessConfig | null,
+      appSettings: null as SettingsValues | null,
       emailConfig: {
         enabled: false,
         recipientEmail: '',
@@ -654,6 +659,7 @@ export const useOrderStore = create<OrderStore>()(
       setEmailConfig: (config) =>
         set((state) => ({ emailConfig: { ...state.emailConfig, ...config } })),
       setAccessControl: (config) => set({ accessControl: config }),
+      setAppSettings: (values) => set({ appSettings: values }),
       clearEodEvents: () => set({ eodEvents: [] }),
       addReturn: (ret) => {
         set((state) => ({

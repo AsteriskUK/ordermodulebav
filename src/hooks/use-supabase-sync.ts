@@ -72,6 +72,8 @@ export function useSupabaseSync() {
         builds: data.builds.length > 0 ? data.builds : currentState.builds,
         // Access control: Supabase is source of truth (null until an admin saves one).
         accessControl: data.accessControl ?? currentState.accessControl,
+        // App settings: Supabase is source of truth (null = all registry defaults).
+        appSettings: data.appSettings ?? currentState.appSettings,
       });
 
       setLastSync(new Date());
