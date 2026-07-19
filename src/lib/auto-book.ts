@@ -1,6 +1,7 @@
 import { Order } from './types';
 import { useOrderStore } from './store';
 import { getOrderPlatform } from './order-utils';
+import { resolveSetting, asBool, asList, asString } from './settings';
 
 // Auto-book carrier labels for newly fetched orders — BOOK ONLY. The label PDFs
 // are stored on the order and printed at the packing stage; the tracking number
@@ -20,19 +21,22 @@ interface ShipResult {
   labelHtmls?: string[];
 }
 
-const BOOKABLE_CARRIERS = ['DPD', 'FedEx'] as const;
-
-function isBookable(o: Order): boolean {
+function isBookable(o: Order, carriers: string[]): boolean {
   return !o.trackingNumber
     && !(o.labelData?.length)
     && o.deliveryType !== 'collection'
-    && (BOOKABLE_CARRIERS as readonly string[]).includes(o.deliveryCarrier)
+    && carriers.includes(o.deliveryCarrier)
     && !!o.postToAddress1 && !!o.postToPostcode;
 }
 
 /** Book labels for any bookable orders in the list. Returns how many were booked. */
 export async function autoBookLabels(orders: Order[]): Promise<number> {
-  const bookable = orders.filter(isBookable);
+  const settings = useOrderStore.getState().appSettings;
+  if (!asBool(resolveSetting(settings, 'autobook.enabled'))) return 0;
+
+  const carriers = asList(resolveSetting(settings, 'autobook.carriers'));
+  const dpdService = asString(resolveSetting(settings, 'shipping.defaultDpdService'));
+  const bookable = orders.filter((o) => isBookable(o, carriers));
   if (bookable.length === 0) return 0;
 
   const { updateOrderTracking, saveOrderLabels } = useOrderStore.getState();
@@ -40,8 +44,7 @@ export async function autoBookLabels(orders: Order[]): Promise<number> {
   let booked = 0;
 
   const batches: Array<[Order[], string, Record<string, unknown>]> = [
-    // Same defaults as Batch Shipping: DPD Next Day, FedEx with today's ship date.
-    [bookable.filter((o) => o.deliveryCarrier === 'DPD'), '/api/dpd/create-shipment', { collectionDate: shipDate, service: 'next_day' }],
+    [bookable.filter((o) => o.deliveryCarrier === 'DPD'), '/api/dpd/create-shipment', { collectionDate: shipDate, service: dpdService }],
     [bookable.filter((o) => o.deliveryCarrier === 'FedEx'), '/api/fedex/create-shipment', { shipDate }],
   ];
 
@@ -85,9 +88,18 @@ export async function autoBookLabels(orders: Order[]): Promise<number> {
 // their eBay messages) — NOT as a fulfilment; that only happens on dispatch.
 // Amazon SP-API doesn't allow proactive free-text messages, so eBay only.
 async function notifyBuyerTracking(order: Order, tracking: string): Promise<void> {
+  const settings = useOrderStore.getState().appSettings;
+  if (!asBool(resolveSetting(settings, 'autobook.notifyBuyer'))) return;
   if (getOrderPlatform(order) !== 'ebay' || !order.buyerUsername) return;
+
   const firstName = (order.postToName || order.buyerName || '').split(' ')[0] || order.buyerUsername;
-  const text = `Hi ${firstName},\n\nGood news — your order #${order.salesRecordNumber} is being prepared and its ${order.deliveryCarrier} shipping label is already booked.\n\nYour tracking number is ${tracking}.\n\nTracking goes live as soon as the parcel leaves our warehouse. Thanks for your purchase!`;
+  const text = asString(resolveSetting(settings, 'autobook.buyerMessageTemplate'))
+    .replace(/\{firstName\}/g, firstName)
+    .replace(/\{buyerName\}/g, order.buyerName || order.postToName || '')
+    .replace(/\{orderNumber\}/g, order.salesRecordNumber)
+    .replace(/\{tracking\}/g, tracking)
+    .replace(/\{carrier\}/g, order.deliveryCarrier || '')
+    .replace(/\{itemTitle\}/g, order.itemTitle || '');
   const res = await fetch('/api/ebay/messages', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },

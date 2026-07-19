@@ -1,4 +1,6 @@
 import { Order } from './types';
+import { useOrderStore } from './store';
+import { resolveSetting, asString, asNumber, asBool } from './settings';
 
 export type OrderUrgency = 'overdue' | 'express' | 'due-soon' | 'normal';
 
@@ -77,8 +79,20 @@ const INVOICE_BRANDS: Record<OrderPlatform, { name: string; color: string; refLa
   manual:     { name: 'Direct Sale', color: '#334155', refLabel: 'Order' },
 };
 
-// Amazon Marketplace seller display name shown on packing slips.
-const AMAZON_SELLER_NAME = 'BIRMINGHAM AV';
+// Invoice-time configuration (Settings → Business / Printing). This module is
+// only used client-side, so it reads the store directly; every value falls back
+// to its registry default when nothing is stored.
+function invoiceConfig() {
+  const values = useOrderStore.getState().appSettings;
+  return {
+    sellerName: asString(resolveSetting(values, 'business.tradingName')),
+    vatRate: asNumber(resolveSetting(values, 'business.vatRatePercent')),
+    footer: asString(resolveSetting(values, 'invoice.footerText')),
+    showBuyerNote: asBool(resolveSetting(values, 'invoice.showBuyerNote')),
+    showSku: asBool(resolveSetting(values, 'invoice.showSku')),
+    useMarketplaceTemplates: asBool(resolveSetting(values, 'invoice.useMarketplaceTemplates')),
+  };
+}
 
 const AMAZON_DELIVERY_SERVICE: Record<string, string> = {
   standard: 'Standard', next_day: 'Next Day', two_day: 'Two Day', express: 'Expedited', collection: 'Collection',
@@ -89,6 +103,7 @@ const AMAZON_DELIVERY_SERVICE: Record<string, string> = {
 // delivery/order-details box, the Quantity/Product Details/Unit price/Order
 // Totals table (VAT-inclusive figures), grand total and the Amazon footer.
 function buildAmazonSlipPage(o: Order): string {
+  const cfg = invoiceConfig();
   const orderId = o.amazonOrderId || o.orderNumber || o.salesRecordNumber;
   const orderDate = o.saleDate
     ? new Date(o.saleDate).toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric', year: 'numeric' })
@@ -98,8 +113,8 @@ function buildAmazonSlipPage(o: Order): string {
   const unitPrice = o.soldFor / qty;
   const itemSubtotal = o.soldFor;
   const grandTotal = o.totalPrice || o.soldFor;
-  // UK prices are VAT-inclusive — the slip shows the VAT portion (20% ⇒ ÷6).
-  const vat = (n: number) => n / 6;
+  // Prices are VAT-inclusive — show the VAT portion at the configured rate.
+  const vat = (n: number) => (cfg.vatRate <= 0 ? 0 : n - n / (1 + cfg.vatRate / 100));
   const gbp = (n: number) => `£${n.toFixed(2)}`;
   const addressLines = [
     o.postToName,
@@ -117,7 +132,7 @@ function buildAmazonSlipPage(o: Order): string {
       <div class="amz-dispatch">${addressLines.map((l) => `<p>${l}</p>`).join('')}</div>
       <div class="amz-dash"></div>
       <p class="amz-order-id">Order ID: ${orderId}</p>
-      <p class="amz-thanks">Thank you for buying from ${AMAZON_SELLER_NAME} on Amazon Marketplace.</p>
+      <p class="amz-thanks">Thank you for buying from ${cfg.sellerName} on Amazon Marketplace.</p>
       <table class="amz-details">
         <tr>
           <td class="amz-details-address" rowspan="4">
@@ -129,7 +144,7 @@ function buildAmazonSlipPage(o: Order): string {
         </tr>
         <tr><td class="amz-details-label">Delivery Service:</td><td>${service}</td></tr>
         <tr><td class="amz-details-label">Buyer Name:</td><td>${o.buyerName || o.buyerUsername || '—'}</td></tr>
-        <tr><td class="amz-details-label">Seller Name:</td><td>${AMAZON_SELLER_NAME}</td></tr>
+        <tr><td class="amz-details-label">Seller Name:</td><td>${cfg.sellerName}</td></tr>
       </table>
       <table class="amz-items">
         <thead>
@@ -177,10 +192,12 @@ function buildAmazonSlipPage(o: Order): string {
 
 /** Build printable invoice HTML for one or more orders. */
 export function buildInvoicesHtml(orders: Order[]): string {
+  const cfg = invoiceConfig();
   const pages = orders.map((o) => {
     const platform = getOrderPlatform(o);
-    // Amazon orders print the official Amazon Marketplace packing slip layout.
-    if (platform === 'amazon') return buildAmazonSlipPage(o);
+    // Amazon orders print the official Amazon Marketplace packing slip layout
+    // (unless marketplace-native templates are switched off in Settings).
+    if (platform === 'amazon' && cfg.useMarketplaceTemplates) return buildAmazonSlipPage(o);
     const brand = INVOICE_BRANDS[platform];
     const orderRef = o.salesRecordNumber;
     return `
@@ -210,7 +227,7 @@ export function buildInvoicesHtml(orders: Order[]): string {
           <p class="label">Order Details</p>
           <p>Sale Date: ${o.saleDate || o.paidOnDate || '—'}</p>
           <p>Sold via: ${brand.name}</p>
-          ${o.customLabel ? `<p>SKU: ${o.customLabel}</p>` : ''}
+          ${cfg.showSku && o.customLabel ? `<p>SKU: ${o.customLabel}</p>` : ''}
           ${o.trackingNumber ? `<p>Tracking: ${o.trackingNumber}</p>` : ''}
         </div>
       </div>
@@ -230,7 +247,8 @@ export function buildInvoicesHtml(orders: Order[]): string {
           <tr class="total"><td colspan="3"></td><td>Total</td><td>£${o.totalPrice.toFixed(2)}</td></tr>
         </tfoot>
       </table>
-      ${o.buyerNote ? `<div class="note"><strong>Buyer Note:</strong> ${o.buyerNote}</div>` : ''}
+      ${cfg.showBuyerNote && o.buyerNote ? `<div class="note"><strong>Buyer Note:</strong> ${o.buyerNote}</div>` : ''}
+      ${cfg.footer ? `<p class="inv-footer">${cfg.footer}</p>` : ''}
     </div>`;
   });
   return `<!DOCTYPE html><html><head><meta charset="utf-8"/><title>Invoices</title>
@@ -254,6 +272,7 @@ export function buildInvoicesHtml(orders: Order[]): string {
     th { background:#f0f0f0; font-weight:bold; }
     tfoot td { border-top:1px solid #999; }
     tr.total td { font-weight:bold; }
+    .inv-footer { margin-top:14px; padding-top:10px; border-top:1px solid #ddd; font-size:10px; color:#666; white-space:pre-wrap; }
     .note { background:#fffbe6; border:1px solid #f0c040; padding:8px; border-radius:4px; font-size:11px; }
 
     /* ---- Amazon Marketplace packing slip ---- */

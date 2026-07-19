@@ -5,7 +5,7 @@ import { Order, OrderNote, OrderStatus, Batch, DeliveryCarrier, DeliveryType, Ap
 import { syncAttendance, syncLeaveRequest, syncLeaveBalance, syncOrder, syncBatch, syncUser, deleteUserFromSupabase, syncReturn, syncTicket, deleteTicketFromSupabase, syncMissingItem, syncInventoryPart, syncStockUnit, syncStockLevel, syncGoodsReceipt, syncBuild, softDeleteOrderInSupabase, hardDeleteOrderFromSupabase } from './supabase-store';
 import { buildSku, INVENTORY_CATEGORY_MAP } from './inventory-config';
 import { allPackItemsConfirmed } from './inventory-build';
-import { SettingsValues } from './settings';
+import { SettingsValues, resolveSetting, asBool } from './settings';
 
 // Generate proper UUID v4 for PostgreSQL compatibility
 function generateUUID(): string {
@@ -24,6 +24,7 @@ function generateUUID(): string {
 const fulfilmentPushed = new Set<string>();
 function pushMarketplaceFulfillment(order: Order): void {
   if (typeof window === 'undefined') return;
+  if (!asBool(resolveSetting(useOrderStore.getState().appSettings, 'fulfilment.uploadOnShipped'))) return;
   if (!order.trackingNumber || !order.orderNumber) return;
   // eBay order ids look like 12-34567-89012 (or the batch says eBay).
   const isEbay = /^\d{2}-\d{5}-\d{5}$/.test(order.orderNumber) || order.batchId?.startsWith('ebay-');

@@ -3,6 +3,7 @@
 import { useEffect, useState, useCallback } from 'react';
 import { AlertTriangle, X, RefreshCw } from 'lucide-react';
 import { useOrderStore } from '@/lib/store';
+import { useSettingNumber, useSettingBool } from '@/hooks/use-settings';
 
 interface CancellationItem {
   orderId: string;
@@ -12,9 +13,12 @@ interface CancellationItem {
   createdAt?: string;
 }
 
-const POLL_INTERVAL_MS = 5 * 60 * 1000; // 5 minutes
 
 export function CancellationAlert() {
+  // Poll cadence + whether the full-screen alert shows (Settings → Reporting & Alerts).
+  const pollMs = useSettingNumber('alerts.cancellationPollMinutes') * 60 * 1000;
+  const fullScreenAlert = useSettingBool('alerts.cancellationFullScreen');
+
   const orders = useOrderStore((s) => s.orders);
   const softCancelOrder = useOrderStore((s) => s.softCancelOrder);
 
@@ -52,13 +56,13 @@ export function CancellationAlert() {
 
   useEffect(() => {
     fetchCancellations();
-    const timer = setInterval(fetchCancellations, POLL_INTERVAL_MS);
+    const timer = setInterval(fetchCancellations, pollMs);
     return () => clearInterval(timer);
-  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [pollMs]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const visible = cancellations.filter((c) => !dismissed.has(c.orderId));
 
-  if (!visible.length) return null;
+  if (!fullScreenAlert || !visible.length) return null;
 
   return (
     <div className="fixed bottom-4 right-4 z-50 space-y-2 max-w-sm w-full">

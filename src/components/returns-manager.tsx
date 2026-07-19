@@ -23,6 +23,7 @@ import {
 } from '@/components/ui/dialog';
 import { PackageOpen, Plus, Search, CheckCircle, Truck, Replace, Pencil, ArrowLeftRight, Loader2, Eye, RefreshCw, ExternalLink } from 'lucide-react';
 import { toast } from 'sonner';
+import { useSettingList, useSettingNumber, useSettingString, useSettingBool } from '@/hooks/use-settings';
 
 type EbayReturnAction =
   | 'SELLER_MARK_AS_RECEIVED'
@@ -32,20 +33,7 @@ type EbayReturnAction =
   | 'SELLER_OFFER_PARTIAL_REFUND'
   | 'SUBMIT_FILE';
 
-const RETURN_REASONS = [
-  'Faulty / Not working',
-  'Wrong item sent',
-  'Item not as described',
-  'Changed mind',
-  'Damaged in transit',
-  'Missing parts / accessories',
-  'Buyer remorse',
-  'Other',
-];
 
-// Swaps now capture the number of boxes rather than a weight; DPD still needs a
-// weight on the consignment, so we default to 20 kg.
-const SWAP_DEFAULT_WEIGHT_KG = 20;
 
 const STATUS_CONFIG: Record<ReturnRecord['status'], { label: string; color: string }> = {
   pending: { label: 'Pending', color: 'bg-yellow-100 text-yellow-800 border-yellow-300' },
@@ -92,6 +80,12 @@ function genId() {
 }
 
 export function ReturnsManager() {
+  // Configurable behaviour (Settings → Returns & Tickets / Shipping).
+  const RETURN_REASONS = useSettingList('returns.reasons');
+  const swapDefaultWeightKg = useSettingNumber('shipping.defaultWeightKg');
+  const defaultSwapMethod = useSettingString('returns.defaultSwapMethod') as 'collection' | 'label';
+  const emailLabelByDefault = useSettingBool('returns.emailLabelToCustomer');
+
   const orders = useOrderStore((s) => s.orders);
   const returns = useOrderStore((s) => s.returns);
   const users = useOrderStore((s) => s.users);
@@ -125,9 +119,9 @@ export function ReturnsManager() {
   const [replacementQty, setReplacementQty] = useState('1');
   const [replacementNotes, setReplacementNotes] = useState('');
   const [replacementImageUrls, setReplacementImageUrls] = useState<string[]>([]);
-  const [swapMethod, setSwapMethod] = useState<'collection' | 'label'>('collection');
+  const [swapMethod, setSwapMethod] = useState<'collection' | 'label'>(defaultSwapMethod);
   const [swapBoxes, setSwapBoxes] = useState('1');
-  const [swapEmailLabel, setSwapEmailLabel] = useState(true);
+  const [swapEmailLabel, setSwapEmailLabel] = useState(emailLabelByDefault);
   const [swapSubmitting, setSwapSubmitting] = useState(false);
 
   // Receive dialog
@@ -178,7 +172,7 @@ export function ReturnsManager() {
     searchParams.get('new') === '1' ? (searchParams.get('order') || searchParams.get('buyer') || '') : ''
   );
   const [selectedOrderId, setSelectedOrderId] = useState('');
-  const [reason, setReason] = useState(RETURN_REASONS[0]);
+  const [reason, setReason] = useState(RETURN_REASONS[0] ?? '');
   const [notes, setNotes] = useState(() => {
     if (searchParams.get('new') !== '1') return '';
     const seed = searchParams.get('notes') || '';
@@ -359,7 +353,7 @@ export function ReturnsManager() {
     setSelectedOrderId('');
     setNotes('');
     setRefundAmount('');
-    setReason(RETURN_REASONS[0]);
+    setReason(RETURN_REASONS[0] ?? '');
     setResponsibleDepartment('');
     setResponsibleUserId('');
     setReturnTrackingNumber('');
@@ -375,7 +369,7 @@ export function ReturnsManager() {
     setReplacementImageUrls([]);
     setSwapMethod('collection');
     setSwapBoxes('1');
-    setSwapEmailLabel(true);
+    setSwapEmailLabel(emailLabelByDefault);
   };
 
   // Call an eBay Post-Order return action. Returns true if eBay accepted it.
@@ -405,7 +399,7 @@ export function ReturnsManager() {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         // Weight is no longer collected in the UI — DPD needs a value, so default to 20 kg.
-        weight: SWAP_DEFAULT_WEIGHT_KG,
+        weight: swapDefaultWeightKg,
         boxes: parseInt(swapBoxes, 10) || 1,
         reference: order.salesRecordNumber,
         ...(swapMethod === 'label' ? { sendEmail: swapEmailLabel } : {}),

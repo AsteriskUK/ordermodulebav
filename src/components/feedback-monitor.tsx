@@ -4,6 +4,7 @@ import { useEffect, useState, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
 import { AlertTriangle, X, ExternalLink } from 'lucide-react';
 import { toast } from 'sonner';
+import { useSettingNumber, useSettingBool } from '@/hooks/use-settings';
 
 interface Negative {
   feedback_id: string;
@@ -13,9 +14,11 @@ interface Negative {
   ticket_id: string | null;
 }
 
-const POLL_MS = 5 * 60 * 1000; // check every 5 minutes while the app is open
 
 export function FeedbackMonitor() {
+  // Poll cadence + whether alerts fire at all (Settings → Reporting & Alerts).
+  const pollMs = useSettingNumber('alerts.feedbackPollMinutes') * 60 * 1000;
+  const alertsEnabled = useSettingBool('alerts.negativeFeedbackAlert');
   const router = useRouter();
   const [negatives, setNegatives] = useState<Negative[]>([]);
 
@@ -31,21 +34,21 @@ export function FeedbackMonitor() {
       const r = await fetch('/api/ebay/feedback/sync', { method: 'POST' });
       if (r.ok) {
         const d = await r.json() as { newNegatives?: number };
-        if ((d.newNegatives ?? 0) > 0) {
+        if (alertsEnabled && (d.newNegatives ?? 0) > 0) {
           toast.error(`${d.newNegatives} new negative feedback received`, { duration: 12000 });
         }
       }
       await refresh();
     } catch { /* non-critical */ }
-  }, [refresh]);
+  }, [refresh, alertsEnabled]);
 
   useEffect(() => {
     /* eslint-disable-next-line react-hooks/set-state-in-effect */
     sync();
-    const t = setInterval(sync, POLL_MS);
+    const t = setInterval(sync, pollMs);
     return () => clearInterval(t);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [pollMs]);
 
   async function acknowledge(id: string) {
     setNegatives((prev) => prev.filter((n) => n.feedback_id !== id));
@@ -54,7 +57,7 @@ export function FeedbackMonitor() {
     } catch { /* ignore */ }
   }
 
-  if (!negatives.length) return null;
+  if (!alertsEnabled || !negatives.length) return null;
 
   return (
     <div className="fixed top-4 right-4 z-50 space-y-2 max-w-sm w-full">

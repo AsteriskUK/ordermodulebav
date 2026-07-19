@@ -6,6 +6,7 @@ import { supabase, isSupabaseConfigured } from '@/lib/supabase-client';
 import { Order, Batch } from '@/lib/types';
 import { fetchPrinterConfig, printInvoicesFor } from '@/lib/print-agent';
 import { autoBookLabels } from '@/lib/auto-book';
+import { useSettingBool, useSettingNumber, useSettingList } from '@/hooks/use-settings';
 import { toast } from 'sonner';
 
 // Automatic order pulling. Every open client checks a shared timestamp and, if
@@ -13,18 +14,12 @@ import { toast } from 'sonner';
 // and merges them in. The shared gate means only one client pulls per window
 // (small races are harmless — addOrders + Supabase upserts are idempotent).
 
-const PULL_INTERVAL_MS = 30 * 60 * 1000;   // pull cadence — every 30 minutes
 const CHECK_INTERVAL_MS = 5 * 60 * 1000;   // how often each client checks the gate
 const LAST_RUN_KEY = 'auto_pull_last_run';
-const WINDOW_DAYS = 3;                       // rolling fetch window; dedup handles overlap
 
-// Each endpoint returns { orders, batch }; unconfigured/disconnected platforms
-// return 401 / not_configured and are skipped silently.
-const SOURCES = ['ebay', 'amazon', 'backmarket', 'onbuy', 'temu'] as const;
-
-async function pullSource(source: string, addOrders: (o: Order[], b: Batch) => void): Promise<Order[]> {
+async function pullSource(source: string, windowDays: number, addOrders: (o: Order[], b: Batch) => void): Promise<Order[]> {
   try {
-    const res = await fetch(`/api/${source}/orders?days=${WINDOW_DAYS}`);
+    const res = await fetch(`/api/${source}/orders?days=${windowDays}`);
     if (!res.ok) return [];
     const data = await res.json() as { orders?: Order[]; batch?: Batch };
     if (!data.orders?.length || !data.batch) return [];
@@ -44,9 +39,17 @@ export function useAutoPull() {
   const addOrders = useOrderStore((s) => s.addOrders);
   const running = useRef(false);
 
+  // All configurable from Settings → Workflow & Queue / Printing.
+  const enabled = useSettingBool('autopull.enabled');
+  const intervalMinutes = useSettingNumber('autopull.intervalMinutes');
+  const windowDays = useSettingNumber('autopull.windowDays');
+  const sources = useSettingList('autopull.sources');
+  const autoInvoiceEnabled = useSettingBool('print.autoInvoiceOnPull');
+
   useEffect(() => {
-    if (!isSupabaseConfigured()) return;
+    if (!isSupabaseConfigured() || !enabled) return;
     let cancelled = false;
+    const pullIntervalMs = Math.max(1, intervalMinutes) * 60 * 1000;
 
     async function maybePull() {
       if (running.current || cancelled) return;
@@ -55,12 +58,12 @@ export function useAutoPull() {
         // Shared gate across every open client — only pull if the interval elapsed.
         const { data } = await supabase.from('app_settings').select('value').eq('key', LAST_RUN_KEY).single();
         const last = data?.value ? new Date(data.value as string).getTime() : 0;
-        if (Date.now() - last < PULL_INTERVAL_MS) return;
+        if (Date.now() - last < pullIntervalMs) return;
         // Claim the window before pulling so concurrent clients don't double-run.
         await supabase.from('app_settings').upsert({ key: LAST_RUN_KEY, value: new Date().toISOString(), updated_at: new Date().toISOString() });
 
         const fresh: Order[] = [];
-        for (const src of SOURCES) fresh.push(...await pullSource(src, addOrders));
+        for (const src of sources) fresh.push(...await pullSource(src, windowDays, addOrders));
         if (fresh.length > 0 && !cancelled) {
           toast.success(`Auto-pulled ${fresh.length} new order${fresh.length !== 1 ? 's' : ''}`, { icon: '🔄' });
           // Book carrier labels straight away (book only — printed at packing).
@@ -74,7 +77,7 @@ export function useAutoPull() {
           // Auto-print invoices for the new orders (if a printer is configured).
           try {
             const cfg = await fetchPrinterConfig();
-            if (cfg.autoInvoice) {
+            if (autoInvoiceEnabled && cfg.autoInvoice) {
               const printed = await printInvoicesFor(fresh, cfg);
               if (printed) toast.success(`Printing ${fresh.length} invoice${fresh.length !== 1 ? 's' : ''}`, { icon: '🖨️' });
             }
@@ -92,5 +95,5 @@ export function useAutoPull() {
     maybePull();                                    // check on mount — pulls if due
     const timer = setInterval(maybePull, CHECK_INTERVAL_MS);
     return () => { cancelled = true; clearInterval(timer); };
-  }, [addOrders]);
+  }, [addOrders, enabled, intervalMinutes, windowDays, sources, autoInvoiceEnabled]);
 }

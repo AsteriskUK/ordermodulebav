@@ -2,7 +2,8 @@
 
 import { useMemo, useState } from 'react';
 import { useOrderStore, assemblyLockHolder } from '@/lib/store';
-import { ORDER_STATUS_CONFIG, PACKAGING_STAGES, Order, OrderStatus, PackagingStage, DEPARTMENT_CONFIG, Department } from '@/lib/types';
+import { ORDER_STATUS_CONFIG, PACKAGING_STAGES, Order, OrderStatus, PackagingStage, DEPARTMENT_CONFIG, Department, TicketRecord } from '@/lib/types';
+import { useSettingNumber, useSettingBool, useSettingString } from '@/hooks/use-settings';
 import { getOrderRowClass, buildInvoicesHtml, printHtml } from '@/lib/order-utils';
 import { getOutstandingPackItems } from '@/lib/inventory-build';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -59,10 +60,6 @@ const PRIORITY_BADGE: Record<number, { label: string; cls: string }> = {
   2: { label: 'P2 · High',   cls: 'bg-orange-100 text-orange-700 border-orange-300' },
   3: { label: 'P3 · Medium', cls: 'bg-amber-100 text-amber-700 border-amber-300' },
 };
-
-// Show at most this many orders per queue column — the rest stay hidden until
-// the visible ones move on (highest priority / earliest post-by first).
-const MAX_VISIBLE_PER_STAGE = 10;
 
 function genTicketId(): string {
   return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, (c) => {
@@ -122,6 +119,15 @@ export function PackagingPipeline() {
 
   const tickets = useOrderStore((s) => s.tickets);
   const addTicket = useOrderStore((s) => s.addTicket);
+
+  // Configurable behaviour (Settings → Workflow & Queue).
+  const maxVisiblePerStage = useSettingNumber('queue.maxVisiblePerStage');
+  const maxActivePerUser = useSettingNumber('queue.maxActivePerUser');
+  const requireTracking = useSettingBool('workflow.requireTrackingBeforePacking');
+  const raiseTrackingTicketEnabled = useSettingBool('workflow.raiseTicketWhenTrackingMissing');
+  const trackingTicketPriority = useSettingString('workflow.missingTrackingTicketPriority') as TicketRecord['priority'];
+  const requireCleaning = useSettingBool('workflow.requireCleaning');
+  const requireVinyl = useSettingBool('workflow.requireVinyl');
 
   const currentUser = users.find((u) => u.id === currentUserId);
   const isAdmin = currentUser?.role === 'admin' || currentUser?.role === 'manager';
@@ -192,7 +198,6 @@ export function PackagingPipeline() {
     () => orders.filter((o) => o.status === 'assembling' && assemblyLockHolder(o)?.id === currentUserId).length,
     [orders, currentUserId]
   );
-  const MAX_ACTIVE_PER_USER = 10;
   const checkingOrders = useMemo(
     () => searchedOrders.filter((o) => o.status === 'checking'),
     [searchedOrders]
@@ -254,12 +259,15 @@ export function PackagingPipeline() {
   }
 
   // An order may only enter Packing with a tracking number (collections excepted).
-  const needsTracking = (o: Order) => !o.trackingNumber && o.deliveryType !== 'collection';
+  // Settings → Workflow can turn this gate off entirely.
+  const needsTracking = (o: Order) =>
+    requireTracking && !o.trackingNumber && o.deliveryType !== 'collection';
 
   // Raise an URGENT Comms ticket to book the label/tracking for an order stuck
   // at Checking. Deduped per order so repeated attempts don't spam Comms.
   // Returns true when a new ticket was created.
   function raiseTrackingTicket(order: Order): boolean {
+    if (!raiseTrackingTicketEnabled) return false;
     const dup = tickets.find((t) => t.orderId === order.id && t.category === 'tracking' && t.status !== 'closed' && t.status !== 'resolved');
     if (dup) return false;
     const now = new Date().toISOString();
@@ -269,7 +277,7 @@ export function PackagingPipeline() {
       body: `Order is ready at Checking but has no tracking number. Book the carrier label (Batch Shipping) so it can move to Packing. Carrier: ${order.deliveryCarrier || 'unknown'} · Service: ${order.deliveryType || 'standard'}.`,
       category: 'tracking',
       status: 'open',
-      priority: 'urgent',
+      priority: trackingTicketPriority,
       department: 'comms',
       orderId: order.id,
       salesRecordNumber: order.salesRecordNumber,
@@ -586,7 +594,7 @@ export function PackagingPipeline() {
                   </p>
                 ) : (
                   <div className="space-y-2">
-                    {s.orders.slice(0, MAX_VISIBLE_PER_STAGE).map((order) => (
+                    {s.orders.slice(0, maxVisiblePerStage).map((order) => (
                       <div
                         key={order.id}
                         onClick={() => {
@@ -757,8 +765,8 @@ export function PackagingPipeline() {
                                           className="h-6 text-xs px-2 bg-lime-600 hover:bg-lime-700 disabled:opacity-50"
                                           title={lockedByOther ? `Claimed by ${holder?.name ?? 'another user'}` : undefined}
                                           onClick={() => {
-                                            if (!isAdmin && myActiveAssemblyCount >= MAX_ACTIVE_PER_USER) {
-                                              toast.warning(`You already have ${MAX_ACTIVE_PER_USER} orders in progress — finish some before starting more`);
+                                            if (!isAdmin && myActiveAssemblyCount >= maxActivePerUser) {
+                                              toast.warning(`You already have ${maxActivePerUser} orders in progress — finish some before starting more`);
                                               return;
                                             }
                                             if (!acquireAssemblyLock(order.id, isAdmin)) { toast.warning('Someone else just claimed this order'); return; }
@@ -773,9 +781,10 @@ export function PackagingPipeline() {
                                     }
                                     const isChecking = s.stage === 'checking';
                                     const isAssembling = s.stage === 'assembling';
-                                    const needsCleaning = isChecking && !order.cleanedAt;
-                                    const needsVinyl = isAssembling && order.cleanedAt && !order.vinylAppliedAt;
-                                    const readyForPacking = isChecking && order.vinylAppliedAt;
+                                    // Cleaning / vinyl hand-offs are optional steps (Settings → Workflow).
+                                    const needsCleaning = requireCleaning && isChecking && !order.cleanedAt;
+                                    const needsVinyl = requireVinyl && isAssembling && order.cleanedAt && !order.vinylAppliedAt;
+                                    const readyForPacking = isChecking && (!requireVinyl || order.vinylAppliedAt);
                                     const label = needsCleaning ? 'Cleaning done' : needsVinyl ? 'Vinyl applied' : readyForPacking ? 'To packing' : 'Done';
                                     const next = needsCleaning ? 'assembling' : needsVinyl ? 'checking' : s.nextStage;
                                     return (
@@ -904,9 +913,9 @@ export function PackagingPipeline() {
                         </div>
                       </div>
                     ))}
-                    {s.orders.length > MAX_VISIBLE_PER_STAGE && (
+                    {s.orders.length > maxVisiblePerStage && (
                       <p className="text-[11px] text-slate-400 text-center py-2 border-t border-dashed border-slate-200">
-                        +{s.orders.length - MAX_VISIBLE_PER_STAGE} more waiting — top {MAX_VISIBLE_PER_STAGE} by priority shown.
+                        +{s.orders.length - maxVisiblePerStage} more waiting — top {maxVisiblePerStage} by priority shown.
                         They appear here as these move on (or use search).
                       </p>
                     )}

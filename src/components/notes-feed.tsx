@@ -1,6 +1,6 @@
 'use client';
 
-import { useMemo, useState, useEffect, useCallback } from 'react';
+import { useMemo, useState, useEffect, useCallback, useRef } from 'react';
 import { useOrderStore } from '@/lib/store';
 import { OrderNote, ORDER_STATUS_CONFIG } from '@/lib/types';
 import { can } from '@/lib/access';
@@ -13,6 +13,7 @@ import { TicketsPanel } from './tickets-panel';
 import { ImageUpload } from './image-upload';
 import { MESSAGE_IMAGE_BUCKET } from '@/lib/image-upload';
 import { htmlEmailToText } from '@/lib/html-text';
+import { useSettingString, useSettingNumber, useSettingBool } from '@/hooks/use-settings';
 import { QuickActions } from './quick-actions';
 import { Ticket as TicketIcon } from 'lucide-react';
 import { toast } from 'sonner';
@@ -257,6 +258,17 @@ export function NotesFeed() {
   const [amazonReplyAction, setAmazonReplyAction] = useState('');
   const [replyText, setReplyText] = useState('');
   const [replyImages, setReplyImages] = useState<string[]>([]);
+  // Scrolls the reading pane to the newest message when a thread opens/updates.
+  const messagesEndRef = useRef<HTMLDivElement | null>(null);
+
+  // Configurable behaviour (Settings → Messaging).
+  const sendShortcut = useSettingString('messaging.sendShortcut');
+  const maxAttachments = useSettingNumber('messaging.maxAttachments');
+  const replySignature = useSettingString('messaging.signature');
+  const strictOrderMatching = useSettingBool('messaging.strictOrderMatching');
+  // Enter sends only when configured to; otherwise Ctrl/Cmd+Enter does.
+  const isSendKey = (e: React.KeyboardEvent) =>
+    e.key === 'Enter' && (sendShortcut === 'enter' ? !e.shiftKey : e.ctrlKey || e.metaKey);
   // Original HTML of an eBay system email (invoice/notice) to render in a modal.
   const [previewHtml, setPreviewHtml] = useState<{ html: string; title: string } | null>(null);
   const [replySending, setReplySending] = useState(false);
@@ -519,27 +531,76 @@ export function NotesFeed() {
     return () => { alive = false; };
   }, [activeItemId]);
 
-  // Related order in our own system.
-  // BackMarket threads carry the real order id → match it directly. eBay matches
-  // by listing item id + buyer, falling back to buyer.
-  const relatedOrder = useMemo(() => {
-    if (!activeConvo) return null;
-    if (activeConvo.conversation_type === 'AMAZON') {
-      const oid = activeConvo.order_id;
-      return orders.find((o) => !o.deletedAt && (o.salesRecordNumber === oid || o.orderNumber === oid)) ?? null;
+  // Indexes over active orders so per-conversation order resolution stays O(1)
+  // even with 40k+ historical orders (the inbox can hold ~700 threads).
+  const orderIndex = useMemo(() => {
+    const byRef = new Map<string, typeof orders[number]>();       // salesRecordNumber / orderNumber / id → order
+    const byItemBuyer = new Map<string, typeof orders[number]>(); // `${itemNumber}::${buyer}` → order
+    const byBuyer = new Map<string, typeof orders[number][]>();   // buyer → orders
+    for (const o of orders) {
+      if (o.deletedAt) continue;
+      if (o.salesRecordNumber) byRef.set(o.salesRecordNumber, o);
+      if (o.orderNumber) byRef.set(o.orderNumber, o);
+      if (o.id) byRef.set(o.id, o);
+      const buyer = (o.buyerUsername || '').toLowerCase();
+      if (o.itemNumber && buyer) byItemBuyer.set(`${o.itemNumber}::${buyer}`, o);
+      if (buyer) { const arr = byBuyer.get(buyer); if (arr) arr.push(o); else byBuyer.set(buyer, [o]); }
     }
-    if (activeConvo.conversation_type === 'BACKMARKET') {
-      const oid = activeConvo.order_id;
+    return { byRef, byItemBuyer, byBuyer };
+  }, [orders]);
+
+  // Resolve the order a conversation is about — used for both the context bar and
+  // record-number search. Correctness matters: an eBay message thread's reference
+  // is the *listing* item id, not an order. A buyer who messages about several
+  // listings but bought only one must NOT have every thread linked to that one
+  // order. So for eBay we require the listing id to match an order the buyer
+  // actually placed; a thread about a non-purchased listing has no linked order.
+  const findOrderForConvo = useCallback((convo: Conversation | null) => {
+    if (!convo) return null;
+    const { byRef, byItemBuyer, byBuyer } = orderIndex;
+    const oid = convo.order_id;
+    if (convo.conversation_type === 'AMAZON') {
+      return (oid && byRef.get(oid)) || null;
+    }
+    if (convo.conversation_type === 'BACKMARKET') {
       if (!oid) return null;
-      return orders.find((o) => !o.deletedAt && (o.salesRecordNumber === oid || o.orderNumber === oid || o.id === `backmarket-${oid}`)) ?? null;
+      return byRef.get(oid) || byRef.get(`backmarket-${oid}`) || null;
     }
-    const buyer = (activeConvo.buyer_username || '').toLowerCase();
-    const oid = activeConvo.order_id;
-    return orders.find((o) => !o.deletedAt && o.itemNumber && o.itemNumber === activeConvo.item_id && (o.buyerUsername || '').toLowerCase() === buyer)
-      ?? (buyer ? orders.find((o) => !o.deletedAt && (o.buyerUsername || '').toLowerCase() === buyer) : undefined)
-      ?? (oid ? orders.find((o) => !o.deletedAt && (o.salesRecordNumber === oid || o.orderNumber === oid)) : undefined)
-      ?? null;
-  }, [activeConvo, orders]);
+    // eBay member / system thread.
+    const buyer = (convo.buyer_username || '').toLowerCase();
+    const item = convo.item_id;
+    if (item) {
+      // Listing id present → only link if the buyer bought that exact listing.
+      const byItem = buyer ? byItemBuyer.get(`${item}::${buyer}`) : undefined;
+      if (byItem) return byItem;
+      // A direct order-id match (rare: some rows store a real order ref here).
+      if (oid && byRef.has(oid)) return byRef.get(oid)!;
+      // Listing referenced but not purchased → genuine inquiry, no linked order.
+      // Relaxed matching (Settings → Messaging) falls through to the buyer's
+      // single order instead, which is looser but never leaves a thread bare.
+      if (strictOrderMatching) return null;
+    }
+    // No listing reference at all: safe to fall back to the buyer's order only
+    // when they have exactly one (avoids mislinking multi-order buyers).
+    if (oid && byRef.has(oid)) return byRef.get(oid)!;
+    if (buyer) {
+      const buyerOrders = byBuyer.get(buyer);
+      if (buyerOrders?.length === 1) return buyerOrders[0];
+    }
+    return null;
+  }, [orderIndex, strictOrderMatching]);
+
+  const relatedOrder = useMemo(() => findOrderForConvo(activeConvo), [findOrderForConvo, activeConvo]);
+
+  // Jump to the newest message whenever a thread is opened or its messages change
+  // (loading a thread appends the full history, which otherwise leaves the pane
+  // scrolled to the top). 'auto' = no animation on open; feels instant.
+  const activeMsgCount = activeConvo?.messages.length ?? 0;
+  useEffect(() => {
+    if (!activeKey) return;
+    const el = messagesEndRef.current;
+    if (el) el.scrollIntoView({ block: 'end' });
+  }, [activeKey, activeMsgCount]);
 
   const activeIsBm = activeConvo?.conversation_type === 'BACKMARKET';
   const activeIsAmazon = activeConvo?.conversation_type === 'AMAZON';
@@ -649,6 +710,10 @@ export function NotesFeed() {
   async function handleReply() {
     if (!activeConvo || (!replyText.trim() && replyImages.length === 0)) return;
     setReplySending(true);
+    // Append the configured signature (Settings → Messaging) to outgoing text.
+    const replyText_ = replyText.trim() && replySignature
+      ? `${replyText}\n\n${replySignature}`
+      : replyText;
     try {
       // Amazon reply — via the email relay when the buyer has written to us
       // (free text, threads into their Amazon inbox), otherwise the templated
@@ -661,7 +726,7 @@ export function NotesFeed() {
               replyToEmail: amazonReplyEmail,
               subject: amazonReplySubject ? (amazonReplySubject.startsWith('Re:') ? amazonReplySubject : `Re: ${amazonReplySubject}`) : undefined,
               orderId: activeConvo.order_id,
-              text: replyText,
+              text: replyText_,
               buyerName: activeConvo.buyer_name,
               itemTitle: activeConvo.item_title,
               sentById: currentUser?.id,
@@ -670,7 +735,7 @@ export function NotesFeed() {
           : {
               orderId: activeConvo.order_id,
               action: amazonReplyAction,
-              text: replyText,
+              text: replyText_,
               buyerName: activeConvo.buyer_name,
               itemTitle: activeConvo.item_title,
               sentById: currentUser?.id,
@@ -724,7 +789,7 @@ export function NotesFeed() {
           buyerName: activeConvo.buyer_name,
           itemTitle: activeConvo.item_title,
           contactReason: 'ORDER',
-          text: replyText,
+          text: replyText_,
           imageUrls: replyImages,
           sentById: currentUser?.id,
           sentByName: currentUser?.name,
@@ -852,11 +917,20 @@ export function NotesFeed() {
         <div className="relative">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400" />
           <Input
-            placeholder={tab === 'team' ? 'Search notes, orders, authors...' : 'Search buyer, order, message...'}
+            placeholder={tab === 'team' ? 'Search notes, orders, authors...' : 'Search buyer, record #, order #, message...'}
             value={search}
             onChange={(e) => setSearch(e.target.value)}
-            className="pl-9"
+            className="pl-9 pr-9"
           />
+          {search && (
+            <button
+              onClick={() => setSearch('')}
+              title="Clear search"
+              className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-700 p-0.5 rounded hover:bg-slate-100"
+            >
+              <X className="h-4 w-4" />
+            </button>
+          )}
         </div>
       )}
 
@@ -947,7 +1021,16 @@ export function NotesFeed() {
           <div className={`${activeConvo ? 'hidden md:flex' : 'flex'} w-full md:w-[320px] shrink-0 flex-col border border-slate-200 rounded-xl overflow-hidden bg-white`}>
             {(() => {
               const filtered = conversations.filter((c) => {
-                if (search && !(c.buyer_username.toLowerCase().includes(search.toLowerCase()) || c.order_id.toLowerCase().includes(search.toLowerCase()) || (c.buyer_name ?? '').toLowerCase().includes(search.toLowerCase()))) return false;
+                if (search) {
+                  const q = search.toLowerCase();
+                  const ord = findOrderForConvo(c);
+                  const haystack = [
+                    c.buyer_username, c.buyer_name, c.order_id, c.item_id, c.item_title,
+                    // Record / order numbers of the linked order so searching by them works.
+                    ord?.salesRecordNumber, ord?.orderNumber,
+                  ];
+                  if (!haystack.some((v) => (v ?? '').toString().toLowerCase().includes(q))) return false;
+                }
                 // Archived threads live only under the "Archived" filter.
                 if (ebayFilter === 'archived') return c.archived;
                 if (c.archived) return false;
@@ -999,7 +1082,21 @@ export function NotesFeed() {
                       </div>
                     ) : (
                     <div className="flex items-center justify-between px-3 py-2">
-                      <p className="text-xs text-slate-400">{filtered.length} of {conversations.length}</p>
+                      <label className="flex items-center gap-1.5 text-xs text-slate-400 cursor-pointer select-none" title="Select all in this view">
+                        <input
+                          type="checkbox"
+                          className="h-3.5 w-3.5 cursor-pointer accent-slate-700"
+                          checked={filtered.length > 0 && filtered.every((c) => selectedKeys.has(c.key))}
+                          ref={(el) => { if (el) el.indeterminate = filtered.some((c) => selectedKeys.has(c.key)) && !filtered.every((c) => selectedKeys.has(c.key)); }}
+                          onChange={(e) => setSelectedKeys((prev) => {
+                            const next = new Set(prev);
+                            if (e.target.checked) filtered.forEach((c) => next.add(c.key));
+                            else filtered.forEach((c) => next.delete(c.key));
+                            return next;
+                          })}
+                        />
+                        {filtered.length} of {conversations.length}
+                      </label>
                       <button onClick={syncAllInboxes} disabled={ebaySyncing || bmSyncing || amazonSyncing} className="text-xs text-slate-400 hover:text-slate-600 flex items-center gap-1 disabled:opacity-50">
                         <RefreshCw className={`h-3 w-3 ${ebaySyncing || bmSyncing || amazonSyncing ? 'animate-spin' : ''}`} /> {ebaySyncing || bmSyncing || amazonSyncing ? 'Syncing…' : 'Sync'}
                       </button>
@@ -1079,7 +1176,15 @@ export function NotesFeed() {
                                   <span className="text-[10px] text-slate-400" title={new Date(convo.lastAt).toLocaleString('en-GB')}>{timeAgo(convo.lastAt)}</span>
                                 </span>
                               </div>
-                              <p className="text-[11px] text-slate-400 truncate">{convo.order_id ? `Order #${convo.order_id}` : 'No order reference'}{convo.item_title ? ` · ${convo.item_title.slice(0, 40)}` : ''}</p>
+                              {(() => {
+                                const ord = findOrderForConvo(convo);
+                                const ref = ord
+                                  ? `Order #${ord.salesRecordNumber}`
+                                  : (convo.conversation_type === 'FROM_MEMBERS' && convo.item_id)
+                                    ? `Listing #${convo.item_id}`
+                                    : convo.order_id ? `Ref #${convo.order_id}` : 'No order reference';
+                                return <p className="text-[11px] text-slate-400 truncate">{ref}{convo.item_title ? ` · ${convo.item_title.slice(0, 40)}` : ''}</p>;
+                              })()}
                               <div className="flex items-center gap-1.5 mt-0.5">
                                 {convo.unreadCount > 0 && <span className="bg-red-500 text-white text-[9px] font-bold rounded-full px-1.5 leading-tight py-0.5 shrink-0">{convo.unreadCount}</span>}
                                 <p className={`text-xs truncate ${convo.unreadCount > 0 ? 'text-slate-700' : 'text-slate-500'}`}>
@@ -1110,7 +1215,15 @@ export function NotesFeed() {
                   <img src={activeIsAmazon ? PLATFORM_LOGOS.amazon : activeIsBm ? PLATFORM_LOGOS.backmarket : PLATFORM_LOGOS.ebay} alt="platform" className="h-5 w-auto object-contain shrink-0" />
                   <div className="min-w-0 flex-1">
                     <p className="font-medium text-slate-800 font-mono text-sm truncate">{activeConvo.buyer_username}</p>
-                    <p className="text-xs text-slate-400 truncate">{activeConvo.buyer_name ? `${activeConvo.buyer_name} · ` : ''}Order #{activeConvo.order_id}{activeConvo.item_title ? ` · ${activeConvo.item_title}` : ''}</p>
+                    <p className="text-xs text-slate-400 truncate">
+                      {activeConvo.buyer_name ? `${activeConvo.buyer_name} · ` : ''}
+                      {relatedOrder
+                        ? `Order #${relatedOrder.salesRecordNumber}`
+                        : (activeConvo.conversation_type === 'FROM_MEMBERS' && activeConvo.item_id)
+                          ? `Listing #${activeConvo.item_id}`
+                          : activeConvo.order_id ? `Ref #${activeConvo.order_id}` : 'No order reference'}
+                      {activeConvo.item_title ? ` · ${activeConvo.item_title}` : ''}
+                    </p>
                   </div>
                   <button
                     onClick={() => activeConvo.unreadCount > 0 ? markRead(activeConvo) : markUnread(activeConvo)}
@@ -1220,11 +1333,15 @@ export function NotesFeed() {
                     </div>
                     );
                   })}
+                  <div ref={messagesEndRef} />
                 </div>
 
                 {/* Quick actions — raise a ticket for a customer request in one tap */}
                 {(() => {
-                  const matched = orders.find((o) => !o.deletedAt && o.buyerUsername === activeConvo.buyer_username);
+                  // Prefer the correctly-resolved order (listing-matched); only fall
+                  // back to a buyer match when the buyer has a single order.
+                  const buyerOrders = orders.filter((o) => !o.deletedAt && o.buyerUsername === activeConvo.buyer_username);
+                  const matched = relatedOrder ?? (buyerOrders.length === 1 ? buyerOrders[0] : undefined);
                   const lastReceived = [...activeConvo.messages].reverse().find((m) => m.direction === 'received');
                   return (
                     <div className="border-t px-3 py-2 shrink-0 bg-slate-50/60">
@@ -1251,10 +1368,10 @@ export function NotesFeed() {
                       <div className="flex items-end gap-2">
                         <textarea
                           className="flex-1 border rounded-xl px-3 py-2 text-sm min-h-[40px] max-h-32 resize-none focus:ring-2 focus:ring-orange-400 focus:border-transparent"
-                          placeholder="Type your reply… (Ctrl+Enter to send)"
+                          placeholder={`Type your reply… (${sendShortcut === 'enter' ? 'Enter' : 'Ctrl+Enter'} to send)`}
                           value={replyText}
                           onChange={(e) => setReplyText(e.target.value)}
-                          onKeyDown={(e) => { if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) { e.preventDefault(); handleReply(); } }}
+                          onKeyDown={(e) => { if (isSendKey(e)) { e.preventDefault(); handleReply(); } }}
                           rows={1}
                           maxLength={4000}
                         />
@@ -1294,7 +1411,7 @@ export function NotesFeed() {
                             placeholder="Type your message to the buyer…"
                             value={replyText}
                             onChange={(e) => setReplyText(e.target.value)}
-                            onKeyDown={(e) => { if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) { e.preventDefault(); handleReply(); } }}
+                            onKeyDown={(e) => { if (isSendKey(e)) { e.preventDefault(); handleReply(); } }}
                             rows={1}
                             maxLength={2000}
                           />
@@ -1313,19 +1430,17 @@ export function NotesFeed() {
                   </div>
                 ) : (
                 <div className="border-t p-2 shrink-0 space-y-2">
-                  {replyImages.length > 0 && (
-                    <ImageUpload bucket={MESSAGE_IMAGE_BUCKET} recordId={activeConvo.conversation_id ?? activeConvo.order_id} images={replyImages} onChange={setReplyImages} maxFiles={5} compact />
-                  )}
+                  {/* One always-mounted uploader: thumbnails + add button live together
+                      so attaching several images in a row works reliably (swapping two
+                      conditional instances lost images mid-selection). */}
                   <div className="flex items-end gap-2">
-                    {replyImages.length === 0 && (
-                      <ImageUpload bucket={MESSAGE_IMAGE_BUCKET} recordId={activeConvo.conversation_id ?? activeConvo.order_id} images={replyImages} onChange={setReplyImages} maxFiles={5} compact />
-                    )}
+                    <ImageUpload bucket={MESSAGE_IMAGE_BUCKET} recordId={activeConvo.conversation_id ?? activeConvo.order_id} images={replyImages} onChange={setReplyImages} maxFiles={maxAttachments} compact />
                     <textarea
                       className="flex-1 border rounded-xl px-3 py-2 text-sm min-h-[40px] max-h-32 resize-none focus:ring-2 focus:ring-amber-400 focus:border-transparent"
-                      placeholder="Type your reply… (Ctrl+Enter to send)"
+                      placeholder={`Type your reply… (${sendShortcut === 'enter' ? 'Enter' : 'Ctrl+Enter'} to send)`}
                       value={replyText}
                       onChange={(e) => setReplyText(e.target.value)}
-                      onKeyDown={(e) => { if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) { e.preventDefault(); handleReply(); } }}
+                      onKeyDown={(e) => { if (isSendKey(e)) { e.preventDefault(); handleReply(); } }}
                       rows={1}
                       maxLength={2000}
                     />
