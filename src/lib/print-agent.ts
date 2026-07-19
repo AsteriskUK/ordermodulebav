@@ -1,4 +1,3 @@
-import { supabase } from './supabase-client';
 import { Order } from './types';
 import { buildInvoicesHtml } from './order-utils';
 
@@ -21,19 +20,26 @@ export const DEFAULT_PRINTER_CONFIG: PrinterConfig = {
 
 const KEY = 'printer_config';
 
+// Printer config lives in app_settings alongside marketplace credentials, which
+// the anon key cannot read — so go through /api/config (allow-listed keys).
 export async function fetchPrinterConfig(): Promise<PrinterConfig> {
-  const { data } = await supabase.from('app_settings').select('value').eq('key', KEY).maybeSingle();
-  if (!data?.value) return DEFAULT_PRINTER_CONFIG;
   try {
-    const v = typeof data.value === 'string' ? JSON.parse(data.value) : data.value;
-    return { ...DEFAULT_PRINTER_CONFIG, ...v };
+    const res = await fetch('/api/config');
+    if (!res.ok) return DEFAULT_PRINTER_CONFIG;
+    const { printerConfig } = await res.json() as { printerConfig: Partial<PrinterConfig> | null };
+    return printerConfig ? { ...DEFAULT_PRINTER_CONFIG, ...printerConfig } : DEFAULT_PRINTER_CONFIG;
   } catch {
     return DEFAULT_PRINTER_CONFIG;
   }
 }
 
 export async function savePrinterConfig(cfg: PrinterConfig): Promise<void> {
-  await supabase.from('app_settings').upsert({ key: KEY, value: JSON.stringify(cfg), updated_at: new Date().toISOString() });
+  const res = await fetch('/api/config', {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ key: KEY, value: cfg }),
+  });
+  if (!res.ok) throw new Error(await res.text());
 }
 
 function headers(token: string): Record<string, string> {

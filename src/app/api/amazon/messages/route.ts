@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { createClient } from '@supabase/supabase-js';
+import { getServiceClient } from '@/lib/supabase-admin';
 import {
   isAmazonConfigured,
   getAmazonMessagingActions,
@@ -9,10 +9,7 @@ import {
 import { isAmazonMailConfigured, fetchAmazonMailbox, sendAmazonEmailReply } from '@/lib/amazon-mail';
 
 function getSupabase() {
-  return createClient(
-    process.env.NEXT_PUBLIC_SUPABASE_URL!,
-    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
-  );
+  return getServiceClient();
 }
 
 // Actions this app can send: free-text types plus the body-less feedback-removal

@@ -1,5 +1,5 @@
 import crypto from 'crypto';
-import { createClient } from '@supabase/supabase-js';
+import { getServiceClient } from '@/lib/supabase-admin';
 
 // eBay "Digital Signatures for APIs": signature-required endpoints (Finances, and
 // other money/PII APIs) reject requests without an RFC 9421 HTTP Message
@@ -13,7 +13,7 @@ const TOKEN_URL = 'https://api.ebay.com/identity/v1/oauth2/token';
 const APP_SCOPE = 'https://api.ebay.com/oauth/api_scope';
 
 function getSupabase() {
-  return createClient(process.env.NEXT_PUBLIC_SUPABASE_URL!, process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!);
+  return getServiceClient();
 }
 type SB = ReturnType<typeof getSupabase>;
 

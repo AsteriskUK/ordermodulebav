@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { createClient } from '@supabase/supabase-js';
+import { getServiceClient } from '@/lib/supabase-admin';
 import { stableUuid } from '@/lib/utils';
 import {
   isAmazonConfigured,
@@ -17,7 +17,7 @@ const REPORT_ID_KEY = 'amazon_returns_report_id';
 const LAST_SYNC_KEY = 'amazon_returns_last_sync_at';
 
 function getSupabase() {
-  return createClient(process.env.NEXT_PUBLIC_SUPABASE_URL!, process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!);
+  return getServiceClient();
 }
 async function getSetting(key: string): Promise<string | null> {
   const { data } = await getSupabase().from('app_settings').select('value').eq('key', key).single();

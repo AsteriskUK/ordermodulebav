@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { createClient } from '@supabase/supabase-js';
+import { getServiceClient } from '@/lib/supabase-admin';
 import { createHash } from 'crypto';
 import { mapEbayOrderToOrder } from '@/lib/ebay-mapper';
 import { getEbayUserToken } from '@/lib/ebay-client';
@@ -17,7 +17,7 @@ const CURSOR_KEY = 'ebay_backfill_cursor';
 const BACKFILL_BATCH_ID = 'a1b2c3d4-0000-5000-8000-eba1f111ba00'; // fixed UUID for the historical batch
 
 function getSupabase() {
-  return createClient(process.env.NEXT_PUBLIC_SUPABASE_URL!, process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!);
+  return getServiceClient();
 }
 
 // Deterministic UUID v5 (SHA-1) so the same eBay order always maps to the same row.

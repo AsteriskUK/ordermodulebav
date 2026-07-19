@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { createClient } from '@supabase/supabase-js';
+import { getServiceClient } from '@/lib/supabase-admin';
 import { getSigningKey, signEbayRequest } from '@/lib/ebay-signature';
 
 const FINANCES_BASE = 'https://apiz.ebay.com/sell/finances/v1';
@@ -7,7 +7,7 @@ const TOKEN_URL = 'https://api.ebay.com/identity/v1/oauth2/token';
 const FINANCES_SCOPE = 'https://api.ebay.com/oauth/api_scope/sell.finances';
 
 function getSupabase() {
-  return createClient(process.env.NEXT_PUBLIC_SUPABASE_URL!, process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!);
+  return getServiceClient();
 }
 
 async function getFinancesToken(): Promise<string | null> {

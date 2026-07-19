@@ -85,11 +85,11 @@ export function invalidateServerSettingsCache(): void {
 
 async function fetchSettingsFromDb(): Promise<SettingsValues> {
   // Imported lazily so this module stays usable in contexts without Supabase.
-  const { createClient } = await import('@supabase/supabase-js');
-  const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
-  const key = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
-  if (!url || !key) return {};
-  const supabase = createClient(url, key);
+  // Uses the service-role client: app_settings is not readable by anon once
+  // restrict_app_settings_rls.sql is applied.
+  const { getServiceClient } = await import('./supabase-admin');
+  if (!process.env.NEXT_PUBLIC_SUPABASE_URL) return {};
+  const supabase = getServiceClient();
   const { data } = await supabase.from('app_settings').select('value').eq('key', SETTINGS_STORAGE_KEY).maybeSingle();
   if (!data?.value) return {};
   try {

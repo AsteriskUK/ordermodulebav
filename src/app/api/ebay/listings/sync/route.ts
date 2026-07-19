@@ -1,11 +1,11 @@
 import { NextResponse } from 'next/server';
-import { createClient } from '@supabase/supabase-js';
+import { getServiceClient } from '@/lib/supabase-admin';
 import { getEbayAccessToken } from '@/lib/ebay-client';
 
 const TRADING_API_URL = 'https://api.ebay.com/ws/api.dll';
 
 function getSupabase() {
-  return createClient(process.env.NEXT_PUBLIC_SUPABASE_URL!, process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!);
+  return getServiceClient();
 }
 
 function getXmlValue(xml: string, tag: string): string | null {

@@ -1,9 +1,15 @@
 import { NextResponse } from 'next/server';
-import { createClient } from '@supabase/supabase-js';
+import { getServiceClient } from '@/lib/supabase-admin';
 
+// Unauthenticated diagnostic that reveals which credentials are present and
+// performs a test write — gated behind an explicit env flag so it is off in
+// production unless deliberately enabled.
 export async function GET() {
+  if (process.env.EBAY_DEBUG !== '1') {
+    return NextResponse.json({ error: 'disabled', message: 'Set EBAY_DEBUG=1 to enable this endpoint.' }, { status: 404 });
+  }
   const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
-  const supabaseKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+  const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY ?? process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
 
   const result: Record<string, unknown> = {
     env: {
@@ -22,7 +28,7 @@ export async function GET() {
   }
 
   try {
-    const supabase = createClient(supabaseUrl, supabaseKey);
+    const supabase = getServiceClient();
 
     // Check if table exists and what's in it
     const { data, error } = await supabase

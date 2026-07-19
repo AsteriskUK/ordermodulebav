@@ -1,14 +1,11 @@
-import { createClient } from '@supabase/supabase-js';
+import { getServiceClient } from '@/lib/supabase-admin';
 
 const TOKEN_URL = 'https://api.ebay.com/identity/v1/oauth2/token';
 export const EBAY_BASE_URL = 'https://api.ebay.com';
 export const EBAY_MARKETPLACE_ID = 'EBAY_GB';
 
 function getSupabase() {
-  return createClient(
-    process.env.NEXT_PUBLIC_SUPABASE_URL!,
-    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
-  );
+  return getServiceClient();
 }
 
 async function getDbSetting(key: string): Promise<string | null> {

@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { createClient } from '@supabase/supabase-js';
+import { getServiceClient } from '@/lib/supabase-admin';
 import { htmlEmailToText, looksLikeHtmlEmail } from '@/lib/html-text';
 
 const TOKEN_URL = 'https://api.ebay.com/identity/v1/oauth2/token';
@@ -17,10 +17,7 @@ const BACKFILL_MAX_PAGES = 60;        // historical conversations per run (× PA
 const LAST_SYNC_KEY = 'ebay_messages_last_sync';
 
 function getSupabase() {
-  return createClient(
-    process.env.NEXT_PUBLIC_SUPABASE_URL!,
-    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
-  );
+  return getServiceClient();
 }
 
 async function getAccessToken(): Promise<string | null> {

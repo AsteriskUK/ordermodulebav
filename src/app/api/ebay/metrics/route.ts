@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { createClient } from '@supabase/supabase-js';
+import { getServiceClient } from '@/lib/supabase-admin';
 import { signEbayRequest } from '@/lib/ebay-signature';
 
 const ANALYTICS_BASE = 'https://api.ebay.com/sell/analytics/v1';
@@ -10,7 +10,7 @@ const ANALYTICS_SCOPE = 'https://api.ebay.com/oauth/api_scope/sell.analytics.rea
 const FINANCES_SCOPE = 'https://api.ebay.com/oauth/api_scope/sell.finances';
 
 function getSupabase() {
-  return createClient(process.env.NEXT_PUBLIC_SUPABASE_URL!, process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!);
+  return getServiceClient();
 }
 async function getSetting(key: string): Promise<string | null> {
   const { data } = await getSupabase().from('app_settings').select('value').eq('key', key).single();

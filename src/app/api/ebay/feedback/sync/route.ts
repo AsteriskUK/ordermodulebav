@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { createClient } from '@supabase/supabase-js';
+import { getServiceClient } from '@/lib/supabase-admin';
 import { randomUUID } from 'crypto';
 
 const FEEDBACK_BASE = 'https://api.ebay.com/commerce/feedback/v1';
@@ -10,7 +10,7 @@ const MAX_PAGES = 30;     // backfill pages per sync → up to 3000 entries
 const TIME_BUDGET_MS = 18000;   // stop paging before a serverless timeout
 
 function getSupabase() {
-  return createClient(process.env.NEXT_PUBLIC_SUPABASE_URL!, process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!);
+  return getServiceClient();
 }
 
 async function getSetting(key: string): Promise<string | null> {

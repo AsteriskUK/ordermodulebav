@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { createClient } from '@supabase/supabase-js';
+import { getServiceClient } from '@/lib/supabase-admin';
 import { isAmazonConfigured, fetchAmazonFinanceSummary, fetchLatestSettlementAdSpend, AmazonSettlementAdSpend } from '@/lib/amazon-client';
 
 // GET /api/amazon/metrics?date=YYYY-MM-DD
@@ -8,7 +8,7 @@ import { isAmazonConfigured, fetchAmazonFinanceSummary, fetchLatestSettlementAdS
 // to our imported orders. Fees & net require the Finance role on the SP-API app.
 
 function getSupabase() {
-  return createClient(process.env.NEXT_PUBLIC_SUPABASE_URL!, process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!);
+  return getServiceClient();
 }
 
 // Ad spend comes from the latest settlement report — a large file that changes

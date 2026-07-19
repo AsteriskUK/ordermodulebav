@@ -867,29 +867,39 @@ export async function fetchBuilds(): Promise<Build[]> {
 // Admin-configured permissions, stored as a JSON blob in app_settings so every
 // device/user shares the same config. See src/lib/access.ts.
 
+// app_settings also holds marketplace credentials, so the browser reads config
+// through /api/config (service-role, allow-listed keys) rather than directly.
+let configCache: Promise<{ settings: SettingsValues | null; accessControl: AccessConfig | null; printerConfig: Record<string, unknown> | null }> | null = null;
+
+function loadConfig() {
+  if (!configCache) {
+    configCache = fetch('/api/config')
+      .then((r) => r.json())
+      .catch((e) => {
+        console.error('Error fetching config:', e);
+        return { settings: null, accessControl: null, printerConfig: null };
+      });
+  }
+  return configCache;
+}
+
+/** Drop the cached config so the next read hits the server (after a save). */
+export function invalidateConfigCache(): void {
+  configCache = null;
+}
+
 export async function fetchAccessControl(): Promise<AccessConfig | null> {
-  const { data, error } = await supabase
-    .from('app_settings')
-    .select('value')
-    .eq('key', 'access_control')
-    .maybeSingle();
-  if (error) {
-    console.error('Error fetching access control:', { message: error.message, code: error.code });
-    return null;
-  }
-  if (!data?.value) return null;
-  try {
-    return typeof data.value === 'string' ? (JSON.parse(data.value) as AccessConfig) : (data.value as AccessConfig);
-  } catch {
-    return null;
-  }
+  return (await loadConfig()).accessControl;
 }
 
 export async function saveAccessControl(config: AccessConfig): Promise<void> {
-  const { error } = await supabase
-    .from('app_settings')
-    .upsert({ key: 'access_control', value: JSON.stringify(config), updated_at: new Date().toISOString() });
-  if (error) console.error('Error saving access control:', { message: error.message, code: error.code });
+  const res = await fetch('/api/config', {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ key: 'access_control', value: config }),
+  });
+  if (!res.ok) console.error('Error saving access control:', await res.text());
+  invalidateConfigCache();
 }
 
 // ==================== APP SETTINGS ====================
@@ -898,31 +908,21 @@ export async function saveAccessControl(config: AccessConfig): Promise<void> {
 // stored — everything else comes from the defaults in settings-schema.ts.
 
 export async function fetchAppSettings(): Promise<SettingsValues | null> {
-  const { data, error } = await supabase
-    .from('app_settings')
-    .select('value')
-    .eq('key', SETTINGS_STORAGE_KEY)
-    .maybeSingle();
-  if (error) {
-    console.error('Error fetching app settings:', { message: error.message, code: error.code });
-    return null;
-  }
-  if (!data?.value) return null;
-  try {
-    return typeof data.value === 'string' ? (JSON.parse(data.value) as SettingsValues) : (data.value as SettingsValues);
-  } catch {
-    return null;
-  }
+  return (await loadConfig()).settings;
 }
 
 export async function saveAppSettings(values: SettingsValues): Promise<void> {
-  const { error } = await supabase
-    .from('app_settings')
-    .upsert({ key: SETTINGS_STORAGE_KEY, value: JSON.stringify(values), updated_at: new Date().toISOString() });
-  if (error) {
-    console.error('Error saving app settings:', { message: error.message, code: error.code });
-    throw new Error(error.message);
+  const res = await fetch('/api/config', {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ key: SETTINGS_STORAGE_KEY, value: values }),
+  });
+  if (!res.ok) {
+    const message = await res.text();
+    console.error('Error saving app settings:', message);
+    throw new Error(message);
   }
+  invalidateConfigCache();
 }
 
 /** Append-only audit of settings changes (best-effort — never blocks a save). */

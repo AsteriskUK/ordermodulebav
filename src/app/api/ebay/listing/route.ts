@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { createClient } from '@supabase/supabase-js';
+import { getServiceClient } from '@/lib/supabase-admin';
 
 const BROWSE_BASE = 'https://api.ebay.com/buy/browse/v1';
 const TOKEN_URL = 'https://api.ebay.com/identity/v1/oauth2/token';
@@ -7,7 +7,7 @@ const APP_SCOPE = 'https://api.ebay.com/oauth/api_scope';
 const CACHE_TTL_MS = 7 * 24 * 60 * 60 * 1000; // refresh listing data weekly
 
 function getSupabase() {
-  return createClient(process.env.NEXT_PUBLIC_SUPABASE_URL!, process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!);
+  return getServiceClient();
 }
 
 // Client-credentials (application) token — Browse only needs the base scope, so we

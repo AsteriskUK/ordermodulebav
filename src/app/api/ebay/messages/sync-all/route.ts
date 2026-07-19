@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { createClient } from '@supabase/supabase-js';
+import { getServiceClient } from '@/lib/supabase-admin';
 
 const TOKEN_URL = 'https://api.ebay.com/identity/v1/oauth2/token';
 const MSG_BASE  = 'https://api.ebay.com/commerce/message/v1';
@@ -15,10 +15,7 @@ const MSG_PAGE_SIZE   = 50;
 const CONV_TYPES      = ['FROM_MEMBERS', 'FROM_EBAY'] as const;
 
 function getSupabase() {
-  return createClient(
-    process.env.NEXT_PUBLIC_SUPABASE_URL!,
-    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
-  );
+  return getServiceClient();
 }
 
 async function getAccessToken(): Promise<string | null> {
