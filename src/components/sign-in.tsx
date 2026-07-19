@@ -4,7 +4,8 @@ import { useState, useRef, useEffect } from 'react';
 import { useOrderStore } from '@/lib/store';
 import { AppUser } from '@/lib/types';
 import { Button } from '@/components/ui/button';
-import { Package, LogIn, ArrowLeft, Lock } from 'lucide-react';
+import { Package, LogIn, ArrowLeft, Lock, AlertTriangle } from 'lucide-react';
+import { claimSession } from '@/hooks/use-session-lock';
 
 export function SignIn() {
   const users = useOrderStore((s) => s.users);
@@ -13,6 +14,9 @@ export function SignIn() {
   const [selected, setSelected] = useState<AppUser | null>(null);
   const [pin, setPin] = useState('');
   const [error, setError] = useState('');
+  const [busy, setBusy] = useState(false);
+  // Set when this profile is already signed in elsewhere — offers a takeover.
+  const [conflict, setConflict] = useState<{ user: AppUser; device: string; since: string } | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
@@ -23,10 +27,27 @@ export function SignIn() {
     }
   }, [selected]);
 
+  // Only one device may be signed in per profile. Claim the session first; if
+  // it is live elsewhere, offer to take it over rather than stranding anyone.
+  const signIn = async (user: AppUser, force = false) => {
+    setBusy(true);
+    try {
+      const blocked = await claimSession(user.id, force);
+      if (blocked) {
+        setConflict({ user, device: blocked.device, since: blocked.since });
+        return;
+      }
+      setConflict(null);
+      setCurrentUser(user.id);
+    } finally {
+      setBusy(false);
+    }
+  };
+
   const handleSelect = (user: AppUser) => {
     // Admins sign in directly; everyone else must enter their PIN every time.
     if (user.role === 'admin') {
-      setCurrentUser(user.id);
+      signIn(user);
       return;
     }
     setSelected(user);
@@ -39,7 +60,7 @@ export function SignIn() {
       return;
     }
     if (pin === selected.pin) {
-      setCurrentUser(selected.id);
+      signIn(selected);
     } else {
       setError('Incorrect PIN. Try again.');
       setPin('');
@@ -58,7 +79,35 @@ export function SignIn() {
           <p className="text-xs text-slate-400">Warehouse Pipeline</p>
         </div>
 
-        {!selected ? (
+        {conflict ? (
+          <div className="space-y-4">
+            <div className="flex flex-col items-center gap-2 text-center">
+              <div className="flex h-10 w-10 items-center justify-center rounded-full bg-amber-100">
+                <AlertTriangle className="h-5 w-5 text-amber-600" />
+              </div>
+              <p className="text-sm font-semibold text-slate-800">Already signed in</p>
+              <p className="text-xs leading-relaxed text-slate-500">
+                <strong>{conflict.user.name}</strong> is signed in on {conflict.device}
+                {conflict.since && ` since ${new Date(conflict.since).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' })}`}.
+                Only one device can use a profile at a time.
+              </p>
+            </div>
+            <div className="rounded-lg border border-amber-200 bg-amber-50 p-3">
+              <p className="text-xs text-amber-800">
+                Signing in here will sign out the other device.
+              </p>
+            </div>
+            <Button className="h-11 w-full" disabled={busy} onClick={() => signIn(conflict.user, true)}>
+              {busy ? 'Signing in…' : 'Sign in here anyway'}
+            </Button>
+            <button
+              onClick={() => { setConflict(null); setSelected(null); setPin(''); }}
+              className="flex w-full items-center justify-center gap-1.5 text-xs text-slate-400 hover:text-slate-600"
+            >
+              <ArrowLeft className="h-3.5 w-3.5" /> Back
+            </button>
+          </div>
+        ) : !selected ? (
           <div className="space-y-3">
             <p className="text-center text-sm font-medium text-slate-600">Who&apos;s working today?</p>
             <div className="space-y-2">
@@ -67,6 +116,7 @@ export function SignIn() {
                   key={u.id}
                   variant="outline"
                   className="h-11 w-full justify-start gap-3"
+                  disabled={busy}
                   onClick={() => handleSelect(u)}
                 >
                   <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-blue-600 text-xs font-bold text-white">
@@ -123,8 +173,8 @@ export function SignIn() {
               className="w-full rounded-lg border border-slate-200 px-3 py-2.5 text-center text-lg tracking-[0.4em] outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
             />
             {error && <p className="text-center text-xs text-red-500">{error}</p>}
-            <Button className="h-11 w-full" onClick={submitPin} disabled={!pin}>
-              Sign In
+            <Button className="h-11 w-full" onClick={submitPin} disabled={!pin || busy}>
+              {busy ? 'Signing in…' : 'Sign In'}
             </Button>
           </div>
         )}

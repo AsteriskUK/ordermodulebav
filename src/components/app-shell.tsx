@@ -9,6 +9,7 @@ import { supabase } from '@/lib/supabase-client';
 import { Button } from './ui/button';
 import { useSupabaseSync } from '@/hooks/use-supabase-sync';
 import { useAutoPull } from '@/hooks/use-auto-pull';
+import { useSessionLock, releaseSession } from '@/hooks/use-session-lock';
 import { CancellationAlert } from './cancellation-alert';
 import { TrackingScheduler } from './tracking-scheduler';
 import { FeedbackMonitor } from './feedback-monitor';
@@ -39,6 +40,8 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   useSupabaseSync();
   // Automatically pull new marketplace orders every 30 minutes.
   useAutoPull();
+  // One active login per profile — signs this device out if superseded.
+  useSessionLock();
 
   const users = useOrderStore((s) => s.users);
   const currentUserId = useOrderStore((s) => s.currentUserId);
@@ -349,7 +352,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
                     ))}
                   </div>
                   <div className="px-2 pb-1.5 border-t border-slate-100 pt-1.5">
-                    <button onClick={() => { setCurrentUser(null); setMenuOpen(false); }}
+                    <button onClick={() => { if (currentUserId) releaseSession(currentUserId); setCurrentUser(null); setMenuOpen(false); }}
                       className="w-full flex items-center gap-2 px-2 py-1.5 rounded-lg hover:bg-red-50 text-red-600 text-xs font-medium transition-colors">
                       <LogOut className="h-3.5 w-3.5" /> Sign out
                     </button>

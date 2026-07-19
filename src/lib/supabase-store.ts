@@ -869,18 +869,26 @@ export async function fetchBuilds(): Promise<Build[]> {
 
 // app_settings also holds marketplace credentials, so the browser reads config
 // through /api/config (service-role, allow-listed keys) rather than directly.
-let configCache: Promise<{ settings: SettingsValues | null; accessControl: AccessConfig | null; printerConfig: Record<string, unknown> | null }> | null = null;
+type ConfigDoc = { settings: SettingsValues | null; accessControl: AccessConfig | null; printerConfig: Record<string, unknown> | null };
+let configCache: { promise: Promise<ConfigDoc>; at: number } | null = null;
+// Short TTL so a settings change made on one device reaches the others on the
+// next periodic sync, rather than only after a page reload.
+const CONFIG_TTL_MS = 30_000;
 
-function loadConfig() {
-  if (!configCache) {
-    configCache = fetch('/api/config')
-      .then((r) => r.json())
-      .catch((e) => {
-        console.error('Error fetching config:', e);
-        return { settings: null, accessControl: null, printerConfig: null };
-      });
+function loadConfig(): Promise<ConfigDoc> {
+  if (!configCache || Date.now() - configCache.at > CONFIG_TTL_MS) {
+    configCache = {
+      at: Date.now(),
+      promise: fetch('/api/config')
+        .then((r) => r.json() as Promise<ConfigDoc>)
+        .catch((e) => {
+          console.error('Error fetching config:', e);
+          configCache = null; // let the next call retry rather than caching a failure
+          return { settings: null, accessControl: null, printerConfig: null };
+        }),
+    };
   }
-  return configCache;
+  return configCache.promise;
 }
 
 /** Drop the cached config so the next read hits the server (after a save). */
