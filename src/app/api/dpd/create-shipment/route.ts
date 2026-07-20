@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { getSettings, resolveSetting, asString } from '@/lib/settings';
 import { createDPDShipment, getDPDLabels, validateDpdOutboundServices, DPDOutboundService, DPDLabelResult } from '@/lib/dpd-client';
 import { Order } from '@/lib/types';
 
@@ -140,15 +141,21 @@ async function orderToPayload(order: Order, service: string): Promise<any> {
   console.log('[DPD] Diagnostic mode - docs collection address:', useDocsCollection || useFullDocsAddresses);
   console.log('[DPD] Diagnostic mode - docs delivery address:', useFullDocsAddresses);
 
+  // Collection address comes from Settings → Business when configured, falling
+  // back to the DPD_COLLECTION_* env vars so existing deployments keep working.
+  const bs = await getSettings();
+  const setOr = (key: string, envValue: string | undefined) =>
+    asString(resolveSetting(bs, key)) || envValue || '';
+
   const collectionAddress = (useDocsCollection || useFullDocsAddresses)
     ? DPD_DOCS_COLLECTION.address
     : {
         organisation: '',
-        street: sanitizeAddressLine(process.env.DPD_COLLECTION_ADDRESS1 || ''),
-        locality: '',
-        town: sanitizeAddressLine(process.env.DPD_COLLECTION_CITY || ''),
-        county: '',
-        postcode: sanitizePostcode(process.env.DPD_COLLECTION_POSTCODE || ''),
+        street: sanitizeAddressLine(setOr('business.address1', process.env.DPD_COLLECTION_ADDRESS1)),
+        locality: sanitizeAddressLine(asString(resolveSetting(bs, 'business.address2'))),
+        town: sanitizeAddressLine(setOr('business.city', process.env.DPD_COLLECTION_CITY)),
+        county: sanitizeAddressLine(asString(resolveSetting(bs, 'business.county'))),
+        postcode: sanitizePostcode(setOr('business.postcode', process.env.DPD_COLLECTION_POSTCODE)),
         countryCode: 'GB',
       };
 
@@ -194,7 +201,7 @@ async function orderToPayload(order: Order, service: string): Promise<any> {
     : {
         contactDetails: {
           contactName: sanitizeAddressLine('Warehouse'),
-          telephone: sanitizePhone(process.env.DPD_COLLECTION_PHONE || ''),
+          telephone: sanitizePhone(setOr('business.supportPhone', process.env.DPD_COLLECTION_PHONE)),
         },
         address: collectionAddress,
       };

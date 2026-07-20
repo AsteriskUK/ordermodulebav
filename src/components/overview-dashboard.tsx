@@ -3,6 +3,7 @@
 import Image from 'next/image';
 import { useCallback, useEffect, useState } from 'react';
 import { Input } from '@/components/ui/input';
+import { currencySymbol } from '@/lib/order-utils';
 import { Button } from '@/components/ui/button';
 import { BarChart3, RefreshCw, AlertTriangle, PoundSterling, ShoppingCart, RotateCcw, ThumbsDown, Gauge, PackageCheck, Clock, WifiOff, Megaphone } from 'lucide-react';
 import type { PlatformMetrics } from '@/app/api/platform-metrics/route';
@@ -66,9 +67,8 @@ const PLATFORM_TABS = [
 
 type TabId = typeof PLATFORM_TABS[number]['id'];
 
-const SYMBOLS: Record<string, string> = { GBP: '£', USD: '$', EUR: '€' };
 const money = (n: number, currency = 'GBP') => {
-  const sym = SYMBOLS[currency] ?? '£';
+  const sym = currencySymbol(currency);
   return `${sym}${n.toLocaleString('en-GB', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 };
 const pct = (v: number | string | null) => (v == null || v === '') ? '—' : `${v}%`;

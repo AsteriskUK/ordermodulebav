@@ -91,7 +91,34 @@ function invoiceConfig() {
     showBuyerNote: asBool(resolveSetting(values, 'invoice.showBuyerNote')),
     showSku: asBool(resolveSetting(values, 'invoice.showSku')),
     useMarketplaceTemplates: asBool(resolveSetting(values, 'invoice.useMarketplaceTemplates')),
+    legalName: asString(resolveSetting(values, 'business.legalName')),
+    companyNumber: asString(resolveSetting(values, 'business.companyNumber')),
+    vatRegistered: asBool(resolveSetting(values, 'business.vatRegistered')),
+    vatNumber: asString(resolveSetting(values, 'business.vatNumber')),
+    supportEmail: asString(resolveSetting(values, 'business.supportEmail')),
+    supportPhone: asString(resolveSetting(values, 'business.supportPhone')),
+    currency: asString(resolveSetting(values, 'business.currency')),
   };
+}
+
+/** Symbol for a currency code, used across invoices and dashboards. */
+export function currencySymbol(code: string): string {
+  return ({ GBP: '£', EUR: '€', USD: '$' } as Record<string, string>)[code] ?? '£';
+}
+
+/**
+ * Legal footer assembled from the Business settings — company details buyers
+ * and tax authorities expect on an invoice. Omits anything not configured.
+ */
+function businessFooterHtml(cfg: ReturnType<typeof invoiceConfig>): string {
+  const parts: string[] = [];
+  const name = cfg.legalName || cfg.sellerName;
+  if (name) parts.push(name);
+  if (cfg.companyNumber) parts.push(`Company No. ${cfg.companyNumber}`);
+  if (cfg.vatRegistered && cfg.vatNumber) parts.push(`VAT No. ${cfg.vatNumber}`);
+  const contact = [cfg.supportEmail, cfg.supportPhone].filter(Boolean).join(' · ');
+  const lines = [parts.join(' · '), contact, cfg.footer].filter(Boolean);
+  return lines.length ? `<p class="inv-footer">${lines.join('<br/>')}</p>` : '';
 }
 
 const AMAZON_DELIVERY_SERVICE: Record<string, string> = {
@@ -115,7 +142,8 @@ function buildAmazonSlipPage(o: Order): string {
   const grandTotal = o.totalPrice || o.soldFor;
   // Prices are VAT-inclusive — show the VAT portion at the configured rate.
   const vat = (n: number) => (cfg.vatRate <= 0 ? 0 : n - n / (1 + cfg.vatRate / 100));
-  const gbp = (n: number) => `£${n.toFixed(2)}`;
+  const sym = currencySymbol(cfg.currency);
+  const gbp = (n: number) => `${sym}${n.toFixed(2)}`;
   const addressLines = [
     o.postToName,
     o.postToAddress1,
@@ -193,6 +221,7 @@ function buildAmazonSlipPage(o: Order): string {
 /** Build printable invoice HTML for one or more orders. */
 export function buildInvoicesHtml(orders: Order[]): string {
   const cfg = invoiceConfig();
+  const sym = currencySymbol(cfg.currency);
   const pages = orders.map((o) => {
     const platform = getOrderPlatform(o);
     // Amazon orders print the official Amazon Marketplace packing slip layout
@@ -238,17 +267,17 @@ export function buildInvoicesHtml(orders: Order[]): string {
             <td>${o.itemTitle}</td>
             <td>${o.variation || '—'}</td>
             <td>${o.quantity}</td>
-            <td>£${o.soldFor.toFixed(2)}</td>
-            <td>£${(o.soldFor * o.quantity).toFixed(2)}</td>
+            <td>${sym}${o.soldFor.toFixed(2)}</td>
+            <td>${sym}${(o.soldFor * o.quantity).toFixed(2)}</td>
           </tr>
         </tbody>
         <tfoot>
-          <tr><td colspan="3"></td><td>Postage</td><td>£${o.postageAndPackaging.toFixed(2)}</td></tr>
-          <tr class="total"><td colspan="3"></td><td>Total</td><td>£${o.totalPrice.toFixed(2)}</td></tr>
+          <tr><td colspan="3"></td><td>Postage</td><td>${sym}${o.postageAndPackaging.toFixed(2)}</td></tr>
+          <tr class="total"><td colspan="3"></td><td>Total</td><td>${sym}${o.totalPrice.toFixed(2)}</td></tr>
         </tfoot>
       </table>
       ${cfg.showBuyerNote && o.buyerNote ? `<div class="note"><strong>Buyer Note:</strong> ${o.buyerNote}</div>` : ''}
-      ${cfg.footer ? `<p class="inv-footer">${cfg.footer}</p>` : ''}
+      ${businessFooterHtml(cfg)}
     </div>`;
   });
   return `<!DOCTYPE html><html><head><meta charset="utf-8"/><title>Invoices</title>
