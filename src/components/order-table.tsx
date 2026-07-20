@@ -49,6 +49,7 @@ import {
 import { generateBatchShipCSV } from '@/lib/csv-parser';
 import { DeliveryBadge } from './delivery-badge';
 import { ItemThumb } from './item-thumb';
+import { useSettingBool } from '@/hooks/use-settings';
 import { toast } from 'sonner';
 import { OrderDetailDialog } from './order-detail-dialog';
 import { EbayMessageDialog } from './ebay-message-dialog';
@@ -57,6 +58,8 @@ import { EbayNewMessageDialog } from './ebay-new-message-dialog';
 const PAGE_SIZE = 25;
 
 export function OrderTable() {
+  // Settings → Appearance: product thumbnails in order lists.
+  const showThumbnails = useSettingBool('appearance.showOrderThumbnails');
   const orders = useOrderStore((s) => s.orders);
   const updateOrderStatus = useOrderStore((s) => s.updateOrderStatus);
   const updateOrderPriority = useOrderStore((s) => s.updateOrderPriority);
@@ -662,7 +665,7 @@ export function OrderTable() {
                   </TableCell>
                   <TableCell className="text-xs max-w-[240px]">
                     <div className="flex items-center gap-2">
-                      <ItemThumb itemNumber={order.itemNumber} />
+                      {showThumbnails && <ItemThumb itemNumber={order.itemNumber} />}
                       <div className="min-w-0">
                         <div className="truncate">{order.itemTitle}</div>
                         {order.variation && (

@@ -10,6 +10,8 @@ import { Button } from './ui/button';
 import { useSupabaseSync } from '@/hooks/use-supabase-sync';
 import { useAutoPull } from '@/hooks/use-auto-pull';
 import { useSessionLock, releaseSession } from '@/hooks/use-session-lock';
+import { useSettingString } from '@/hooks/use-settings';
+import { AppearanceProvider } from './appearance-provider';
 import { CancellationAlert } from './cancellation-alert';
 import { TrackingScheduler } from './tracking-scheduler';
 import { FeedbackMonitor } from './feedback-monitor';
@@ -47,6 +49,8 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   const currentUserId = useOrderStore((s) => s.currentUserId);
   const currentUser = users.find((u) => u.id === currentUserId);
   const accessControl = useOrderStore((s) => s.accessControl);
+  // Preferred landing page (Settings → Appearance); used when it is reachable.
+  const preferredLanding = useSettingString('appearance.defaultLandingPage');
   // Buyer messages (Inbox / email) visibility — governed by the access rules.
   const canInbox = can(currentUser, 'feature:buyer-inbox', accessControl);
 
@@ -58,10 +62,10 @@ export function AppShell({ children }: { children: React.ReactNode }) {
     if (!currentUser) return;
     const resourceId = resourceIdForPath(pathname);
     if (!resourceId || can(currentUser, resourceId, accessControl)) return;
-    const target = landingPathFor(currentUser, accessControl);
+    const target = landingPathFor(currentUser, accessControl, preferredLanding);
     // Guard against redirecting to the same (still-inaccessible) page — no loops.
     if (target !== resourceId && target !== pathname) router.replace(target);
-  }, [pathname, currentUser, accessControl, router]);
+  }, [pathname, currentUser, accessControl, router, preferredLanding]);
   const setCurrentUser = useOrderStore((s) => s.setCurrentUser);
 
   const [menuOpen, setMenuOpen] = useState(false);
@@ -155,6 +159,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
 
   return (
     <div className="flex h-screen overflow-hidden">
+      <AppearanceProvider />
       <EodScheduler />
       <TrackingScheduler />
       <div className="flex-shrink-0">

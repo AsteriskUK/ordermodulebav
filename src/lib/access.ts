@@ -98,9 +98,18 @@ export function can(user: AppUser | null | undefined, resourceId: string, config
 // Priority order for choosing a landing page: the first one the user can access.
 const LANDING_PRIORITY = ['/', '/overview', '/notes', '/tracking', '/packaging', '/hr', '/returns', '/feedback'];
 
-/** The best landing path for a user given their access — where to send them on sign-in / redirect. */
-export function landingPathFor(user: AppUser | null | undefined, config?: AccessConfig | null): string {
+/**
+ * The best landing path for a user given their access — where to send them on
+ * sign-in / redirect. `preferred` comes from Settings → Appearance and wins
+ * whenever the user can actually reach it.
+ */
+export function landingPathFor(
+  user: AppUser | null | undefined,
+  config?: AccessConfig | null,
+  preferred?: string,
+): string {
   if (!user) return '/';
+  if (preferred && can(user, preferred, config)) return preferred;
   for (const href of LANDING_PRIORITY) if (can(user, href, config)) return href;
   const firstPage = PAGE_RESOURCES.find((p) => can(user, p.id, config));
   return firstPage?.id ?? '/notes';

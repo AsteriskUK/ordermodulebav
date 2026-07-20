@@ -130,3 +130,26 @@
     font-family: "Arial", "Calibri", "Helvetica Neue", sans-serif;
   }
 }
+/* ── Appearance settings (Settings → Appearance) ─────────────────────────────
+   AppearanceProvider sets --app-accent* from the configured accent colour and
+   data-density on <html>. Both fall back to the built-in look when unset, so
+   nothing depends on the provider having run. */
+
+:root {
+  --app-accent: #2563eb;
+  --app-accent-rgb: 37 99 235;
+  --app-accent-foreground: #ffffff;
+}
+
+/* Accent-aware utilities — used where the brand colour should follow settings
+   rather than a fixed Tailwind blue. */
+.accent-bg { background-color: var(--app-accent); color: var(--app-accent-foreground); }
+.accent-text { color: var(--app-accent); }
+.accent-border { border-color: var(--app-accent); }
+.accent-bg-soft { background-color: rgb(var(--app-accent-rgb) / 0.10); }
+.accent-ring:focus-visible { outline: 2px solid var(--app-accent); outline-offset: 2px; }
+
+/* Compact density: tighten the vertical rhythm of dense list/table screens.
+   Deliberately narrow in scope — it must not squash form controls. */
+html[data-density='compact'] table :is(th, td) { padding-top: .3rem; padding-bottom: .3rem; }
+html[data-density='compact'] .density-row { padding-top: .3rem; padding-bottom: .3rem; }

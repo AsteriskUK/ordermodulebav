@@ -34,6 +34,7 @@ import { cn } from '@/lib/utils';
 import { useOrderStore } from '@/lib/store';
 import { DEPARTMENT_CONFIG, Department } from '@/lib/types';
 import { can } from '@/lib/access';
+import { useSettingString } from '@/hooks/use-settings';
 import { GlobalSearch } from './global-search';
 
 const ALL_NAV = [
@@ -82,23 +83,36 @@ export function Sidebar({ collapsed, onToggle, onNavigate }: { collapsed: boolea
     ? (currentUser.departments?.length ? currentUser.departments : [currentUser.department ?? 'management'])
     : [];
 
+  // Sidebar palette follows Settings → Appearance → Sidebar theme.
+  const sidebarTheme = useSettingString('appearance.sidebarTheme');
+  const light = sidebarTheme === 'light';
+  const t = {
+    shell:    light ? 'bg-white text-slate-800 border-r border-slate-200' : 'bg-slate-900 text-white',
+    divider:  light ? 'border-slate-200' : 'border-slate-700',
+    hover:    light ? 'hover:bg-slate-100' : 'hover:bg-slate-800',
+    title:    light ? 'text-slate-900' : 'text-white',
+    subtitle: light ? 'text-slate-500' : 'text-slate-400',
+    muted:    light ? 'text-slate-400' : 'text-slate-500',
+    navIdle:  light ? 'text-slate-600 hover:bg-slate-100 hover:text-slate-900' : 'text-slate-300 hover:bg-slate-800 hover:text-white',
+  };
+
   return (
     <aside className={`${
       collapsed ? 'w-16' : 'w-64'
-    } bg-slate-900 text-white flex flex-col h-full flex-shrink-0 transition-all duration-300`}>
-      <div className="p-4 border-b border-slate-700 flex items-center justify-between">
+    } ${t.shell} flex flex-col h-full flex-shrink-0 transition-all duration-300`}>
+      <div className={`p-4 border-b ${t.divider} flex items-center justify-between`}>
         {!collapsed && (
           <div>
-            <h1 className="text-lg font-bold flex items-center gap-2">
-              <Package className="h-5 w-5 text-blue-400" />
+            <h1 className={`text-lg font-bold flex items-center gap-2 ${t.title}`}>
+              <Package className="h-5 w-5 accent-text" />
               Orders Manager
             </h1>
-            <p className="text-xs text-slate-400 mt-1">Warehouse Pipeline</p>
+            <p className={`text-xs mt-1 ${t.subtitle}`}>Warehouse Pipeline</p>
           </div>
         )}
         <button
           onClick={onToggle}
-          className="p-1.5 rounded-lg hover:bg-slate-800 transition-colors"
+          className={`p-1.5 rounded-lg ${t.hover} transition-colors`}
         >
           {collapsed ? (
             <ChevronRight className="h-4 w-4" />
@@ -108,7 +122,7 @@ export function Sidebar({ collapsed, onToggle, onNavigate }: { collapsed: boolea
         </button>
       </div>
       {isAdminOrManager && !collapsed && (
-        <div className="px-3 py-2 border-b border-slate-700">
+        <div className={`px-3 py-2 border-b ${t.divider}`}>
           <GlobalSearch />
         </div>
       )}
@@ -123,8 +137,8 @@ export function Sidebar({ collapsed, onToggle, onNavigate }: { collapsed: boolea
               className={cn(
                 'flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-colors',
                 isActive
-                  ? 'bg-blue-600 text-white'
-                  : 'text-slate-300 hover:bg-slate-800 hover:text-white'
+                  ? 'accent-bg'
+                  : t.navIdle
               )}
               title={collapsed ? item.name : undefined}
             >
@@ -150,8 +164,8 @@ export function Sidebar({ collapsed, onToggle, onNavigate }: { collapsed: boolea
         })}
       </nav>
       {!collapsed && (
-        <div className="p-4 border-t border-slate-700">
-          <p className="text-xs text-slate-500">v1.0 — Core Module</p>
+        <div className={`p-4 border-t ${t.divider}`}>
+          <p className={`text-xs ${t.muted}`}>v1.0 — Core Module</p>
         </div>
       )}
     </aside>

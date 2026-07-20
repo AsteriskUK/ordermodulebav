@@ -3,6 +3,7 @@
 import { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
 import { useOrderStore } from '@/lib/store';
+import { useSettingString } from '@/hooks/use-settings';
 import { ORDER_STATUS_CONFIG } from '@/lib/types';
 import { Badge } from '@/components/ui/badge';
 import {
@@ -52,6 +53,8 @@ interface Result {
 }
 
 export function GlobalSearch() {
+  // Matches the sidebar it lives in (Settings → Appearance).
+  const light = useSettingString('appearance.sidebarTheme') === 'light';
   const router = useRouter();
   const orders = useOrderStore((s) => s.orders);
   const returns = useOrderStore((s) => s.returns);
@@ -252,11 +255,17 @@ export function GlobalSearch() {
       {/* Trigger button */}
       <button
         onClick={() => setOpen(true)}
-        className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-400 hover:text-slate-200 transition-colors text-sm w-full"
+        className={`flex items-center gap-2 px-3 py-1.5 rounded-lg transition-colors text-sm w-full ${
+          light
+            ? 'bg-slate-100 hover:bg-slate-200 text-slate-500 hover:text-slate-700'
+            : 'bg-slate-800 hover:bg-slate-700 text-slate-400 hover:text-slate-200'
+        }`}
       >
         <Search className="h-3.5 w-3.5 shrink-0" />
         <span className="flex-1 text-left">Search…</span>
-        <kbd className="hidden sm:flex items-center gap-0.5 rounded border border-slate-600 px-1.5 py-0.5 text-xs font-mono text-slate-500">
+        <kbd className={`hidden sm:flex items-center gap-0.5 rounded px-1.5 py-0.5 text-xs font-mono ${
+          light ? 'border border-slate-300 text-slate-400' : 'border border-slate-600 text-slate-500'
+        }`}>
           ⌘K
         </kbd>
       </button>
