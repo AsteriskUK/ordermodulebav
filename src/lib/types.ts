@@ -15,7 +15,7 @@ export type DPDService =
   | 'saturday'
   | 'sunday';
 
-export type UserRole = 'admin' | 'manager' | 'staff' | 'comms';
+export type UserRole = 'admin' | 'manager' | 'staff' | 'comms' | 'viewer';
 
 export type Department =
   | 'management'

@@ -14,7 +14,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
-import { Users, Plus, Trash2, Pencil, Check, X, ShieldCheck, User, Briefcase } from 'lucide-react';
+import { Users, Plus, Trash2, Pencil, Check, X, ShieldCheck, User, Briefcase, Eye } from 'lucide-react';
 import { toast } from 'sonner';
 
 const ROLE_CONFIG: Record<UserRole, { label: string; color: string; icon: React.ElementType; description: string }> = {
@@ -41,6 +41,12 @@ const ROLE_CONFIG: Record<UserRole, { label: string; color: string; icon: React.
     color: 'bg-purple-100 text-purple-800 border-purple-300',
     icon: User,
     description: 'Can place orders on hold; senior comms can release holds',
+  },
+  viewer: {
+    label: 'Viewer (read-only)',
+    color: 'bg-slate-100 text-slate-700 border-slate-300',
+    icon: Eye,
+    description: 'Sees everything, changes nothing — for clients/demos. Writes are blocked server-side.',
   },
 };
 
@@ -198,7 +204,7 @@ export function UserManagement() {
       )}
 
       {/* Role legend */}
-      <div className="grid grid-cols-1 md:grid-cols-4 gap-3">
+      <div className="grid grid-cols-1 md:grid-cols-3 lg:grid-cols-5 gap-3">
         {(Object.entries(ROLE_CONFIG) as [UserRole, typeof ROLE_CONFIG[UserRole]][]).map(([role, cfg]) => {
           const Icon = cfg.icon;
           return (
@@ -251,6 +257,7 @@ export function UserManagement() {
                     <SelectItem value="manager">Manager</SelectItem>
                     <SelectItem value="staff">Staff</SelectItem>
                     <SelectItem value="comms">Comms</SelectItem>
+                    <SelectItem value="viewer">Viewer (read-only)</SelectItem>
                   </SelectContent>
                 </Select>
               </div>
@@ -319,6 +326,7 @@ export function UserManagement() {
                             <SelectItem value="manager">Manager</SelectItem>
                             <SelectItem value="staff">Staff</SelectItem>
                             <SelectItem value="comms">Comms</SelectItem>
+                            <SelectItem value="viewer">Viewer (read-only)</SelectItem>
                           </SelectContent>
                         </Select>
                         <Input
