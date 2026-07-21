@@ -3,7 +3,8 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useOrderStore } from '@/lib/store';
 import { GoodsReceipt, GoodsReceiptLine, CatalogProduct } from '@/lib/types';
-import { INVENTORY_CATEGORIES, INVENTORY_CATEGORY_MAP, STOCK_GRADES, describeAttributes } from '@/lib/inventory-config';
+import { INVENTORY_CATEGORIES, INVENTORY_CATEGORY_MAP,  describeAttributes } from '@/lib/inventory-config';
+import { useSettingList } from '@/hooks/use-settings';
 import { searchCatalog, catalogToAttributes, CATALOG_TO_INVENTORY_CATEGORY } from '@/lib/catalog';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -20,6 +21,8 @@ function uuid(): string {
 const fieldCls = 'w-full px-2.5 py-2 border border-slate-300 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-blue-500';
 
 export function GoodsInwardForm({ onClose }: { onClose: () => void }) {
+  // Condition grades are configurable (Settings → Inventory & Picker).
+  const grades = useSettingList('inventory.grades');
   const saveGoodsReceipt = useOrderStore((s) => s.saveGoodsReceipt);
   const postGoodsReceipt = useOrderStore((s) => s.postGoodsReceipt);
   const currentUser = useOrderStore((s) => s.users.find((u) => u.id === s.currentUserId));
@@ -249,7 +252,7 @@ export function GoodsInwardForm({ onClose }: { onClose: () => void }) {
               <div>
                 <label className="text-[11px] font-medium text-slate-500 block mb-1">Grade</label>
                 <select value={grade} onChange={(e) => setGrade(e.target.value)} className={fieldCls}>
-                  {STOCK_GRADES.map((g) => <option key={g} value={g}>{g}</option>)}
+                  {grades.map((g: string) => <option key={g} value={g}>{g}</option>)}
                 </select>
               </div>
               <div>

@@ -360,8 +360,9 @@ export const useOrderStore = create<OrderStore>()(
         if (!order) return;
         // Soft cancel — status only, order is retained (recoverable via Recently Deleted / status change).
         updateOrderStatus(orderId, 'cancelled');
-        // Raise an urgent Comms ticket so they handle the refund/buyer comms — but
-        // not if one is already open for this order (avoid duplicates on re-detection).
+        // Raising the Comms ticket is optional (Settings → Returns & Tickets).
+        if (!asBool(resolveSetting(get().appSettings, 'tickets.autoTicketOnCancellation'))) return;
+        // Don't duplicate an already-open cancellation ticket for this order.
         const dup = tickets.find((t) => t.orderId === orderId && t.category === 'cancellation' && t.status !== 'closed' && t.status !== 'resolved');
         if (dup) return;
         const user = users.find((u) => u.id === currentUserId);

@@ -2,6 +2,7 @@
 
 import { useMemo, useState } from 'react';
 import { useOrderStore } from '@/lib/store';
+import { useSettingList, useSettingString } from '@/hooks/use-settings';
 import {
   TicketRecord, TicketActivity, TicketStatus, TicketPriority, TicketContactMethod,
   Department, DEPARTMENT_CONFIG, TICKET_STATUS_CONFIG, TICKET_PRIORITY_CONFIG,
@@ -18,7 +19,7 @@ function generateId(): string {
   });
 }
 
-const CATEGORIES = [
+const CATEGORY_LABELS: Record<string, string> = Object.fromEntries([
   { value: 'wrong-item', label: 'Wrong item' },
   { value: 'damaged', label: 'Damaged / faulty' },
   { value: 'not-received', label: 'Not received' },
@@ -30,7 +31,12 @@ const CATEGORIES = [
   { value: 'callback', label: 'Callback request' },
   { value: 'question', label: 'General question' },
   { value: 'other', label: 'Other' },
-];
+].map((c) => [c.value, c.label]));
+
+/** Title-case a raw category slug for categories added via Settings. */
+function categoryLabel(value: string): string {
+  return CATEGORY_LABELS[value] ?? value.replace(/[-_]/g, ' ').replace(/\b\w/g, (m) => m.toUpperCase());
+}
 
 const CONTACT_METHODS: { value: TicketContactMethod; label: string; icon: typeof Phone }[] = [
   { value: 'phone', label: 'Phone call', icon: Phone },
@@ -76,7 +82,9 @@ export function TicketDialog({
   const [subject, setSubject] = useState(base.subject ?? '');
   const [body, setBody] = useState(base.body ?? '');
   const [category, setCategory] = useState(base.category ?? 'other');
-  const [priority, setPriority] = useState<TicketPriority>(base.priority ?? 'normal');
+  const categoryOptions = useSettingList('tickets.categories');
+  const defaultPriority = useSettingString('tickets.defaultPriority') as TicketPriority;
+  const [priority, setPriority] = useState<TicketPriority>(base.priority ?? defaultPriority ?? 'normal');
   const [status, setStatus] = useState<TicketStatus>(base.status ?? 'open');
   const [department, setDepartment] = useState<Department | ''>(base.department ?? '');
   const [assigneeUserId, setAssigneeUserId] = useState(base.assigneeUserId ?? '');
@@ -208,7 +216,7 @@ export function TicketDialog({
             <div>
               <label className={labelCls}>Category</label>
               <select value={category} onChange={(e) => setCategory(e.target.value)} className={fieldCls} disabled={isEdit && !canManage}>
-                {CATEGORIES.map((c) => <option key={c.value} value={c.value}>{c.label}</option>)}
+                {categoryOptions.map((c: string) => <option key={c} value={c}>{categoryLabel(c)}</option>)}
               </select>
             </div>
             <div>

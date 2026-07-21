@@ -2,6 +2,7 @@
 
 import { useMemo, useState } from 'react';
 import { useOrderStore } from '@/lib/store';
+import { useSettingList } from '@/hooks/use-settings';
 import { Department, DEPARTMENT_CONFIG, Order } from '@/lib/types';
 import { Button } from '@/components/ui/button';
 import { ListChecks, Check, Undo2, Tag, Minus, ChevronLeft, Cpu, MemoryStick, HardDrive, Boxes } from 'lucide-react';
@@ -24,10 +25,6 @@ const CPU_FAMILIES: { label: string; value: string; brand: string }[] = [
   { label: 'Ryzen 5', value: 'Ryzen 5', brand: 'AMD' },
   { label: 'Ryzen 7', value: 'Ryzen 7', brand: 'AMD' },
 ];
-const CPU_GENS = ['2nd', '3rd', '4th', '6th', '7th', '8th', '9th', '10th', '11th', '12th', '13th', '14th'];
-const RAM_CAPS = [4, 8, 16, 32, 64];
-const STORAGE_TYPES = ['SSD', 'HDD', 'NVMe'];
-const STORAGE_CAPS = ['128GB', '256GB', '512GB', '1TB', '2TB'];
 
 // Which component slots each order category needs, in order.
 function slotsFor(cat: string): string[] {
@@ -59,6 +56,11 @@ const chip = (active: boolean) =>
 // One order's pick card: tap a component tile; Processor/RAM/Storage flip to a
 // spec panel. Picked specs collect below with counters.
 function PickerCard({ order, onSubmit }: { order: Order; onSubmit: (specs: PickedSpec[]) => void }) {
+  // Build-spec options are configurable (Settings → Inventory & Picker).
+  const CPU_GENS = useSettingList('picker.cpuGenerations');
+  const RAM_CAPS = useSettingList('picker.ramCapacities').map(Number).filter(Number.isFinite);
+  const STORAGE_TYPES = useSettingList('picker.storageTypes');
+  const STORAGE_CAPS = useSettingList('picker.storageCapacities');
   const [open, setOpen] = useState<string | null>(null);       // which drill panel is flipped open
   const [picked, setPicked] = useState<Record<string, PickedSpec>>({});
   const [cpuFamily, setCpuFamily] = useState<typeof CPU_FAMILIES[number] | null>(null);
@@ -106,7 +108,7 @@ function PickerCard({ order, onSubmit }: { order: Order; onSubmit: (specs: Picke
 
           {open === 'ram' && (
             <div className="flex flex-wrap gap-1.5">
-              {RAM_CAPS.map((cap) => (
+              {RAM_CAPS.map((cap: number) => (
                 <button key={cap} className={chip(false)} onClick={() => add('ram', `${cap}GB RAM`, { capacity: cap })}>{cap}GB</button>
               ))}
             </div>
@@ -115,12 +117,12 @@ function PickerCard({ order, onSubmit }: { order: Order; onSubmit: (specs: Picke
           {open === 'storage' && (
             <>
               <div className="flex flex-wrap gap-1.5 mb-2">
-                {STORAGE_TYPES.map((t) => (
+                {STORAGE_TYPES.map((t: string) => (
                   <button key={t} className={chip(storageType === t)} onClick={() => setStorageType(t)}>{t}</button>
                 ))}
               </div>
               <div className="flex flex-wrap gap-1.5">
-                {STORAGE_CAPS.map((cap) => (
+                {STORAGE_CAPS.map((cap: string) => (
                   <button key={cap} className={chip(false)} onClick={() => add('storage', `${cap} ${storageType}`, { type: storageType, capacity: cap })}>{cap}</button>
                 ))}
               </div>
@@ -136,7 +138,7 @@ function PickerCard({ order, onSubmit }: { order: Order; onSubmit: (specs: Picke
               </div>
               <p className="text-[11px] text-slate-400 mb-1">{cpuFamily ? `${cpuFamily.label} — tap a generation` : 'Pick a family first'}</p>
               <div className="flex flex-wrap gap-1.5">
-                {CPU_GENS.map((g) => (
+                {CPU_GENS.map((g: string) => (
                   <button
                     key={g}
                     disabled={!cpuFamily}

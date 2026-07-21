@@ -2,6 +2,7 @@
 
 import { useMemo, useState } from 'react';
 import { useOrderStore } from '@/lib/store';
+import { useSettingNumber } from '@/hooks/use-settings';
 import { INVENTORY_CATEGORIES, INVENTORY_CATEGORY_MAP, describeAttributes, STOCK_UNIT_STATUS_CONFIG } from '@/lib/inventory-config';
 import { computeAvailability } from '@/lib/inventory-utils';
 import { Input } from '@/components/ui/input';
@@ -14,6 +15,7 @@ import { Boxes, Search, PackagePlus, ChevronDown, ChevronRight, Warehouse, ScanL
 type Tab = 'stock' | 'scan' | 'catalog' | 'receipts';
 
 export function InventoryModule() {
+  const defaultLowStock = useSettingNumber('inventory.lowStockThreshold');
   const parts = useOrderStore((s) => s.inventoryParts);
   const stockLevels = useOrderStore((s) => s.stockLevels);
   const stockUnits = useOrderStore((s) => s.stockUnits);
@@ -102,7 +104,9 @@ export function InventoryModule() {
                 const cat = INVENTORY_CATEGORY_MAP[part.category];
                 const isSerialized = part.tracking === 'serialized';
                 const units = isSerialized ? stockUnits.filter((u) => u.partId === part.id) : [];
-                const low = part.lowStockThreshold !== undefined && avail.available <= part.lowStockThreshold;
+                // Per-part threshold wins; otherwise the global default (Settings → Inventory).
+                const threshold = part.lowStockThreshold ?? defaultLowStock;
+                const low = threshold !== undefined && avail.available <= threshold;
                 const open = expanded === part.id;
                 return (
                   <div key={part.id} className="border border-slate-200 rounded-xl bg-white overflow-hidden">

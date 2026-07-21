@@ -3,7 +3,8 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useOrderStore } from '@/lib/store';
 import { GoodsReceipt, GoodsReceiptLine, InventoryPart } from '@/lib/types';
-import { INVENTORY_CATEGORIES, INVENTORY_CATEGORY_MAP, STOCK_GRADES, describeAttributes, buildSku } from '@/lib/inventory-config';
+import { INVENTORY_CATEGORIES, INVENTORY_CATEGORY_MAP,  describeAttributes, buildSku } from '@/lib/inventory-config';
+import { useSettingList } from '@/hooks/use-settings';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { toast } from 'sonner';
@@ -24,6 +25,8 @@ interface ScanLineItem {
 }
 
 export function ScanReceiving() {
+  // Condition grades are configurable (Settings → Inventory & Picker).
+  const grades = useSettingList('inventory.grades');
   const parts = useOrderStore((s) => s.inventoryParts);
   const upsertInventoryPart = useOrderStore((s) => s.upsertInventoryPart);
   const saveGoodsReceipt = useOrderStore((s) => s.saveGoodsReceipt);
@@ -107,7 +110,7 @@ export function ScanReceiving() {
         <div>
           <label className="text-[11px] font-medium text-slate-500 block mb-1">Grade</label>
           <select value={grade} onChange={(e) => setGrade(e.target.value)} className={fieldCls}>
-            {STOCK_GRADES.map((g) => <option key={g} value={g}>{g}</option>)}
+            {grades.map((g: string) => <option key={g} value={g}>{g}</option>)}
           </select>
         </div>
         <div>
