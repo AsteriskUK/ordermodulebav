@@ -11,6 +11,7 @@ import { OrderDetailDialog } from './order-detail-dialog';
 import { EbayNewMessageDialog } from './ebay-new-message-dialog';
 import { TicketsPanel } from './tickets-panel';
 import { ImageUpload } from './image-upload';
+import { AutoGrowTextarea } from './ui/auto-grow-textarea';
 import { MESSAGE_IMAGE_BUCKET } from '@/lib/image-upload';
 import { htmlEmailToText } from '@/lib/html-text';
 import { useSettingString, useSettingNumber, useSettingBool } from '@/hooks/use-settings';
@@ -236,6 +237,7 @@ export function NotesFeed() {
 
   const [tab, setTab] = useState<Tab>('team');
   const [search, setSearch] = useState('');
+  const [searchOpen, setSearchOpen] = useState(false);   // collapsible inbox search
   const [openOrderId, setOpenOrderId] = useState<string | null>(null);
   const [showAddForm, setShowAddForm] = useState(false);
   const [showNewEbayMsg, setShowNewEbayMsg] = useState(false);
@@ -861,78 +863,84 @@ export function NotesFeed() {
 
   return (
     <div className={tab === 'ebay' ? 'px-3 py-3 max-w-none space-y-3' : 'p-6 max-w-3xl mx-auto space-y-4'}>
-      {/* Header */}
-      <div className="flex items-start justify-between gap-3 flex-wrap">
-        <div>
-          <h2 className="text-2xl font-bold text-slate-900 flex items-center gap-2">
-            <MessageSquare className="h-6 w-6 text-blue-500" />
-            Messages
-          </h2>
-          <p className="text-slate-500 text-sm mt-1">Team notes and eBay, BackMarket &amp; Amazon messages</p>
+      {/* Tabs + inline search — the page title now lives in the app header, so
+          this row carries the tabs, a collapsible search, and the primary action. */}
+      <div className="flex items-center gap-2 flex-wrap">
+        <div className="flex rounded-lg border overflow-hidden text-sm w-fit">
+          <button
+            onClick={() => { setTab('team'); setSearch(''); setSearchOpen(false); }}
+            className={`px-5 py-2 font-medium transition-colors ${tab === 'team' ? 'bg-blue-600 text-white' : 'bg-white text-slate-600 hover:bg-slate-50'}`}
+          >
+            Team Notes {feed.length > 0 && <span className="ml-1 text-xs opacity-75">({feed.length})</span>}
+          </button>
+          {canInbox && (
+          <button
+            onClick={() => { setTab('ebay'); setSearch(''); setSearchOpen(false); setActiveKey(null); }}
+            className={`px-5 py-2 font-medium transition-colors flex items-center gap-1.5 ${tab === 'ebay' ? 'bg-amber-600 text-white' : 'bg-white text-slate-600 hover:bg-slate-50'}`}
+          >
+            <Inbox className="h-4 w-4" />
+            Inbox
+            {unreadTotal > 0 && <span className="ml-0.5 bg-red-500 text-white text-[10px] font-bold rounded-full px-1.5 py-0.5 leading-none">{unreadTotal}</span>}
+          </button>
+          )}
+          <button
+            onClick={() => { setTab('tickets'); setSearch(''); setSearchOpen(false); setActiveKey(null); }}
+            className={`px-5 py-2 font-medium transition-colors flex items-center gap-1.5 ${tab === 'tickets' ? 'bg-blue-600 text-white' : 'bg-white text-slate-600 hover:bg-slate-50'}`}
+          >
+            <TicketIcon className="h-4 w-4" />
+            Tickets
+            {activeTicketCount > 0 && <span className="ml-0.5 bg-red-500 text-white text-[10px] font-bold rounded-full px-1.5 py-0.5 leading-none">{activeTicketCount}</span>}
+          </button>
         </div>
-        {tab === 'ebay' && canInbox && (
-          <Button onClick={() => setShowNewEbayMsg(true)} className="bg-amber-600 hover:bg-amber-700 text-white">
-            <img src={PLATFORM_LOGOS.ebay} alt="eBay" className="h-4 w-auto object-contain mr-1.5 brightness-0 invert" />
-            New eBay Message
-          </Button>
-        )}
-        {tab === 'team' && (
-          <Button onClick={() => setShowAddForm(!showAddForm)} variant="outline">
-            <Plus className="h-4 w-4 mr-1" />
-            Add Note
-          </Button>
-        )}
-      </div>
 
-      {/* Tabs */}
-      <div className="flex rounded-lg border overflow-hidden text-sm w-fit">
-        <button
-          onClick={() => { setTab('team'); setSearch(''); }}
-          className={`px-5 py-2 font-medium transition-colors ${tab === 'team' ? 'bg-blue-600 text-white' : 'bg-white text-slate-600 hover:bg-slate-50'}`}
-        >
-          Team Notes {feed.length > 0 && <span className="ml-1 text-xs opacity-75">({feed.length})</span>}
-        </button>
-        {canInbox && (
-        <button
-          onClick={() => { setTab('ebay'); setSearch(''); setActiveKey(null); }}
-          className={`px-5 py-2 font-medium transition-colors flex items-center gap-1.5 ${tab === 'ebay' ? 'bg-amber-600 text-white' : 'bg-white text-slate-600 hover:bg-slate-50'}`}
-        >
-          <Inbox className="h-4 w-4" />
-          Inbox
-          {unreadTotal > 0 && <span className="ml-0.5 bg-red-500 text-white text-[10px] font-bold rounded-full px-1.5 py-0.5 leading-none">{unreadTotal}</span>}
-        </button>
-        )}
-        <button
-          onClick={() => { setTab('tickets'); setSearch(''); setActiveKey(null); }}
-          className={`px-5 py-2 font-medium transition-colors flex items-center gap-1.5 ${tab === 'tickets' ? 'bg-blue-600 text-white' : 'bg-white text-slate-600 hover:bg-slate-50'}`}
-        >
-          <TicketIcon className="h-4 w-4" />
-          Tickets
-          {activeTicketCount > 0 && <span className="ml-0.5 bg-red-500 text-white text-[10px] font-bold rounded-full px-1.5 py-0.5 leading-none">{activeTicketCount}</span>}
-        </button>
-      </div>
-
-      {/* Search — the tickets tab has its own; on eBay it filters the conversation list */}
-      {tab !== 'tickets' && (
-        <div className="relative">
-          <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400" />
-          <Input
-            placeholder={tab === 'team' ? 'Search notes, orders, authors...' : 'Search buyer, record #, order #, message...'}
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            className="pl-9 pr-9"
-          />
-          {search && (
+        {/* Collapsible search: an icon that expands into a field on click. The
+            tickets tab has its own search, so it's hidden there. */}
+        {tab !== 'tickets' && (
+          searchOpen || search ? (
+            <div className="relative flex-1 min-w-[200px] max-w-md">
+              <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400" />
+              <Input
+                autoFocus
+                placeholder={tab === 'team' ? 'Search notes, orders, authors...' : 'Search buyer, record #, order #, message...'}
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+                onBlur={() => { if (!search) setSearchOpen(false); }}
+                className="pl-9 pr-9"
+              />
+              <button
+                onClick={() => { setSearch(''); setSearchOpen(false); }}
+                title="Close search"
+                className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-700 p-0.5 rounded hover:bg-slate-100"
+              >
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+          ) : (
             <button
-              onClick={() => setSearch('')}
-              title="Clear search"
-              className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-700 p-0.5 rounded hover:bg-slate-100"
+              onClick={() => setSearchOpen(true)}
+              title="Search"
+              className="h-9 w-9 flex items-center justify-center rounded-lg border text-slate-500 hover:bg-slate-50"
             >
-              <X className="h-4 w-4" />
+              <Search className="h-4 w-4" />
             </button>
+          )
+        )}
+
+        <div className="ml-auto flex items-center gap-2">
+          {tab === 'ebay' && canInbox && (
+            <Button onClick={() => setShowNewEbayMsg(true)} className="bg-amber-600 hover:bg-amber-700 text-white">
+              <img src={PLATFORM_LOGOS.ebay} alt="eBay" className="h-4 w-auto object-contain mr-1.5 brightness-0 invert" />
+              New eBay Message
+            </Button>
+          )}
+          {tab === 'team' && (
+            <Button onClick={() => setShowAddForm(!showAddForm)} variant="outline">
+              <Plus className="h-4 w-4 mr-1" />
+              Add Note
+            </Button>
           )}
         </div>
-      )}
+      </div>
 
       {/* ── TEAM NOTES TAB ── */}
       {tab === 'team' && (
@@ -1366,13 +1374,12 @@ export function NotesFeed() {
                   <div className="border-t p-2 shrink-0 space-y-2">
                     {amazonReplyEmail ? (
                       <div className="flex items-end gap-2">
-                        <textarea
-                          className="flex-1 border rounded-xl px-3 py-2 text-sm min-h-[40px] max-h-32 resize-none focus:ring-2 focus:ring-orange-400 focus:border-transparent"
+                        <AutoGrowTextarea
+                          className="flex-1 border rounded-xl px-3 py-2 text-sm min-h-[40px] focus:ring-2 focus:ring-orange-400 focus:border-transparent"
                           placeholder={`Type your reply… (${sendShortcut === 'enter' ? 'Enter' : 'Ctrl+Enter'} to send)`}
                           value={replyText}
                           onChange={(e) => setReplyText(e.target.value)}
                           onKeyDown={(e) => { if (isSendKey(e)) { e.preventDefault(); handleReply(); } }}
-                          rows={1}
                           maxLength={4000}
                         />
                         <Button
@@ -1406,8 +1413,8 @@ export function NotesFeed() {
                           </select>
                         </div>
                         <div className="flex items-end gap-2">
-                          <textarea
-                            className="flex-1 border rounded-xl px-3 py-2 text-sm min-h-[40px] max-h-32 resize-none focus:ring-2 focus:ring-orange-400 focus:border-transparent"
+                          <AutoGrowTextarea
+                            className="flex-1 border rounded-xl px-3 py-2 text-sm min-h-[40px] focus:ring-2 focus:ring-orange-400 focus:border-transparent"
                             placeholder="Type your message to the buyer…"
                             value={replyText}
                             onChange={(e) => setReplyText(e.target.value)}
@@ -1435,13 +1442,12 @@ export function NotesFeed() {
                       conditional instances lost images mid-selection). */}
                   <div className="flex items-end gap-2">
                     <ImageUpload bucket={MESSAGE_IMAGE_BUCKET} recordId={activeConvo.conversation_id ?? activeConvo.order_id} images={replyImages} onChange={setReplyImages} maxFiles={maxAttachments} compact />
-                    <textarea
-                      className="flex-1 border rounded-xl px-3 py-2 text-sm min-h-[40px] max-h-32 resize-none focus:ring-2 focus:ring-amber-400 focus:border-transparent"
+                    <AutoGrowTextarea
+                      className="flex-1 border rounded-xl px-3 py-2 text-sm min-h-[40px] focus:ring-2 focus:ring-amber-400 focus:border-transparent"
                       placeholder={`Type your reply… (${sendShortcut === 'enter' ? 'Enter' : 'Ctrl+Enter'} to send)`}
                       value={replyText}
                       onChange={(e) => setReplyText(e.target.value)}
                       onKeyDown={(e) => { if (isSendKey(e)) { e.preventDefault(); handleReply(); } }}
-                      rows={1}
                       maxLength={2000}
                     />
                     <Button

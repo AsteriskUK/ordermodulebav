@@ -112,6 +112,7 @@ async function notifyBuyerTracking(order: Order, tracking: string): Promise<void
       contactReason: 'TRACKING',
       text,
       sentByName: 'Auto (label booking)',
+      automated: true,   // keep the buyer's message unread until a human replies
     }),
   });
   if (!res.ok) console.warn('[auto-book] buyer tracking note failed', order.salesRecordNumber, res.status);

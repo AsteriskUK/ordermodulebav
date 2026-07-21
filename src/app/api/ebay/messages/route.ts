@@ -84,9 +84,10 @@ export async function POST(req: NextRequest) {
     imageUrls?: string[];        // self-hosted HTTPS image URLs to attach (max 5)
     sentById?: string;
     sentByName?: string;
+    automated?: boolean;         // system-generated (e.g. tracking note) — keeps the buyer's message unread
   };
 
-  const { orderId, itemId, recipientUsername, conversationId, buyerName, itemTitle, contactReason, text, imageUrls, sentById, sentByName } = body;
+  const { orderId, itemId, recipientUsername, conversationId, buyerName, itemTitle, contactReason, text, imageUrls, sentById, sentByName, automated } = body;
 
   // eBay allows message text OR one or more media attachments (error 355015).
   const media = (imageUrls ?? []).filter((u) => typeof u === 'string' && u.startsWith('https://')).slice(0, 5);
@@ -119,28 +120,45 @@ export async function POST(req: NextRequest) {
     payload.otherPartyUsername = recipientUsername;
   }
 
-  // Attach listing reference if we have an item ID
-  if (itemId) {
+  // Attach the listing reference only when STARTING a conversation. On a reply
+  // (conversationId present) eBay already knows the thread's listing, and a
+  // reference to an ended listing is the usual cause of 355020 — so replies
+  // never carry it. New conversations still get it, with the retry below as a
+  // safety net if that listing has since ended.
+  if (itemId && !conversationId) {
     payload.reference = {
       referenceId: itemId,
       referenceType: 'LISTING',
     };
   }
 
-  const res = await fetch(`${MSG_BASE}/send_message`, {
+  const doSend = (body: Record<string, unknown>) => fetch(`${MSG_BASE}/send_message`, {
     method: 'POST',
     headers: {
       'Authorization': `Bearer ${token}`,
       'Content-Type': 'application/json',
       'X-EBAY-C-MARKETPLACE-ID': 'EBAY_GB',
     },
-    body: JSON.stringify(payload),
+    body: JSON.stringify(body),
   });
+
+  let res = await doSend(payload);
+  let errBody = res.ok ? '' : await res.text();
+
+  // Fallback: when the listing behind referenceId has ended/been removed, eBay
+  // rejects the whole message with 355020. The reference is only a nicety, so
+  // drop it and resend — the buyer still gets the message. (Only retry when we
+  // actually attached a reference and that's the specific error.)
+  if (!res.ok && payload.reference && /355020|referenceId is invalid|no listing can be found/i.test(errBody)) {
+    console.warn('[eBay messages] referenceId invalid — retrying without listing reference');
+    const { reference: _dropped, ...noRef } = payload;
+    res = await doSend(noRef);
+    errBody = res.ok ? '' : await res.text();
+  }
 
   const supabase = getSupabase();
 
   if (!res.ok) {
-    const errBody = await res.text();
     console.error('[eBay messages] send error:', res.status, errBody);
     await supabase.from('ebay_messages').insert({
       order_id: orderId,
@@ -182,6 +200,17 @@ export async function POST(req: NextRequest) {
     direction: 'sent',
     status: 'sent',
   });
+
+  // A system-generated message (e.g. the auto-booked tracking note) must NOT
+  // clear the buyer's unread flag — a human still needs to read and reply.
+  // eBay's send_message can mark the thread read on their side, so re-assert
+  // the incoming messages as unread in our store, and don't mirror read to eBay.
+  if (automated && conversationId) {
+    await supabase.from('ebay_messages')
+      .update({ status: 'unread' })
+      .eq('conversation_id', conversationId)
+      .eq('direction', 'received');
+  }
 
   return NextResponse.json({ success: true, messageId: responseData.messageId });
 }

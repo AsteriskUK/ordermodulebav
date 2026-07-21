@@ -64,6 +64,23 @@ const ALL_NAV = [
   { name: 'Settings', href: '/settings', icon: Settings, staffVisible: false, commsVisible: false },
 ];
 
+// The page title shown in the app header, resolved from the current pathname
+// (longest matching href wins, so /orders/new beats /orders). Deep/detail
+// routes fall back to their section name.
+export function pageTitleForPath(pathname: string): string {
+  if (pathname === '/') return 'Dashboard';
+  let best = '';
+  let bestLen = -1;
+  for (const item of ALL_NAV) {
+    if (item.href === '/') continue;
+    if ((pathname === item.href || pathname.startsWith(item.href + '/')) && item.href.length > bestLen) {
+      best = item.name;
+      bestLen = item.href.length;
+    }
+  }
+  return best || 'Orders Manager';
+}
+
 export function Sidebar({ collapsed, onToggle, onNavigate }: { collapsed: boolean; onToggle: () => void; onNavigate?: () => void }) {
   const pathname = usePathname();
   const users = useOrderStore((s) => s.users);

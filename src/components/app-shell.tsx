@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useRef, useMemo } from 'react';
 import { useRouter, usePathname } from 'next/navigation';
-import { Sidebar } from './sidebar';
+import { Sidebar, pageTitleForPath } from './sidebar';
 import { EodScheduler } from './eod-scheduler';
 import { PanelLeftClose, PanelLeftOpen, LogOut, ChevronDown, Check, Bell, MessageSquare, ChevronRight, ThumbsDown, ThumbsUp } from 'lucide-react';
 import { supabase } from '@/lib/supabase-client';
@@ -170,9 +170,14 @@ export function AppShell({ children }: { children: React.ReactNode }) {
       <div className="flex-1 flex flex-col overflow-hidden">
         {/* Top header bar */}
         <header className="h-12 bg-white border-b border-slate-200 flex items-center justify-between px-4 shrink-0 sticky top-0 z-30">
-          <Button variant="ghost" size="sm" onClick={toggleSidebar} className="h-8 w-8 p-0 text-slate-500" title={sidebarCollapsed ? 'Show sidebar' : 'Hide sidebar'}>
-            {sidebarCollapsed ? <PanelLeftOpen className="h-4 w-4" /> : <PanelLeftClose className="h-4 w-4" />}
-          </Button>
+          <div className="flex items-center gap-2 min-w-0">
+            <Button variant="ghost" size="sm" onClick={toggleSidebar} className="h-8 w-8 p-0 text-slate-500 shrink-0" title={sidebarCollapsed ? 'Show sidebar' : 'Hide sidebar'}>
+              {sidebarCollapsed ? <PanelLeftOpen className="h-4 w-4" /> : <PanelLeftClose className="h-4 w-4" />}
+            </Button>
+            {/* Page title lives in the header, so pages don't repeat it and keep
+                more vertical space for content. */}
+            <h1 className="text-base font-semibold text-slate-800 truncate">{pageTitleForPath(pathname)}</h1>
+          </div>
 
           <div className="flex items-center gap-1">
 
