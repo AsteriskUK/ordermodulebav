@@ -46,13 +46,18 @@ function pushMarketplaceFulfillment(order: Order): void {
 }
 
 // Advisory assembly locks auto-expire so a closed tab / abandoned build doesn't
-// block the order forever.
+// block the order forever. Default 30 min; overridable in Settings → Workflow.
 export const ASSEMBLY_LOCK_TTL_MS = 30 * 60 * 1000;
+
+function assemblyLockTtlMs(): number {
+  const mins = Number(resolveSetting(useOrderStore.getState().appSettings, 'queue.assemblyLockMinutes'));
+  return Number.isFinite(mins) && mins > 0 ? mins * 60_000 : ASSEMBLY_LOCK_TTL_MS;
+}
 
 /** The assembler holding a fresh lock on this order, or null if free/expired. */
 export function assemblyLockHolder(order: { lockedById?: string; lockedByName?: string; lockedAt?: string }): { id?: string; name?: string } | null {
   if (!order.lockedById || !order.lockedAt) return null;
-  if (Date.now() - new Date(order.lockedAt).getTime() > ASSEMBLY_LOCK_TTL_MS) return null;
+  if (Date.now() - new Date(order.lockedAt).getTime() > assemblyLockTtlMs()) return null;
   return { id: order.lockedById, name: order.lockedByName };
 }
 
@@ -261,7 +266,7 @@ export const useOrderStore = create<OrderStore>()(
         const before = get().orders.find((o) => o.id === orderId);
         // Block Packed until the packing dept has ticked every outstanding
         // accessory/monitor added during the build. Callers show the checklist.
-        if (status === 'packed' && before && before.status !== 'packed' && !allPackItemsConfirmed(before, get().builds)) {
+        if (status === 'packed' && before && before.status !== 'packed' && asBool(resolveSetting(get().appSettings, 'workflow.requirePackChecklist')) && !allPackItemsConfirmed(before, get().builds)) {
           return;
         }
         set((state) => {

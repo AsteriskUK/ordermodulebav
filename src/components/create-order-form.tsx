@@ -6,6 +6,7 @@ import { useOrderStore } from '@/lib/store';
 import { Order, DeliveryCarrier, DeliveryType } from '@/lib/types';
 import { deriveCategory } from '@/lib/categoriser';
 import { deriveShipping } from '@/lib/csv-parser';
+import { useSettingString, useSettingNumber, useSettingList } from '@/hooks/use-settings';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -156,7 +157,17 @@ export function CreateOrderForm() {
   const addOrders = useOrderStore((s) => s.addOrders);
   const batches = useOrderStore((s) => s.batches);
   const orders = useOrderStore((s) => s.orders);
-  const [form, setForm] = useState<FormState>(EMPTY_FORM);
+  // Defaults from Settings → Shipping / Business.
+  const defaultCarrier = useSettingString('shipping.defaultCarrier') as DeliveryCarrier;
+  const defaultBoxes = useSettingNumber('shipping.defaultBoxes');
+  const defaultCountry = useSettingString('business.country');
+  const expressPrefixes = useSettingList('shipping.expressPostcodePrefixes');
+  const [form, setForm] = useState<FormState>(() => ({
+    ...EMPTY_FORM,
+    deliveryCarrier: (['DPD','FedEx','Royal Mail','Parcelforce','Other'].includes(defaultCarrier) ? defaultCarrier : 'DPD') as DeliveryCarrier,
+    numberOfBoxes: String(defaultBoxes || 1),
+    postToCountry: defaultCountry || EMPTY_FORM.postToCountry,
+  }));
   const [saving, setSaving] = useState(false);
   const [aiPrefilling, setAiPrefilling] = useState(false);
   const [aiDescription, setAiDescription] = useState('');
@@ -246,7 +257,7 @@ export function CreateOrderForm() {
       if (key === 'postToPostcode') {
         const price = parseFloat(next.totalPrice) || parseFloat(next.soldFor) || 0;
         const pp = parseFloat(next.postageAndPackaging) || 0;
-        const derived = deriveShipping(value, price, pp);
+        const derived = deriveShipping(value, price, pp, expressPrefixes);
         next.deliveryCarrier = derived.deliveryCarrier;
         next.deliveryType = derived.deliveryType;
         // Debounced postcodes.io lookup
@@ -441,7 +452,13 @@ export function CreateOrderForm() {
     setSaving(false);
 
     if (andNew) {
-      setForm({ ...EMPTY_FORM, saleDate: new Date().toISOString().slice(0, 10) });
+      setForm({
+        ...EMPTY_FORM,
+        deliveryCarrier: (['DPD','FedEx','Royal Mail','Parcelforce','Other'].includes(defaultCarrier) ? defaultCarrier : 'DPD') as DeliveryCarrier,
+        numberOfBoxes: String(defaultBoxes || 1),
+        postToCountry: defaultCountry || EMPTY_FORM.postToCountry,
+        saleDate: new Date().toISOString().slice(0, 10),
+      });
     } else {
       router.push('/orders');
     }

@@ -249,7 +249,11 @@ export function NotesFeed() {
   const [ebayLoading, setEbayLoading] = useState(false);
   const [ebaySyncing, setEbaySyncing] = useState(false);
   const [activeKey, setActiveKey] = useState<string | null>(null);
-  const [ebayFilter, setEbayFilter] = useState<'all' | 'unread' | 'client' | 'ebay' | 'backmarket' | 'amazon' | 'archived'>('all');
+  const defaultInboxFilter = useSettingString('messaging.defaultFilter');
+  const syncIntervalMinutes = useSettingNumber('messaging.syncIntervalMinutes');
+  const [ebayFilter, setEbayFilter] = useState<'all' | 'unread' | 'client' | 'ebay' | 'backmarket' | 'amazon' | 'archived'>(
+    (['all', 'unread', 'client'].includes(defaultInboxFilter) ? defaultInboxFilter : 'all') as 'all' | 'unread' | 'client'
+  );
   const [bmMessages, setBmMessages] = useState<EbayMessage[]>([]);
   const [bmSyncing, setBmSyncing] = useState(false);
   const [amazonMessages, setAmazonMessages] = useState<EbayMessage[]>([]);
@@ -433,6 +437,15 @@ export function NotesFeed() {
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [tab, canInbox]);
+
+  // Periodic inbox refresh while the tab is open (Settings → Messaging).
+  useEffect(() => {
+    if (tab !== 'ebay' || !canInbox) return;
+    const ms = Math.max(1, syncIntervalMinutes) * 60_000;
+    const timer = setInterval(() => { syncEbayInbox(); syncBmInbox(); syncAmazonInbox(); }, ms);
+    return () => clearInterval(timer);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [tab, canInbox, syncIntervalMinutes]);
 
   // Our seller username = the sender that appears across the most conversations
   // (each buyer is unique to ~1 thread, so the seller is the clear mode).

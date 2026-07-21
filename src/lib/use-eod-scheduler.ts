@@ -3,17 +3,15 @@
 import { useEffect, useRef } from 'react';
 import { toast } from 'sonner';
 
-/** Returns ms until the next 20:00 GMT (8pm) */
-function msUntil8pmGMT(): number {
+/** Returns ms until the next occurrence of hh:mm GMT. */
+function msUntilGMT(hh: number, mm: number): number {
   const now = new Date();
-  // Build today's 20:00 UTC
   const target = new Date(Date.UTC(
     now.getUTCFullYear(),
     now.getUTCMonth(),
     now.getUTCDate(),
-    20, 0, 0, 0,
+    hh, mm, 0, 0,
   ));
-  // If we've already passed 20:00 today, schedule for tomorrow
   if (target.getTime() <= now.getTime()) {
     target.setUTCDate(target.getUTCDate() + 1);
   }
@@ -23,24 +21,28 @@ function msUntil8pmGMT(): number {
 type EodTriggerFn = () => void;
 
 /**
- * Schedules the EOD trigger at 20:00 GMT every day.
- * Pass a stable callback that runs the EOD export / email send.
+ * Schedules the EOD trigger daily at the configured time (Settings → Reporting).
+ * Pass a stable callback and the schedule options; re-schedules if they change.
  */
-export function useEodScheduler(onTrigger: EodTriggerFn) {
+export function useEodScheduler(onTrigger: EodTriggerFn, opts: { enabled: boolean; sendAt: string }) {
   const callbackRef = useRef(onTrigger);
   callbackRef.current = onTrigger;
+  const { enabled, sendAt } = opts;
 
   useEffect(() => {
+    if (!enabled) return;
+    const [hhRaw, mmRaw] = (sendAt || '20:00').split(':');
+    const hh = Math.min(23, Math.max(0, parseInt(hhRaw, 10) || 20));
+    const mm = Math.min(59, Math.max(0, parseInt(mmRaw, 10) || 0));
     let timeoutId: ReturnType<typeof setTimeout>;
 
     function schedule() {
-      const ms = msUntil8pmGMT();
+      const ms = msUntilGMT(hh, mm);
       const fireAt = new Date(Date.now() + ms);
       console.info(`[EOD Scheduler] Next trigger at ${fireAt.toUTCString()}`);
 
       timeoutId = setTimeout(() => {
         callbackRef.current();
-        // Reschedule for the next day
         schedule();
       }, ms);
     }
@@ -48,7 +50,7 @@ export function useEodScheduler(onTrigger: EodTriggerFn) {
     schedule();
 
     return () => clearTimeout(timeoutId);
-  }, []);
+  }, [enabled, sendAt]);
 }
 
 /** Build CSV text from eod events */

@@ -9,6 +9,7 @@ import { useOrderStore } from '@/lib/store';
 import { fetchPrinterConfig, printLabel, printerForCarrier, printInvoicesFor } from '@/lib/print-agent';
 import { buildInvoicesHtml, printHtml } from '@/lib/order-utils';
 import { useEffect, useState } from 'react';
+import { useSettingBool, useSettingNumber } from '@/hooks/use-settings';
 
 interface Props {
   order: Order;
@@ -19,6 +20,8 @@ type Carrier = 'DPD' | 'FedEx';
 
 export function LabelPrintDialog({ order, onClose }: Props) {
   const updateOrderStatus = useOrderStore((s) => s.updateOrderStatus);
+  const combineLabelAndInvoice = useSettingBool('print.combineLabelAndInvoice');
+  const invoiceCopies = useSettingNumber('print.copiesPerInvoice');
 
   const carrier: Carrier | null =
     order.labelCarrier === 'DPD' || order.labelCarrier === 'FedEx'
@@ -85,15 +88,17 @@ export function LabelPrintDialog({ order, onClose }: Props) {
   // Invoice — via the print-agent invoice printer when configured, otherwise
   // the browser print dialog (same fallback as InvoicePreviewDialog).
   async function printInvoice() {
+    const copies = Math.max(1, invoiceCopies || 1);
     try {
       const cfg = await fetchPrinterConfig();
-      if (cfg.agentUrl && cfg.invoicePrinter && (await printInvoicesFor([order], cfg))) {
-        toast.success('Invoice sent to invoice printer');
-        return;
+      if (cfg.agentUrl && cfg.invoicePrinter) {
+        let ok = true;
+        for (let i = 0; i < copies; i++) ok = (await printInvoicesFor([order], cfg)) && ok;
+        if (ok) { toast.success(`Invoice sent to invoice printer${copies > 1 ? ` (${copies} copies)` : ''}`); return; }
       }
-      printHtml(buildInvoicesHtml([order]));
+      for (let i = 0; i < copies; i++) printHtml(buildInvoicesHtml([order]));
     } catch {
-      printHtml(buildInvoicesHtml([order]));
+      for (let i = 0; i < copies; i++) printHtml(buildInvoicesHtml([order]));
     }
   }
 
@@ -177,7 +182,7 @@ export function LabelPrintDialog({ order, onClose }: Props) {
 
           {/* Actions — one combined tap for the packing bench, or each separately */}
           <div className="flex flex-col gap-2 pt-1">
-            {canPrint && (
+            {canPrint && combineLabelAndInvoice && (
               <Button onClick={printBoth} className="w-full bg-green-600 hover:bg-green-700">
                 <Printer className="h-4 w-4 mr-2" />
                 Print Label + Invoice

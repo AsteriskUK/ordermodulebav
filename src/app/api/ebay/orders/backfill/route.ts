@@ -4,6 +4,7 @@ import { createHash } from 'crypto';
 import { mapEbayOrderToOrder } from '@/lib/ebay-mapper';
 import { getEbayUserToken } from '@/lib/ebay-client';
 import { Order } from '@/lib/types';
+import { getSetting as getAppSetting } from '@/lib/settings';
 
 const BASE_URL = 'https://api.ebay.com';
 
@@ -11,7 +12,7 @@ const BASE_URL = 'https://api.ebay.com';
 // and well within serverless limits. The client loops until done.
 const PAGE_SIZE = 50;
 const WINDOW_DAYS = 14;            // date window width (keeps each window under eBay's ~1000-result cap)
-const BACKFILL_DAYS = 720;         // just under eBay's 2-year limit (avoids the 30830 boundary error)
+const BACKFILL_DAYS_DEFAULT = 720;  // just under eBay's 2-year limit (avoids the 30830 boundary error)
 const OFFSET_CAP = 1000;           // eBay won't page past ~1000 within one filter
 const CURSOR_KEY = 'ebay_backfill_cursor';
 const BACKFILL_BATCH_ID = 'a1b2c3d4-0000-5000-8000-eba1f111ba00'; // fixed UUID for the historical batch
@@ -80,7 +81,8 @@ export async function POST(req: Request) {
   if (!token) return NextResponse.json({ error: 'not_connected', message: 'Not connected to eBay.' }, { status: 401 });
 
   const supabase = getSupabase();
-  const oldestMs = Date.now() - BACKFILL_DAYS * 86400000;
+  const backfillDays = Math.min(730, Number(await getAppSetting('data.backfillDays')) || BACKFILL_DAYS_DEFAULT);
+  const oldestMs = Date.now() - backfillDays * 86400000;
 
   // Load / init cursor
   let cursor: Cursor;
@@ -164,7 +166,8 @@ export async function GET() {
   if (!raw) return NextResponse.json({ started: false });
   try {
     const c = JSON.parse(raw) as Cursor;
-    const oldestMs = Date.now() - BACKFILL_DAYS * 86400000;
+    const backfillDays = Math.min(730, Number(await getAppSetting('data.backfillDays')) || BACKFILL_DAYS_DEFAULT);
+    const oldestMs = Date.now() - backfillDays * 86400000;
     const span = Date.now() - oldestMs;
     const progressed = Math.min(span, Date.now() - c.windowEndMs);
     return NextResponse.json({ started: true, done: c.done, imported: c.imported, pages: c.pages, percent: Math.round((progressed / span) * 100) });

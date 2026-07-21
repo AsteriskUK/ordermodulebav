@@ -2,6 +2,7 @@
 
 import { useCallback } from 'react';
 import { useOrderStore } from '@/lib/store';
+import { useSettingBool, useSettingString, useSettingList } from '@/hooks/use-settings';
 import {
   useEodScheduler,
   buildEodCsvText,
@@ -12,6 +13,10 @@ import {
 export function EodScheduler() {
   const eodEvents = useOrderStore((s) => s.eodEvents);
   const emailConfig = useOrderStore((s) => s.emailConfig);
+  // Schedule + recipients are configurable (Settings → Reporting & Alerts).
+  const eodEnabled = useSettingBool('eod.enabled');
+  const eodSendAt = useSettingString('eod.sendAt');
+  const eodRecipients = useSettingList('eod.recipients');
 
   const handleEod = useCallback(async () => {
     const dateStr = new Date().toISOString().slice(0, 10);
@@ -27,8 +32,13 @@ export function EodScheduler() {
     downloadEodCsv(dateStr, csvText);
     notifyEodTriggered(dateStr);
 
-    // Send email if configured
-    if (emailConfig.enabled && emailConfig.recipientEmail && emailConfig.autoSendAt8pm) {
+    // Send email to the configured recipients. Settings recipients take
+    // precedence; fall back to the legacy single emailConfig recipient.
+    const recipients = eodRecipients.length > 0
+      ? eodRecipients
+      : (emailConfig.enabled && emailConfig.recipientEmail ? [emailConfig.recipientEmail] : []);
+    if (eodEnabled && recipients.length > 0) {
+      for (const recipientEmail of recipients) {
       try {
         const res = await fetch('/api/send-eod', {
           method: 'POST',
@@ -36,7 +46,7 @@ export function EodScheduler() {
           body: JSON.stringify({
             csvText,
             date: dateStr,
-            recipientEmail: emailConfig.recipientEmail,
+            recipientEmail,
             smtpHost:    emailConfig.smtpHost,
             smtpPort:    emailConfig.smtpPort,
             smtpUser:    emailConfig.smtpUser,
@@ -47,17 +57,18 @@ export function EodScheduler() {
         const data = await res.json();
         if (!res.ok) throw new Error(data.error);
         import('sonner').then(({ toast }) =>
-          toast.success(`EOD report emailed to ${emailConfig.recipientEmail}`)
+          toast.success(`EOD report emailed to ${recipientEmail}`)
         );
       } catch (err) {
         import('sonner').then(({ toast }) =>
           toast.error(`EOD email failed: ${err instanceof Error ? err.message : 'Unknown error'}`)
         );
       }
+      }
     }
-  }, [eodEvents, emailConfig]);
+  }, [eodEvents, emailConfig, eodEnabled, eodRecipients]);
 
-  useEodScheduler(handleEod);
+  useEodScheduler(handleEod, { enabled: eodEnabled, sendAt: eodSendAt });
 
   return null; // Invisible background component
 }

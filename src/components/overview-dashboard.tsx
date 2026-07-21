@@ -4,6 +4,7 @@ import Image from 'next/image';
 import { useCallback, useEffect, useState } from 'react';
 import { Input } from '@/components/ui/input';
 import { currencySymbol } from '@/lib/order-utils';
+import { useSettingNumber } from '@/hooks/use-settings';
 import { Button } from '@/components/ui/button';
 import { BarChart3, RefreshCw, AlertTriangle, PoundSterling, ShoppingCart, RotateCcw, ThumbsDown, Gauge, PackageCheck, Clock, WifiOff, Megaphone } from 'lucide-react';
 import type { PlatformMetrics } from '@/app/api/platform-metrics/route';
@@ -135,6 +136,9 @@ function PlatformTabContent({ p }: { p: PlatformMetrics }) {
 }
 
 export function OverviewDashboard() {
+  // KPI benchmark shown on the eBay return-rate stat (Settings → Reporting).
+  const returnRateTarget = useSettingNumber('targets.returnRatePercent');
+  const dispatchTarget = useSettingNumber('targets.dispatchSameDayPercent');
   const [date, setDate] = useState(new Date().toISOString().slice(0, 10));
   const [tab, setTab] = useState<TabId>('ebay');
   const [ebay, setEbay] = useState<EbayMetrics | null>(null);
@@ -267,8 +271,14 @@ export function OverviewDashboard() {
             )}
             <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
               <Stat label="Transaction Defect Rate" value={pct(ebay.performance.transactionDefectRate)} icon={Gauge} />
-              <Stat label="Late Delivery Rate" value={pct(ebay.performance.lateShipmentRate)} icon={Gauge} />
-              <Stat label="Return Rate — Item not described" value={pct(ebay.performance.itemNotAsDescribedRate)} sub={`Projected ${pct(ebay.performance.itemNotAsDescribedProjected)}`} icon={Gauge} tone="amber" />
+              <Stat label="Late Delivery Rate" value={pct(ebay.performance.lateShipmentRate)} sub={`Same-day dispatch goal ≥ ${dispatchTarget}%`} icon={Gauge} />
+              <Stat
+                label="Return Rate — Item not described"
+                value={pct(ebay.performance.itemNotAsDescribedRate)}
+                sub={`Target ≤ ${returnRateTarget}% · Projected ${pct(ebay.performance.itemNotAsDescribedProjected)}`}
+                icon={Gauge}
+                tone={Number(ebay.performance.itemNotAsDescribedRate) > returnRateTarget ? 'red' : 'green'}
+              />
               <Stat label="Dispute Rate — Item not received" value={pct(ebay.performance.itemNotReceivedRate)} sub={`Projected ${pct(ebay.performance.itemNotReceivedProjected)}`} icon={Gauge} tone="amber" />
             </div>
           </div>

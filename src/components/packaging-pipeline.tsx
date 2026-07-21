@@ -1,6 +1,6 @@
 'use client';
 
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useOrderStore, assemblyLockHolder } from '@/lib/store';
 import { ORDER_STATUS_CONFIG, PACKAGING_STAGES, Order, OrderStatus, PackagingStage, DEPARTMENT_CONFIG, Department, TicketRecord } from '@/lib/types';
 import { useSettingNumber, useSettingBool, useSettingString } from '@/hooks/use-settings';
@@ -128,6 +128,8 @@ export function PackagingPipeline() {
   const trackingTicketPriority = useSettingString('workflow.missingTrackingTicketPriority') as TicketRecord['priority'];
   const requireCleaning = useSettingBool('workflow.requireCleaning');
   const requireVinyl = useSettingBool('workflow.requireVinyl');
+  const requirePackChecklist = useSettingBool('workflow.requirePackChecklist');
+  const combineLabelAndInvoice = useSettingBool('print.combineLabelAndInvoice');
 
   const currentUser = users.find((u) => u.id === currentUserId);
   const isAdmin = currentUser?.role === 'admin' || currentUser?.role === 'manager';
@@ -219,6 +221,21 @@ export function PackagingPipeline() {
     () => visibleOrders.filter((o) => o.status === 'shipped'),
     [visibleOrders]
   );
+
+  // Auto-archive shipped orders older than the configured age (Settings → Data).
+  // 0 disables it — shipped orders are then only cleared manually at EOD. Only
+  // orders with a known despatch date qualify, so nothing is archived prematurely.
+  const archiveShippedAfterDays = useSettingNumber('data.archiveShippedAfterDays');
+  useEffect(() => {
+    if (archiveShippedAfterDays <= 0) return;
+    const cutoff = Date.now() - archiveShippedAfterDays * 86400000;
+    const stale = allShippedOrders
+      .filter((o) => o.dispatchedOnDate && new Date(o.dispatchedOnDate).getTime() < cutoff)
+      .map((o) => o.id);
+    if (stale.length > 0) bulkUpdateStatus(stale, 'archived');
+    // Run once per mount; the list updates as orders change.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [archiveShippedAfterDays]);
 
   const handleEODClear = () => {
     const shippedOrderIds = allShippedOrders.map(o => o.id);
@@ -711,7 +728,8 @@ export function PackagingPipeline() {
                                     const hasTracking = !!order.trackingNumber;
                                     const isCollection = order.deliveryType === 'collection';
                                     const outstanding = getOutstandingPackItems(order, builds);
-                                    const allFitted = outstanding.every((i) => i.done);
+                                    // The pack checklist can be turned off (Settings → Workflow).
+                                    const allFitted = !requirePackChecklist || outstanding.every((i) => i.done);
                                     const canPrint = (hasTracking || isCollection) && allFitted;
                                     return (
                                       <>
@@ -739,7 +757,7 @@ export function PackagingPipeline() {
                                           title={!allFitted ? 'Fit all outstanding accessories/monitors first' : !hasTracking && !isCollection ? 'Tracking number required before printing label' : undefined}
                                         >
                                           <Printer className="h-3 w-3 mr-1" />
-                                          {isCollection ? 'Pack' : (hasTracking ? 'Label + Invoice' : 'No Tracking')}
+                                          {isCollection ? 'Pack' : (hasTracking ? (combineLabelAndInvoice ? 'Label + Invoice' : 'Print Label') : 'No Tracking')}
                                         </Button>
                                         {!hasTracking && !isCollection && (
                                           <p className="text-[10px] text-amber-600">Add tracking first</p>

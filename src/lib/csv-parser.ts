@@ -2,12 +2,17 @@ import Papa from 'papaparse';
 import { Order, DeliveryCarrier, DeliveryType } from './types';
 import { deriveCategory } from './categoriser';
 
-export function deriveShipping(postcode: string, totalPrice: number, postageAndPackaging: number): { deliveryCarrier: DeliveryCarrier; deliveryType: DeliveryType } {
+export function deriveShipping(
+  postcode: string,
+  totalPrice: number,
+  postageAndPackaging: number,
+  expressPrefixes: string[] = [],
+): { deliveryCarrier: DeliveryCarrier; deliveryType: DeliveryType } {
   const upper = postcode.trim().toUpperCase();
   const isBT = upper.startsWith('BT');
 
-  // Postage paid in CSV = customer paid for express shipping
-  if (postageAndPackaging > 0) {
+  // Postage paid in CSV, or a configured always-express postcode prefix = express.
+  if (postageAndPackaging > 0 || expressPrefixes.some((p) => p && upper.startsWith(p.toUpperCase()))) {
     return { deliveryCarrier: 'DPD', deliveryType: 'express' };
   }
   // BT postcode (Northern Ireland) = DPD two-day service

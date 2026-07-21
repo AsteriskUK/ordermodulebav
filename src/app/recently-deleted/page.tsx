@@ -2,6 +2,7 @@
 
 import { useState, useMemo } from 'react';
 import { useOrderStore } from '@/lib/store';
+import { useSettingNumber } from '@/hooks/use-settings';
 import { Order } from '@/lib/types';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -39,6 +40,7 @@ const PAGE_SIZE = 25;
 
 export default function RecentlyDeletedPage() {
   const orders = useOrderStore((s) => s.orders);
+  const retentionDays = useSettingNumber('data.recentlyDeletedDays');
   const restoreOrder = useOrderStore((s) => s.restoreOrder);
   const permanentDeleteOrder = useOrderStore((s) => s.permanentDeleteOrder);
   
@@ -58,8 +60,10 @@ export default function RecentlyDeletedPage() {
   };
 
   const deletedOrders = useMemo(() => {
-    let result = orders.filter((o) => o.deletedAt);
-    
+    // Only show orders deleted within the retention window (Settings → Data).
+    const cutoff = retentionDays > 0 ? Date.now() - retentionDays * 86400000 : 0;
+    let result = orders.filter((o) => o.deletedAt && (!cutoff || new Date(o.deletedAt).getTime() >= cutoff));
+
     if (search.trim()) {
       const q = search.toLowerCase();
       result = result.filter(
@@ -105,7 +109,7 @@ export default function RecentlyDeletedPage() {
     });
 
     return result;
-  }, [orders, search, sortField, sortDir]);
+  }, [orders, search, sortField, sortDir, retentionDays]);
 
   const totalPages = Math.ceil(deletedOrders.length / PAGE_SIZE);
   const pageOrders = deletedOrders.slice(page * PAGE_SIZE, (page + 1) * PAGE_SIZE);
