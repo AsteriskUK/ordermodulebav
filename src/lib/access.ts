@@ -87,6 +87,9 @@ function userDepts(user: Pick<AppUser, 'department' | 'departments'>): Departmen
 export function can(user: AppUser | null | undefined, resourceId: string, config?: AccessConfig | null): boolean {
   if (!user) return false;
   if (user.role === 'admin') return true;              // admins are never locked out
+  // Read-only viewers can SEE every page (writes are blocked server-side), so a
+  // client can look around the whole app without being able to change anything.
+  if (user.role === 'viewer') return true;
   const rule = ruleFor(resourceId, config);
   if (rule.denyUsers?.includes(user.id)) return false; // hard revoke wins
   if (rule.allowUsers?.includes(user.id)) return true;

@@ -18,7 +18,10 @@ export function RoleGate({ allowedRoles, children, redirectTo = '/' }: RoleGateP
   const router = useRouter();
 
   const currentUser = users.find((u) => u.id === currentUserId);
-  const allowed = currentUser && allowedRoles.includes(currentUser.role);
+  // Read-only viewers may view any gated page (e.g. Settings, Users) — every
+  // write is blocked server-side, so read-only access to admin pages is safe
+  // and matches "see everything, change nothing".
+  const allowed = currentUser && (currentUser.role === 'viewer' || allowedRoles.includes(currentUser.role));
 
   useEffect(() => {
     if (currentUser && !allowed) {

@@ -16,7 +16,7 @@ export function SignIn() {
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
   // Set when this profile is already signed in elsewhere — offers a takeover.
-  const [conflict, setConflict] = useState<{ user: AppUser; device: string; since: string } | null>(null);
+  const [conflict, setConflict] = useState<{ user: AppUser; device: string; since: string; pin: string } | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
@@ -29,14 +29,24 @@ export function SignIn() {
 
   // Only one device may be signed in per profile. Claim the session first; if
   // it is live elsewhere, offer to take it over rather than stranding anyone.
-  const signIn = async (user: AppUser, force = false) => {
+  const signIn = async (user: AppUser, enteredPin = '', force = false) => {
     setBusy(true);
     try {
       const blocked = await claimSession(user.id, force);
       if (blocked) {
-        setConflict({ user, device: blocked.device, since: blocked.since });
+        // Remember the PIN so the takeover retry can still set the role cookie.
+        setConflict({ user, device: blocked.device, since: blocked.since, pin: enteredPin });
         return;
       }
+      // Establish the signed, server-verified role cookie (drives the read-only
+      // 'viewer' write-block). Best-effort: a failure here doesn't block sign-in.
+      try {
+        await fetch('/api/auth/login', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ userId: user.id, pin: enteredPin }),
+        });
+      } catch { /* non-blocking */ }
       setConflict(null);
       setCurrentUser(user.id);
     } finally {
@@ -60,7 +70,7 @@ export function SignIn() {
       return;
     }
     if (pin === selected.pin) {
-      signIn(selected);
+      signIn(selected, pin);
     } else {
       setError('Incorrect PIN. Try again.');
       setPin('');
@@ -97,7 +107,7 @@ export function SignIn() {
                 Signing in here will sign out the other device.
               </p>
             </div>
-            <Button className="h-11 w-full" disabled={busy} onClick={() => signIn(conflict.user, true)}>
+            <Button className="h-11 w-full" disabled={busy} onClick={() => signIn(conflict.user, conflict.pin, true)}>
               {busy ? 'Signing in…' : 'Sign in here anyway'}
             </Button>
             <button

@@ -4,12 +4,13 @@ import { useState, useEffect, useRef, useMemo } from 'react';
 import { useRouter, usePathname } from 'next/navigation';
 import { Sidebar, pageTitleForPath } from './sidebar';
 import { EodScheduler } from './eod-scheduler';
-import { PanelLeftClose, PanelLeftOpen, LogOut, ChevronDown, Check, Bell, MessageSquare, ChevronRight, ThumbsDown, ThumbsUp } from 'lucide-react';
+import { PanelLeftClose, PanelLeftOpen, LogOut, ChevronDown, Check, Bell, MessageSquare, ChevronRight, ThumbsDown, ThumbsUp, Eye } from 'lucide-react';
 import { supabase } from '@/lib/supabase-client';
 import { Button } from './ui/button';
 import { useSupabaseSync } from '@/hooks/use-supabase-sync';
 import { useAutoPull } from '@/hooks/use-auto-pull';
 import { useSessionLock, releaseSession } from '@/hooks/use-session-lock';
+import { useReadOnly, useInstallReadOnlyGuard } from '@/hooks/use-read-only';
 import { useSettingString } from '@/hooks/use-settings';
 import { AppearanceProvider } from './appearance-provider';
 import { CancellationAlert } from './cancellation-alert';
@@ -44,6 +45,10 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   useAutoPull();
   // One active login per profile — signs this device out if superseded.
   useSessionLock();
+  // Read-only 'viewer' role: install the client write-guard (UX complement to
+  // the server proxy) and expose whether the current session is read-only.
+  useInstallReadOnlyGuard();
+  const readOnly = useReadOnly();
 
   const users = useOrderStore((s) => s.users);
   const currentUserId = useOrderStore((s) => s.currentUserId);
@@ -177,6 +182,11 @@ export function AppShell({ children }: { children: React.ReactNode }) {
             {/* Page title lives in the header, so pages don't repeat it and keep
                 more vertical space for content. */}
             <h1 className="text-base font-semibold text-slate-800 truncate">{pageTitleForPath(pathname)}</h1>
+            {readOnly && (
+              <span className="hidden sm:inline-flex items-center gap-1 text-[11px] font-medium text-amber-800 bg-amber-100 border border-amber-300 rounded-full px-2 py-0.5 shrink-0">
+                <Eye className="h-3 w-3" /> Read-only preview
+              </span>
+            )}
           </div>
 
           <div className="flex items-center gap-1">
@@ -362,7 +372,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
                     ))}
                   </div>
                   <div className="px-2 pb-1.5 border-t border-slate-100 pt-1.5">
-                    <button onClick={() => { if (currentUserId) releaseSession(currentUserId); setCurrentUser(null); setMenuOpen(false); }}
+                    <button onClick={() => { if (currentUserId) releaseSession(currentUserId); fetch('/api/auth/logout', { method: 'POST' }).catch(() => {}); setCurrentUser(null); setMenuOpen(false); }}
                       className="w-full flex items-center gap-2 px-2 py-1.5 rounded-lg hover:bg-red-50 text-red-600 text-xs font-medium transition-colors">
                       <LogOut className="h-3.5 w-3.5" /> Sign out
                     </button>
