@@ -12,6 +12,7 @@ export function SignIn() {
   const setCurrentUser = useOrderStore((s) => s.setCurrentUser);
 
   const [selected, setSelected] = useState<AppUser | null>(null);
+  const [query, setQuery] = useState('');
   const [pin, setPin] = useState('');
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
@@ -53,6 +54,13 @@ export function SignIn() {
       setBusy(false);
     }
   };
+
+  // Browse list excludes admins; typing a query matches everyone (so an admin
+  // can find their hidden profile by name). Sorted, case-insensitive contains.
+  const q = query.trim().toLowerCase();
+  const pickList = users
+    .filter((u) => (q ? u.name.toLowerCase().includes(q) : u.role !== 'admin'))
+    .sort((a, b) => a.name.localeCompare(b.name));
 
   const handleSelect = (user: AppUser) => {
     // Admins sign in directly; everyone else must enter their PIN every time.
@@ -120,32 +128,44 @@ export function SignIn() {
         ) : !selected ? (
           <div className="space-y-3">
             <p className="text-center text-sm font-medium text-slate-600">Who&apos;s working today?</p>
-            <div className="space-y-2">
-              {users.map((u) => (
-                <Button
-                  key={u.id}
-                  variant="outline"
-                  className="h-11 w-full justify-start gap-3"
-                  disabled={busy}
-                  onClick={() => handleSelect(u)}
-                >
-                  <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-blue-600 text-xs font-bold text-white">
-                    {u.name.charAt(0).toUpperCase()}
-                  </div>
-                  <div className="text-left">
-                    <p className="text-sm font-medium">{u.name}</p>
-                    <p className="text-xs capitalize text-slate-400">{u.role}</p>
-                  </div>
-                  {u.role === 'admin' ? (
-                    <LogIn className="ml-auto h-4 w-4 text-slate-400" />
-                  ) : (
-                    <Lock className="ml-auto h-3.5 w-3.5 text-slate-400" />
-                  )}
-                </Button>
-              ))}
-              {users.length === 0 && (
-                <p className="py-6 text-center text-xs text-slate-400">No profiles available.</p>
-              )}
+            {/* Searchable picker. The browse list hides admins; an admin signs in
+                by typing their username (they still match the filter). */}
+            <div className="relative">
+              <input
+                autoFocus
+                value={query}
+                onChange={(e) => setQuery(e.target.value)}
+                placeholder="Type your name…"
+                className="w-full rounded-lg border border-slate-200 px-3 py-2.5 text-sm outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
+              />
+              <div className="mt-2 max-h-64 overflow-y-auto rounded-lg border border-slate-100 divide-y divide-slate-100">
+                {pickList.map((u) => (
+                  <button
+                    key={u.id}
+                    disabled={busy}
+                    onClick={() => handleSelect(u)}
+                    className="w-full flex items-center gap-3 px-3 py-2.5 text-left hover:bg-slate-50 disabled:opacity-50 transition-colors"
+                  >
+                    <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-blue-600 text-xs font-bold text-white">
+                      {u.name.charAt(0).toUpperCase()}
+                    </div>
+                    <div className="min-w-0 flex-1">
+                      <p className="text-sm font-medium truncate">{u.name}</p>
+                      <p className="text-xs capitalize text-slate-400">{u.role}</p>
+                    </div>
+                    {u.role === 'admin' ? (
+                      <LogIn className="ml-auto h-4 w-4 text-slate-400 shrink-0" />
+                    ) : (
+                      <Lock className="ml-auto h-3.5 w-3.5 text-slate-400 shrink-0" />
+                    )}
+                  </button>
+                ))}
+                {pickList.length === 0 && (
+                  <p className="py-6 text-center text-xs text-slate-400">
+                    {users.length === 0 ? 'No profiles available.' : 'No match — check the spelling.'}
+                  </p>
+                )}
+              </div>
             </div>
           </div>
         ) : (

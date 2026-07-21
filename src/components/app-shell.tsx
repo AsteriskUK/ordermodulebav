@@ -4,7 +4,7 @@ import { useState, useEffect, useRef, useMemo } from 'react';
 import { useRouter, usePathname } from 'next/navigation';
 import { Sidebar, pageTitleForPath } from './sidebar';
 import { EodScheduler } from './eod-scheduler';
-import { PanelLeftClose, PanelLeftOpen, LogOut, ChevronDown, Check, Bell, MessageSquare, ChevronRight, ThumbsDown, ThumbsUp, Eye } from 'lucide-react';
+import { PanelLeftClose, PanelLeftOpen, LogOut, ChevronDown, Bell, MessageSquare, ChevronRight, ThumbsDown, ThumbsUp, Eye } from 'lucide-react';
 import { supabase } from '@/lib/supabase-client';
 import { Button } from './ui/button';
 import { useSupabaseSync } from '@/hooks/use-supabase-sync';
@@ -355,23 +355,9 @@ export function AppShell({ children }: { children: React.ReactNode }) {
                     <p className="text-xs font-semibold text-slate-700">{currentUser.name}</p>
                     <p className="text-[10px] text-slate-400 capitalize">{currentUser.role}</p>
                   </div>
-                  <div className="px-2 py-1.5 max-h-64 overflow-y-auto">
-                    <p className="text-[10px] font-semibold text-slate-400 uppercase tracking-wide px-1 mb-1">Switch user</p>
-                    {users.map((u) => (
-                      <button key={u.id} onClick={() => { setCurrentUser(u.id); setMenuOpen(false); }}
-                        className="w-full flex items-center gap-2.5 px-2 py-1.5 rounded-lg hover:bg-slate-50 text-left transition-colors">
-                        <div className="h-6 w-6 rounded-full bg-slate-300 flex items-center justify-center text-[10px] font-bold text-slate-600 shrink-0">
-                          {u.name.charAt(0).toUpperCase()}
-                        </div>
-                        <div className="flex-1 min-w-0">
-                          <p className="text-xs font-medium text-slate-700 truncate">{u.name}</p>
-                          <p className="text-[10px] text-slate-400 capitalize">{u.role}</p>
-                        </div>
-                        {u.id === currentUser.id && <Check className="h-3.5 w-3.5 text-blue-500 shrink-0" />}
-                      </button>
-                    ))}
-                  </div>
-                  <div className="px-2 pb-1.5 border-t border-slate-100 pt-1.5">
+                  <div className="px-2 pb-1.5 pt-1.5">
+                    {/* Switching users requires signing out and re-authenticating
+                        with a PIN — there is no in-app account switcher. */}
                     <button onClick={() => { if (currentUserId) releaseSession(currentUserId); fetch('/api/auth/logout', { method: 'POST' }).catch(() => {}); setCurrentUser(null); setMenuOpen(false); }}
                       className="w-full flex items-center gap-2 px-2 py-1.5 rounded-lg hover:bg-red-50 text-red-600 text-xs font-medium transition-colors">
                       <LogOut className="h-3.5 w-3.5" /> Sign out
