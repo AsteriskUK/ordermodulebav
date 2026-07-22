@@ -2,6 +2,7 @@
 
 import { useEffect } from 'react';
 import { useOrderStore } from '@/lib/store';
+import { setSupabaseReadOnly } from '@/lib/supabase-client';
 
 /** True when the signed-in user is a read-only 'viewer'. */
 export function useReadOnly(): boolean {
@@ -35,7 +36,12 @@ function isWriteToApi(input: RequestInfo | URL, init?: RequestInit): boolean {
 /** Installs the fetch guard once and keeps it in sync with read-only state. */
 export function useInstallReadOnlyGuard(): void {
   const readOnly = useReadOnly();
-  useEffect(() => { readOnlyActive = readOnly; }, [readOnly]);
+  // Set both guards synchronously on every render so even the first action after
+  // a viewer signs in is covered — the Supabase client guard blocks the direct
+  // DB writes the app makes with the anon key (its main write path).
+  readOnlyActive = readOnly;
+  setSupabaseReadOnly(readOnly);
+  useEffect(() => { readOnlyActive = readOnly; setSupabaseReadOnly(readOnly); }, [readOnly]);
 
   useEffect(() => {
     if (installed || typeof window === 'undefined') return;
