@@ -119,7 +119,7 @@ export function UserManagement() {
     setEditingId(user.id);
     setEditName(user.name);
     setEditRole(user.role);
-    setEditDepts(user.departments?.length ? user.departments : [user.department ?? 'management']);
+    setEditDepts(user.role === 'viewer' ? [] : (user.departments?.length ? user.departments : [user.department ?? 'management']));
     setEditPin(user.pin || '');
   };
 
@@ -306,9 +306,13 @@ export function UserManagement() {
               const Icon = cfg.icon;
               const isEditing = editingId === user.id;
               const isActive = user.id === currentUserId;
-              const userDepts: Department[] = user.departments?.length
-                ? user.departments
-                : [user.department ?? 'management'];
+              // Viewers have no department (read-only, all screens) — don't show
+              // the fallback 'Management' badge that made them look privileged.
+              const userDepts: Department[] = user.role === 'viewer'
+                ? []
+                : user.departments?.length
+                  ? user.departments
+                  : [user.department ?? 'management'];
 
               return (
                 <div
