@@ -125,13 +125,14 @@ export function UserManagement() {
 
   const saveEdit = () => {
     if (!editName.trim()) { toast.error('Name is required'); return; }
-    if (!editDepts.length) { toast.error('Select at least one department'); return; }
+    // Viewers see everything read-only, so a department is meaningless for them.
+    if (editRole !== 'viewer' && !editDepts.length) { toast.error('Select at least one department'); return; }
     updateUser(editingId!, {
       name: editName.trim(),
       role: editRole,
       roles: [editRole],
-      department: editDepts[0],
-      departments: editDepts,
+      department: editDepts[0] ?? 'management',
+      departments: editRole === 'viewer' ? [] : editDepts,
       pin: editPin || undefined,
     });
     toast.success('User updated');
@@ -140,15 +141,15 @@ export function UserManagement() {
 
   const handleAdd = () => {
     if (!newName.trim()) { toast.error('Name is required'); return; }
-    if (!newDepts.length) { toast.error('Select at least one department'); return; }
+    if (newRole !== 'viewer' && !newDepts.length) { toast.error('Select at least one department'); return; }
     addUser({
       id: generateUUID(),
       name: newName.trim(),
       email: newEmail.trim() || undefined,
       role: newRole,
       roles: [newRole],
-      department: newDepts[0],
-      departments: newDepts,
+      department: newDepts[0] ?? 'management',
+      departments: newRole === 'viewer' ? [] : newDepts,
       pin: newPin || undefined,
     });
     toast.success(`${newName} added`);

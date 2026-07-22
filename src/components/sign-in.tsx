@@ -63,11 +63,7 @@ export function SignIn() {
     .sort((a, b) => a.name.localeCompare(b.name));
 
   const handleSelect = (user: AppUser) => {
-    // Admins sign in directly; everyone else must enter their PIN every time.
-    if (user.role === 'admin') {
-      signIn(user);
-      return;
-    }
+    // Everyone — admins included — must enter their PIN. No direct sign-in.
     setSelected(user);
   };
 
