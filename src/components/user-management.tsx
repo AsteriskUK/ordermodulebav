@@ -279,10 +279,14 @@ export function UserManagement() {
                 <X className="h-3 w-3" />
               </Button>
             </div>
-            <div>
-              <label className="text-xs text-slate-500 block mb-1.5">Departments (select all that apply)</label>
-              <DeptCheckboxes selected={newDepts} onChange={setNewDepts} />
-            </div>
+            {newRole === 'viewer' ? (
+              <p className="text-xs text-slate-400">Viewers see everything in read-only — no department needed.</p>
+            ) : (
+              <div>
+                <label className="text-xs text-slate-500 block mb-1.5">Departments (select all that apply)</label>
+                <DeptCheckboxes selected={newDepts} onChange={setNewDepts} />
+              </div>
+            )}
           </CardContent>
         </Card>
       )}
@@ -346,10 +350,14 @@ export function UserManagement() {
                           </Button>
                         </div>
                       </div>
-                      <div>
-                        <label className="text-xs text-slate-500 block mb-1.5">Departments</label>
-                        <DeptCheckboxes selected={editDepts} onChange={setEditDepts} />
-                      </div>
+                      {editRole === 'viewer' ? (
+                        <p className="text-xs text-slate-400">Viewers see everything in read-only — no department needed.</p>
+                      ) : (
+                        <div>
+                          <label className="text-xs text-slate-500 block mb-1.5">Departments</label>
+                          <DeptCheckboxes selected={editDepts} onChange={setEditDepts} />
+                        </div>
+                      )}
                     </div>
                   ) : (
                     <div className="flex items-start gap-3">
