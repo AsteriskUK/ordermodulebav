@@ -4,10 +4,15 @@ import { useEffect } from 'react';
 import { useOrderStore, setStoreReadOnly } from '@/lib/store';
 import { setSupabaseReadOnly } from '@/lib/supabase-client';
 
-/** True when the signed-in user is a read-only 'viewer'. */
+/** True when the signed-in user is a read-only 'viewer'.
+ *  Authoritative source is the server-signed cookie (sessionRole); the users-list
+ *  check is a fallback so it still works before /api/auth/me resolves. Either
+ *  saying 'viewer' locks the session read-only. */
 export function useReadOnly(): boolean {
   const users = useOrderStore((s) => s.users);
   const currentUserId = useOrderStore((s) => s.currentUserId);
+  const sessionRole = useOrderStore((s) => s.sessionRole);
+  if (sessionRole === 'viewer') return true;
   return users.find((u) => u.id === currentUserId)?.role === 'viewer';
 }
 
@@ -35,6 +40,21 @@ function isWriteToApi(input: RequestInfo | URL, init?: RequestInit): boolean {
 
 /** Installs the fetch guard once and keeps it in sync with read-only state. */
 export function useInstallReadOnlyGuard(): void {
+  const currentUserId = useOrderStore((s) => s.currentUserId);
+
+  // Ask the server (signed cookie) what role we actually are, so read-only holds
+  // even when the user isn't present in the synced users list (e.g. inactive).
+  // setState bypasses the store's read-only guard, so this write always applies.
+  useEffect(() => {
+    let cancelled = false;
+    if (!currentUserId) { useOrderStore.setState({ sessionRole: null }); return; }
+    fetch('/api/auth/me')
+      .then((r) => r.json())
+      .then((d: { role: string | null }) => { if (!cancelled) useOrderStore.setState({ sessionRole: d.role ?? null }); })
+      .catch(() => { /* keep the users-list fallback */ });
+    return () => { cancelled = true; };
+  }, [currentUserId]);
+
   const readOnly = useReadOnly();
   // Set both guards synchronously on every render so even the first action after
   // a viewer signs in is covered — the Supabase client guard blocks the direct

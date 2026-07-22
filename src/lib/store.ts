@@ -100,6 +100,8 @@ interface OrderStore {
   setAccessControl: (config: AccessConfig | null) => void;
   /** Admin-configured app settings — overrides only; defaults live in settings-schema.ts. */
   appSettings: SettingsValues | null;
+  /** Role from the server-signed cookie (authoritative for read-only enforcement). */
+  sessionRole: string | null;
   setAppSettings: (values: SettingsValues | null) => void;
   addOrders: (orders: Order[], batch: Batch) => void;
   updateOrderStatus: (orderId: string, status: OrderStatus) => void;
@@ -219,6 +221,7 @@ export const useOrderStore = create<OrderStore>()(
       currentUserId: null as string | null,
       accessControl: null as AccessConfig | null,
       appSettings: null as SettingsValues | null,
+      sessionRole: null as string | null,
       emailConfig: {
         enabled: false,
         recipientEmail: '',
