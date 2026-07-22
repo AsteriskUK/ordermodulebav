@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect } from 'react';
-import { useOrderStore } from '@/lib/store';
+import { useOrderStore, setStoreReadOnly } from '@/lib/store';
 import { setSupabaseReadOnly } from '@/lib/supabase-client';
 
 /** True when the signed-in user is a read-only 'viewer'. */
@@ -41,7 +41,8 @@ export function useInstallReadOnlyGuard(): void {
   // DB writes the app makes with the anon key (its main write path).
   readOnlyActive = readOnly;
   setSupabaseReadOnly(readOnly);
-  useEffect(() => { readOnlyActive = readOnly; setSupabaseReadOnly(readOnly); }, [readOnly]);
+  setStoreReadOnly(readOnly);
+  useEffect(() => { readOnlyActive = readOnly; setSupabaseReadOnly(readOnly); setStoreReadOnly(readOnly); }, [readOnly]);
 
   useEffect(() => {
     if (installed || typeof window === 'undefined') return;

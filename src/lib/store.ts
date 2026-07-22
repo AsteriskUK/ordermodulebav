@@ -185,9 +185,20 @@ interface OrderStore {
   updateLeaveBalance: (userId: string, year: number, updates: Partial<LeaveBalance>) => void;
 }
 
+// Read-only viewers: block every state mutation that flows through a store
+// action's `set`. Background sync (useOrderStore.setState) and setCurrentUser
+// use the raw setter, so reads, sync and sign-in/out are unaffected.
+let storeReadOnly = false;
+export function setStoreReadOnly(value: boolean): void { storeReadOnly = value; }
+
 export const useOrderStore = create<OrderStore>()(
   persist(
-    (set, get) => ({
+    (rawSet, get) => {
+      const set: typeof rawSet = ((...args: Parameters<typeof rawSet>) => {
+        if (storeReadOnly) return undefined;
+        return rawSet(...args);
+      }) as typeof rawSet;
+      return ({
       orders: [] as Order[],
       batches: [] as Batch[],
       eodEvents: [] as EodEvent[],
@@ -662,7 +673,7 @@ export const useOrderStore = create<OrderStore>()(
         set((state) => ({ users: state.users.filter((u) => u.id !== userId) }));
         deleteUserFromSupabase(userId).catch(console.error);
       },
-      setCurrentUser: (userId) => set({ currentUserId: userId }),
+      setCurrentUser: (userId) => rawSet({ currentUserId: userId }),
       setEmailConfig: (config) =>
         set((state) => ({ emailConfig: { ...state.emailConfig, ...config } })),
       setAccessControl: (config) => set({ accessControl: config }),
@@ -1384,7 +1395,8 @@ export const useOrderStore = create<OrderStore>()(
           return { leaveBalances: updatedBalances };
         });
       },
-    }),
+    });
+    },
     {
       name: 'ebay-orders-idb-v6',
       storage: idbStorage(),
