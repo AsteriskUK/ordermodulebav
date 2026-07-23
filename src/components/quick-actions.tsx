@@ -4,6 +4,7 @@ import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { TicketRecord, TicketContactMethod, Department } from '@/lib/types';
 import { TicketDialog } from './ticket-dialog';
+import { CancellationDialog } from './cancellation-dialog';
 import { Phone, RotateCcw, Banknote, XCircle, PackageMinus, Zap, Ticket } from 'lucide-react';
 
 /** Context a quick action can prefill onto a ticket. Any field may be omitted. */
@@ -30,8 +31,9 @@ interface Preset {
   /**
    * 'ticket' opens the ticket dialog (for actions with no dedicated workflow page).
    * 'nav' deep-links to the relevant module, prefilling a new record from context.
+   * 'cancel' opens the pre-shipment cancellation dialog (no return case involved).
    */
-  mode: 'ticket' | 'nav';
+  mode: 'ticket' | 'nav' | 'cancel';
   // Ticket-mode fields
   category?: string;
   contactMethod?: TicketContactMethod;
@@ -48,7 +50,7 @@ const PRESETS: Preset[] = [
   { key: 'callback', label: 'Callback',    icon: Phone,        color: 'text-emerald-700 border-emerald-200 hover:bg-emerald-50', mode: 'ticket', category: 'callback',  contactMethod: 'phone', department: 'comms', priority: 'high' },
   { key: 'return',   label: 'Return',      icon: RotateCcw,    color: 'text-rose-700 border-rose-200 hover:bg-rose-50',          mode: 'nav', navPath: '/returns',      navKind: 'return' },
   { key: 'refund',   label: 'Refund',      icon: Banknote,     color: 'text-amber-700 border-amber-200 hover:bg-amber-50',       mode: 'nav', navPath: '/returns',      navKind: 'refund' },
-  { key: 'cancel',   label: 'Cancel',      icon: XCircle,      color: 'text-red-700 border-red-200 hover:bg-red-50',             mode: 'nav', navPath: '/returns',      navKind: 'cancel' },
+  { key: 'cancel',   label: 'Cancel',      icon: XCircle,      color: 'text-red-700 border-red-200 hover:bg-red-50',             mode: 'cancel' },
   { key: 'missing',  label: 'Missing item',icon: PackageMinus, color: 'text-orange-700 border-orange-200 hover:bg-orange-50',    mode: 'nav', navPath: '/missing-items' },
 ];
 
@@ -66,10 +68,15 @@ function buildNavHref(p: Preset, ctx: QuickActionContext): string {
 export function QuickActions({ context, label = true, className = '' }: { context: QuickActionContext; label?: boolean; className?: string }) {
   const router = useRouter();
   const [prefill, setPrefill] = useState<Partial<TicketRecord> | null>(null);
+  const [showCancel, setShowCancel] = useState(false);
 
   function open(p: Preset) {
     if (p.mode === 'nav') {
       router.push(buildNavHref(p, context));
+      return;
+    }
+    if (p.mode === 'cancel') {
+      setShowCancel(true);
       return;
     }
     const contactValue = p.contactMethod === 'phone' ? (context.contactPhone ?? '')
@@ -110,6 +117,7 @@ export function QuickActions({ context, label = true, className = '' }: { contex
         );
       })}
       {prefill && <TicketDialog prefill={prefill} onClose={() => setPrefill(null)} />}
+      {showCancel && <CancellationDialog context={context} onClose={() => setShowCancel(false)} />}
     </div>
   );
 }
