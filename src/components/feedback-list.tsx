@@ -4,7 +4,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { supabase } from '@/lib/supabase-client';
 import { Button } from '@/components/ui/button';
 import { toast } from 'sonner';
-import { ThumbsDown, ThumbsUp, Minus, RefreshCw, ExternalLink, Check, MessageSquareWarning } from 'lucide-react';
+import { ThumbsDown, ThumbsUp, Minus, RefreshCw, ExternalLink, Check, MessageSquareWarning, Reply, CornerDownRight, Loader2 } from 'lucide-react';
 
 interface FeedbackRow {
   feedback_id: string;
@@ -20,6 +20,8 @@ interface FeedbackRow {
   automated: boolean | null;
   ticket_id: string | null;
   acknowledged: boolean | null;
+  reply_text: string | null;
+  replied_at: string | null;
   first_seen_at: string;
 }
 
@@ -37,6 +39,10 @@ export function FeedbackList() {
   const [loading, setLoading] = useState(false);
   const [syncing, setSyncing] = useState(false);
   const [counts, setCounts] = useState<{ NEGATIVE: number; NEUTRAL: number; POSITIVE: number }>({ NEGATIVE: 0, NEUTRAL: 0, POSITIVE: 0 });
+  // Inline "reply to feedback" composer (eBay only lets you reply once per feedback).
+  const [replyingId, setReplyingId] = useState<string | null>(null);
+  const [replyText, setReplyText] = useState('');
+  const [sendingReply, setSendingReply] = useState(false);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -79,6 +85,33 @@ export function FeedbackList() {
   async function acknowledge(id: string) {
     setRows((prev) => prev.map((r) => r.feedback_id === id ? { ...r, acknowledged: true } : r));
     await fetch('/api/ebay/feedback/sync', { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ feedbackIds: [id] }) });
+  }
+
+  function startReply(r: FeedbackRow) {
+    setReplyingId(r.feedback_id);
+    setReplyText(r.reply_text ?? '');
+  }
+
+  async function sendReply(id: string) {
+    const text = replyText.trim();
+    if (!text) { toast.error('Enter a reply'); return; }
+    setSendingReply(true);
+    try {
+      const res = await fetch('/api/ebay/feedback/reply', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ feedbackId: id, responseText: text }),
+      });
+      const data = await res.json();
+      if (!res.ok) { toast.error(data.message || 'Reply failed'); return; }
+      setRows((prev) => prev.map((r) => r.feedback_id === id ? { ...r, reply_text: text, replied_at: data.repliedAt ?? new Date().toISOString() } : r));
+      setReplyingId(null);
+      setReplyText('');
+      toast.success('Reply posted to eBay');
+    } catch {
+      toast.error('Failed to post reply');
+    } finally {
+      setSendingReply(false);
+    }
   }
 
   const FILTERS: { key: Filter; label: string }[] = [
@@ -153,6 +186,45 @@ export function FeedbackList() {
                         </a>
                       )}
                     </p>
+
+                    {/* Your public reply (if already sent) */}
+                    {r.reply_text && replyingId !== r.feedback_id && (
+                      <div className="mt-2 flex items-start gap-1.5 rounded-lg bg-slate-50 border border-slate-200 px-2.5 py-1.5">
+                        <CornerDownRight className="h-3.5 w-3.5 text-slate-400 mt-0.5 shrink-0" />
+                        <div className="min-w-0">
+                          <p className="text-xs text-slate-700">{r.reply_text}</p>
+                          <p className="text-[10px] text-slate-400 mt-0.5">Your reply{r.replied_at ? ` · ${new Date(r.replied_at).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' })}` : ''}</p>
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Reply composer */}
+                    {replyingId === r.feedback_id ? (
+                      <div className="mt-2 space-y-1.5">
+                        <textarea
+                          autoFocus
+                          value={replyText}
+                          onChange={(e) => setReplyText(e.target.value.slice(0, 500))}
+                          onKeyDown={(e) => { if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') sendReply(r.feedback_id); }}
+                          rows={2}
+                          placeholder="Write a public reply to this feedback…"
+                          className="w-full rounded-md border border-slate-300 px-2.5 py-1.5 text-sm resize-y focus:outline-none focus:ring-2 focus:ring-blue-500"
+                        />
+                        <div className="flex items-center gap-2">
+                          <Button size="sm" className="h-7 text-xs" disabled={sendingReply || !replyText.trim()} onClick={() => sendReply(r.feedback_id)}>
+                            {sendingReply ? <Loader2 className="h-3.5 w-3.5 mr-1 animate-spin" /> : <Reply className="h-3.5 w-3.5 mr-1" />}
+                            Post reply
+                          </Button>
+                          <button onClick={() => { setReplyingId(null); setReplyText(''); }} className="text-xs text-slate-400 hover:text-slate-600">Cancel</button>
+                          <span className="text-[10px] text-slate-400 ml-auto">{replyText.length}/500 · ⌘/Ctrl+Enter</span>
+                        </div>
+                        <p className="text-[10px] text-amber-600">Replies are public on eBay and can&apos;t be edited or removed once posted.</p>
+                      </div>
+                    ) : !r.reply_text && (
+                      <button onClick={() => startReply(r)} className="mt-2 text-xs text-blue-600 hover:text-blue-700 flex items-center gap-1">
+                        <Reply className="h-3.5 w-3.5" /> Reply
+                      </button>
+                    )}
                   </div>
                   {r.comment_type === 'NEGATIVE' && !r.acknowledged && (
                     <button onClick={() => acknowledge(r.feedback_id)} title="Acknowledge" className="shrink-0 text-slate-400 hover:text-green-600 flex items-center gap-1 text-xs">
