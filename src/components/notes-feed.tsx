@@ -176,6 +176,13 @@ function mergeInbox(prev: EbayMessage[], fresh: EbayMessage[], keepLocalStatus =
   return [...byId.values()];
 }
 
+// In-memory inbox cache, held OUTSIDE the component so it survives remounts
+// (switching tabs/pages). Without this, the inbox state resets to [] every time
+// the screen mounts, so it blanks and re-fetches the whole list. With it, opening
+// the inbox shows the last-known messages instantly and a sync only merges in the
+// new ones (AJAX-style) instead of wiping and repainting the screen.
+const inboxCache: { ebay: EbayMessage[]; bm: EbayMessage[]; amazon: EbayMessage[] } = { ebay: [], bm: [], amazon: [] };
+
 interface Conversation {
   key: string; // conversation_id (falls back to buyer_username + order_id)
   conversation_id: string | null;
@@ -245,7 +252,7 @@ export function NotesFeed() {
   const [noteText, setNoteText] = useState('');
 
   // eBay messages
-  const [ebayMessages, setEbayMessages] = useState<EbayMessage[]>([]);
+  const [ebayMessages, setEbayMessages] = useState<EbayMessage[]>(() => inboxCache.ebay);
   const [ebayLoading, setEbayLoading] = useState(false);
   const [ebaySyncing, setEbaySyncing] = useState(false);
   const [activeKey, setActiveKey] = useState<string | null>(null);
@@ -254,9 +261,9 @@ export function NotesFeed() {
   const [ebayFilter, setEbayFilter] = useState<'all' | 'unread' | 'client' | 'ebay' | 'backmarket' | 'amazon' | 'archived'>(
     (['all', 'unread', 'client'].includes(defaultInboxFilter) ? defaultInboxFilter : 'all') as 'all' | 'unread' | 'client'
   );
-  const [bmMessages, setBmMessages] = useState<EbayMessage[]>([]);
+  const [bmMessages, setBmMessages] = useState<EbayMessage[]>(() => inboxCache.bm);
   const [bmSyncing, setBmSyncing] = useState(false);
-  const [amazonMessages, setAmazonMessages] = useState<EbayMessage[]>([]);
+  const [amazonMessages, setAmazonMessages] = useState<EbayMessage[]>(() => inboxCache.amazon);
   const [amazonSyncing, setAmazonSyncing] = useState(false);
   // Message types Amazon currently allows for the open Amazon thread's order
   // (null = still checking). Amazon only permits templated types per order.
@@ -286,6 +293,12 @@ export function NotesFeed() {
     return next;
   });
   const clearSelection = () => setSelectedKeys(new Set());
+
+  // Keep the module-level cache in step with state so a remount restores the
+  // exact list we last had (no blank + full re-fetch on re-entry).
+  useEffect(() => { inboxCache.ebay = ebayMessages; }, [ebayMessages]);
+  useEffect(() => { inboxCache.bm = bmMessages; }, [bmMessages]);
+  useEffect(() => { inboxCache.amazon = amazonMessages; }, [amazonMessages]);
 
   // Fast read of already-synced messages from our Supabase (no eBay calls).
   async function loadEbayMessages() {
