@@ -535,6 +535,8 @@ export async function syncReturn(ret: ReturnRecord): Promise<void> {
       order_id: ret.orderId,
       sales_record_number: ret.salesRecordNumber,
       order_number: ret.orderNumber,
+      buyer_username: ret.buyerUsername,
+      item_title: ret.itemTitle,
       reason: ret.reason,
       status: ret.status,
       notes: ret.notes,

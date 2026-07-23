@@ -12,6 +12,24 @@ const MAX_PAGES = 20;
 // Shared all-scopes user token (see getEbayUserToken) — avoids scope clobbering.
 const getUserToken = getEbayUserToken;
 
+// Map an eBay Post-Order return's state/status onto our local return status so a
+// case that's been refunded/closed on eBay doesn't sit in the app's "open" tab.
+// eBay `state` is OPEN | CLOSED; `status` carries the detail (e.g. REFUND_SUCCESS,
+// RETURN_CLOSED, ESCALATED, REFUND_PENDING). We only ever move a return TOWARDS
+// closed here — an open eBay state leaves the local status untouched.
+type LocalReturnStatus = 'pending' | 'received' | 'refunded' | 'rejected' | 'replacement' | 'swap';
+function mapEbayReturnStatus(state?: string | null, status?: string | null): LocalReturnStatus | null {
+  const st = (state || '').toUpperCase();
+  const s = (status || '').toUpperCase();
+  const closed = st === 'CLOSED' || s.includes('CLOSED') || s.includes('COMPLETE');
+  if (s.includes('REFUND')) return 'refunded';
+  if (closed) {
+    if (s.includes('REJECT') || s.includes('DECLIN') || s.includes('CANCEL')) return 'rejected';
+    return 'refunded'; // a closed eBay return without an explicit rejection is a refund
+  }
+  return null; // still open on eBay — don't override the local status
+}
+
 interface ReturnMember {
   returnId?: string;
   orderId?: string;
@@ -139,9 +157,14 @@ export async function POST(req: Request) {
   const orderNumbers = [...new Set(rows.map((r) => r.order_id).filter(Boolean))] as string[];
   const { data: existingReturns } = await supabase
     .from('returns')
-    .select('metadata')
+    .select('id, status, buyer_username, metadata')
     .not('metadata->>ebay_return_id', 'is', null);
-  const existingEbayReturnIds = new Set((existingReturns ?? []).map((r) => r.metadata?.ebay_return_id).filter(Boolean) as string[]);
+  const existingByEbayId = new Map(
+    (existingReturns ?? [])
+      .filter((r) => r.metadata?.ebay_return_id)
+      .map((r) => [r.metadata.ebay_return_id as string, r])
+  );
+  const existingEbayReturnIds = new Set(existingByEbayId.keys());
 
   const { data: orders } = await supabase
     .from('orders')
@@ -166,7 +189,7 @@ export async function POST(req: Request) {
         buyer_username: r.buyer_login || order?.buyer_username || null,
         item_title: r.item_title || order?.item_title || null,
         reason: reasonLabel,
-        status: 'pending',
+        status: mapEbayReturnStatus(r.state, r.status) ?? 'pending',
         notes: raw.creationInfo?.comments?.content || '',
         returned_at: r.creation_date || new Date().toISOString(),
         refund_amount: r.refund_amount,
@@ -180,6 +203,33 @@ export async function POST(req: Request) {
     if (insertError) console.error('[eBay returns] auto-create local returns failed', insertError.message);
   }
 
+  // Reconcile EXISTING linked returns: when eBay now shows a case refunded/closed,
+  // move the local record out of "open", and backfill a missing buyer username from
+  // a now-matched order. Only touch rows that actually change so we don't churn.
+  const openLocal = new Set<LocalReturnStatus>(['pending', 'received', 'swap']);
+  const updates: Array<{ id: string; patch: Record<string, unknown> }> = [];
+  for (const r of rows) {
+    if (!r.return_id) continue;
+    const existing = existingByEbayId.get(r.return_id);
+    if (!existing) continue;
+    const patch: Record<string, unknown> = {};
+    const mapped = mapEbayReturnStatus(r.state, r.status);
+    if (mapped && mapped !== existing.status && openLocal.has(existing.status as LocalReturnStatus)) {
+      patch.status = mapped;
+      if (r.refund_amount != null) patch.refund_amount = r.refund_amount;
+    }
+    const order = r.order_id ? orderByNumber.get(r.order_id) : undefined;
+    const buyer = r.buyer_login || order?.buyer_username || null;
+    if (buyer && !existing.buyer_username) patch.buyer_username = buyer;
+    if (Object.keys(patch).length > 0) updates.push({ id: existing.id, patch });
+  }
+  let reconciled = 0;
+  for (const u of updates) {
+    const { error: updErr } = await supabase.from('returns').update(u.patch).eq('id', u.id);
+    if (updErr) console.error('[eBay returns] reconcile update failed', u.id, updErr.message);
+    else reconciled++;
+  }
+
   await setSetting('ebay_returns_last_sync_at', new Date().toISOString());
-  return NextResponse.json({ synced: rows.length, total, created: returnsToInsert.length, incremental });
+  return NextResponse.json({ synced: rows.length, total, created: returnsToInsert.length, reconciled, incremental });
 }

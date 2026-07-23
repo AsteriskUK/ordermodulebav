@@ -44,6 +44,17 @@ const STATUS_CONFIG: Record<ReturnRecord['status'], { label: string; color: stri
   swap: { label: 'Swap — awaiting item', color: 'bg-orange-100 text-orange-800 border-orange-300' },
 };
 
+// Colour-coded platform chip so it's obvious at a glance whether a return is
+// eBay, Back Market, Amazon, etc. (the header used to hard-code "eBay").
+const PLATFORM_CONFIG: Record<string, { label: string; color: string }> = {
+  ebay: { label: 'eBay', color: 'bg-blue-100 text-blue-800 border-blue-300' },
+  amazon: { label: 'Amazon', color: 'bg-orange-100 text-orange-800 border-orange-300' },
+  backmarket: { label: 'Back Market', color: 'bg-teal-100 text-teal-800 border-teal-300' },
+  onbuy: { label: 'OnBuy', color: 'bg-indigo-100 text-indigo-800 border-indigo-300' },
+  temu: { label: 'Temu', color: 'bg-amber-100 text-amber-800 border-amber-300' },
+  manual: { label: 'Manual', color: 'bg-slate-100 text-slate-600 border-slate-300' },
+};
+
 function derivePlatform(batchId?: string): ReturnRecord['platform'] | undefined {
   const prefix = batchId?.split('-')[0]?.toLowerCase();
   if (['ebay', 'amazon', 'backmarket', 'onbuy', 'temu'].includes(prefix || '')) return prefix as ReturnRecord['platform'];
@@ -65,6 +76,20 @@ function isEbayActionAvailable(
 
 // eBay-synced reasons arrive as ALL-CAPS enums (e.g. "DEFECTIVE ITEM") —
 // sentence-case those for display; manually-entered reasons pass through as-is.
+// Mirror of the server's mapping (api/ebay/returns): move a return towards closed
+// when the cached eBay case shows it refunded/closed. Returns null while eBay is
+// still open so we never re-open a locally closed return.
+function mapEbayCacheStatus(state?: string | null, status?: string | null): ReturnRecord['status'] | null {
+  const st = (state || '').toUpperCase();
+  const s = (status || '').toUpperCase();
+  if (s.includes('REFUND')) return 'refunded';
+  if (st === 'CLOSED' || s.includes('CLOSED') || s.includes('COMPLETE')) {
+    if (s.includes('REJECT') || s.includes('DECLIN') || s.includes('CANCEL')) return 'rejected';
+    return 'refunded';
+  }
+  return null;
+}
+
 function prettyReason(r?: string): string {
   if (!r) return '';
   const t = r.replace(/_/g, ' ').trim();
@@ -220,7 +245,7 @@ export function ReturnsManager() {
     try {
       const res = await fetch('/api/ebay/returns', { method: 'POST' });
       const data = await res.json();
-      if (res.ok) { toast.success(`Synced ${data.synced ?? 0} eBay returns${data.created ? ` — ${data.created} new` : ''}`); loadEbayReturns(); }
+      if (res.ok) { toast.success(`Synced ${data.synced ?? 0} eBay returns${data.created ? ` — ${data.created} new` : ''}${data.reconciled ? `, ${data.reconciled} updated` : ''}`); loadEbayReturns(); }
       else toast.error(`eBay returns sync failed: ${data.message || data.error || 'error'}`);
     } catch { toast.error('eBay returns sync failed'); } finally { setSyncing(null); }
   };
@@ -258,9 +283,18 @@ export function ReturnsManager() {
   };
 
   // Auto-link local returns to eBay return cases by order number / item title.
+  const openStatusesForSync: ReturnRecord['status'][] = ['pending', 'received', 'swap'];
   useEffect(() => {
     if (ebayReturns.length === 0) return;
     returns.forEach((ret) => {
+      // Reconcile status for already-linked eBay returns: if the case is refunded/
+      // closed on eBay but still open locally, move it to the closed tab. This runs
+      // off the cached ebay_returns rows, so it catches up even without a re-sync.
+      if (ret.ebayReturnId && openStatusesForSync.includes(ret.status)) {
+        const er = ebayReturns.find((e) => e.return_id === ret.ebayReturnId);
+        const mapped = er ? mapEbayCacheStatus(er.state, er.status) : null;
+        if (mapped && mapped !== ret.status) updateReturn(ret.id, { status: mapped });
+      }
       if (ret.ebayReturnId) return;
       const order = orders.find((o) => o.id === ret.orderId);
       if (!order) return;
@@ -728,8 +762,9 @@ export function ReturnsManager() {
                 <TableRow className="bg-slate-50">
                   <TableHead className="text-xs">Date</TableHead>
                   <TableHead className="text-xs">Sale #</TableHead>
-                  <TableHead className="text-xs">eBay Order #</TableHead>
-                  <TableHead className="text-xs">eBay User</TableHead>
+                  <TableHead className="text-xs">Platform</TableHead>
+                  <TableHead className="text-xs">Order #</TableHead>
+                  <TableHead className="text-xs">Buyer</TableHead>
                   <TableHead className="text-xs">Item</TableHead>
                   <TableHead className="text-xs">Reason</TableHead>
                   <TableHead className="text-xs">Return Tracking</TableHead>
@@ -753,6 +788,11 @@ export function ReturnsManager() {
                       {new Date(ret.returnedAt).toLocaleDateString('en-GB')}
                     </TableCell>
                     <TableCell className="font-mono text-xs">{ret.salesRecordNumber}</TableCell>
+                    <TableCell>
+                      <Badge variant="outline" className={`text-xs w-fit capitalize ${PLATFORM_CONFIG[ret.platform || 'manual']?.color || PLATFORM_CONFIG.manual.color}`}>
+                        {PLATFORM_CONFIG[ret.platform || 'manual']?.label || ret.platform}
+                      </Badge>
+                    </TableCell>
                     <TableCell className="font-mono text-xs text-slate-500">{ret.orderNumber || '—'}</TableCell>
                     <TableCell className="text-xs text-slate-600">{ret.buyerUsername || '—'}</TableCell>
                     <TableCell className="max-w-[200px]">
@@ -818,11 +858,6 @@ export function ReturnsManager() {
                         <Badge variant="outline" className={`text-xs ${STATUS_CONFIG[ret.status].color} w-fit`}>
                           {STATUS_CONFIG[ret.status].label}
                         </Badge>
-                        {ret.platform && ret.platform !== 'manual' && (
-                          <Badge variant="outline" className="text-xs w-fit bg-slate-100 text-slate-600 border-slate-300 capitalize">
-                            {ret.platform}
-                          </Badge>
-                        )}
                         {listing.caseNumber && (
                           listing.caseUrl ? (
                             <a href={listing.caseUrl} target="_blank" rel="noopener noreferrer" onClick={(e) => e.stopPropagation()}>
