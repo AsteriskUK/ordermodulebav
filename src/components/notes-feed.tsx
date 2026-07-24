@@ -176,6 +176,11 @@ function mergeInbox(prev: EbayMessage[], fresh: EbayMessage[], keepLocalStatus =
   return [...byId.values()];
 }
 
+// Product titles are compared across sources that differ only in whitespace
+// (eBay's listing title has doubled spaces where the order sheet has single), so
+// normalise before matching.
+const normTitle = (t?: string | null): string => (t || '').toLowerCase().replace(/\s+/g, ' ').trim();
+
 // In-memory inbox cache, held OUTSIDE the component so it survives remounts
 // (switching tabs/pages). Without this, the inbox state resets to [] every time
 // the screen mounts, so it blanks and re-fetches the whole list. With it, opening
@@ -293,6 +298,31 @@ export function NotesFeed() {
     return next;
   });
   const clearSelection = () => setSelectedKeys(new Set());
+
+  // Listing id → title, used to link a thread to an order when the order's stored
+  // itemNumber is a lineItemId (see findOrderForConvo). Cache-only lookup, so it
+  // costs one small request and never calls eBay.
+  const [listingTitles, setListingTitles] = useState<Record<string, string>>({});
+  useEffect(() => {
+    const ids = [...new Set(ebayMessages.map((m) => m.item_id).filter((id): id is string => !!id && /^\d+$/.test(id)))];
+    const missing = ids.filter((id) => !(id in listingTitles));
+    if (missing.length === 0) return;
+    let alive = true;
+    fetch(`/api/ebay/listing?itemIds=${missing.slice(0, 1000).join(',')}`)
+      .then((r) => r.json())
+      .then((d: { titles?: Record<string, string> }) => {
+        if (!alive || !d.titles) return;
+        // Record every id we asked for, so ones with no cached listing aren't refetched.
+        setListingTitles((prev) => {
+          const next = { ...prev };
+          for (const id of missing) next[id] = d.titles![id] ?? '';
+          return next;
+        });
+      })
+      .catch(() => {});
+    return () => { alive = false; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [ebayMessages]);
 
   // Keep the module-level cache in step with state so a remount restores the
   // exact list we last had (no blank + full re-fetch on re-entry).
@@ -565,6 +595,7 @@ export function NotesFeed() {
     const byRef = new Map<string, typeof orders[number]>();       // salesRecordNumber / orderNumber / id → order
     const byItemBuyer = new Map<string, typeof orders[number]>(); // `${itemNumber}::${buyer}` → order
     const byBuyer = new Map<string, typeof orders[number][]>();   // buyer → orders
+    const byBuyerTitle = new Map<string, typeof orders[number][]>(); // `${buyer}::${title}` → orders
     for (const o of orders) {
       if (o.deletedAt) continue;
       if (o.salesRecordNumber) byRef.set(o.salesRecordNumber, o);
@@ -573,8 +604,13 @@ export function NotesFeed() {
       const buyer = (o.buyerUsername || '').toLowerCase();
       if (o.itemNumber && buyer) byItemBuyer.set(`${o.itemNumber}::${buyer}`, o);
       if (buyer) { const arr = byBuyer.get(buyer); if (arr) arr.push(o); else byBuyer.set(buyer, [o]); }
+      const t = normTitle(o.itemTitle);
+      if (buyer && t) {
+        const k = `${buyer}::${t}`;
+        const arr = byBuyerTitle.get(k); if (arr) arr.push(o); else byBuyerTitle.set(k, [o]);
+      }
     }
-    return { byRef, byItemBuyer, byBuyer };
+    return { byRef, byItemBuyer, byBuyer, byBuyerTitle };
   }, [orders]);
 
   // Resolve the order a conversation is about — used for both the context bar and
@@ -585,7 +621,7 @@ export function NotesFeed() {
   // actually placed; a thread about a non-purchased listing has no linked order.
   const findOrderForConvo = useCallback((convo: Conversation | null) => {
     if (!convo) return null;
-    const { byRef, byItemBuyer, byBuyer } = orderIndex;
+    const { byRef, byItemBuyer, byBuyer, byBuyerTitle } = orderIndex;
     const oid = convo.order_id;
     if (convo.conversation_type === 'AMAZON') {
       return (oid && byRef.get(oid)) || null;
@@ -603,6 +639,21 @@ export function NotesFeed() {
       if (byItem) return byItem;
       // A direct order-id match (rare: some rows store a real order ref here).
       if (oid && byRef.has(oid)) return byRef.get(oid)!;
+      // Id match failed — but orders synced before the legacyItemId fix stored
+      // eBay's lineItemId in itemNumber, so they can never match a message's
+      // listing id. Bridge via the listing title: resolve the listing id to its
+      // title and look for an order this buyer placed for that same product.
+      // Still requires the buyer to have actually bought it, so it's as safe as
+      // the id match and stays correct under strict matching.
+      const listingTitle = normTitle(listingTitles[item]);
+      if (buyer && listingTitle) {
+        const byTitle = byBuyerTitle.get(`${buyer}::${listingTitle}`);
+        if (byTitle?.length) {
+          // Same buyer + same product: if they bought it more than once, the
+          // newest order is the best guess for what they're writing about.
+          return [...byTitle].sort((a, b) => (b.saleDate || '').localeCompare(a.saleDate || ''))[0];
+        }
+      }
       // Listing referenced but not purchased → genuine inquiry, no linked order.
       // Relaxed matching (Settings → Messaging) falls through to the buyer's
       // single order instead, which is looser but never leaves a thread bare.
@@ -616,7 +667,7 @@ export function NotesFeed() {
       if (buyerOrders?.length === 1) return buyerOrders[0];
     }
     return null;
-  }, [orderIndex, strictOrderMatching]);
+  }, [orderIndex, strictOrderMatching, listingTitles]);
 
   const relatedOrder = useMemo(() => findOrderForConvo(activeConvo), [findOrderForConvo, activeConvo]);
 

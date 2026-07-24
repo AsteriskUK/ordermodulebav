@@ -36,8 +36,27 @@ async function getAppToken(): Promise<string | null> {
 }
 
 // GET /api/ebay/listing?itemId=123 — cached listing image/title/price for a legacy item id.
+// GET /api/ebay/listing?itemIds=1,2,3 — cache-only bulk title lookup { titles: { id: title } }.
+//   Used by the inbox to bridge a message's listing id to an order: historical
+//   orders stored eBay's lineItemId instead of the legacy item id, so they can't
+//   be matched on id alone — the listing title links them instead.
 export async function GET(req: NextRequest) {
-  const itemId = new URL(req.url).searchParams.get('itemId');
+  const params = new URL(req.url).searchParams;
+
+  const itemIdsParam = params.get('itemIds');
+  if (itemIdsParam) {
+    const ids = [...new Set(itemIdsParam.split(',').map((s) => s.trim()).filter((s) => /^\d+$/.test(s)))].slice(0, 1000);
+    if (ids.length === 0) return NextResponse.json({ titles: {} });
+    const supabase = getSupabase();
+    const titles: Record<string, string> = {};
+    for (let i = 0; i < ids.length; i += 200) {
+      const { data } = await supabase.from('ebay_listings').select('item_id,title').in('item_id', ids.slice(i, i + 200));
+      for (const r of data ?? []) if (r.title) titles[r.item_id] = r.title;
+    }
+    return NextResponse.json({ titles });
+  }
+
+  const itemId = params.get('itemId');
   if (!itemId || !/^\d+$/.test(itemId)) return NextResponse.json({ error: 'valid itemId required' }, { status: 400 });
 
   const supabase = getSupabase();
