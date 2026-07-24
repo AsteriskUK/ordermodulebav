@@ -203,6 +203,61 @@ export async function fetchAmazonOrderItems(orderId: string): Promise<AmazonOrde
   return items;
 }
 
+/** A single order's current state — used to skip confirming an already-shipped order. */
+export async function getAmazonOrder(orderId: string): Promise<AmazonOrder | null> {
+  const creds = getAmazonCredentials()!;
+  const token = await getAmazonAccessToken();
+  const data = await spGet<{ payload?: AmazonOrder }>(`/orders/v0/orders/${orderId}`, {}, token, creds.endpoint);
+  return data.payload ?? null;
+}
+
+// Amazon accepts a fixed set of carrier codes; anything outside it must be sent as
+// a free-text carrierName instead (or the confirmation is rejected). DPD isn't in
+// the enum, so it goes through as a name; FedEx has a recognised code.
+function amazonCarrierField(carrier?: string): { carrierCode: string } | { carrierName: string } {
+  const c = (carrier || '').trim();
+  const KNOWN: Record<string, string> = { fedex: 'FedEx', ups: 'UPS', usps: 'USPS', dhl: 'DHL' };
+  const code = KNOWN[c.toLowerCase()];
+  return code ? { carrierCode: code } : { carrierName: c || 'Other' };
+}
+
+/**
+ * Confirm shipment of an Amazon (MFN) order — the Amazon equivalent of uploading
+ * tracking to eBay. Marks the order dispatched for the buyer with the carrier's
+ * tracking number. Returns { alreadyShipped } when Amazon already has it shipped.
+ */
+export async function confirmAmazonShipment(
+  orderId: string,
+  opts: { trackingNumber: string; carrier?: string; shipDate?: string },
+): Promise<{ shipped: true; alreadyShipped?: boolean }> {
+  const creds = getAmazonCredentials()!;
+  const token = await getAmazonAccessToken();
+
+  // Idempotent: if Amazon already shows the order shipped, don't confirm again.
+  const order = await getAmazonOrder(orderId);
+  if (order?.OrderStatus === 'Shipped') return { shipped: true, alreadyShipped: true };
+
+  const items = await fetchAmazonOrderItems(orderId);
+  const orderItems = items
+    .filter((it) => it.OrderItemId)
+    .map((it) => ({ orderItemId: it.OrderItemId!, quantity: num(it.QuantityOrdered) || 1 }));
+
+  const body = {
+    marketplaceId: creds.marketplaceId,
+    packageDetail: {
+      packageReferenceId: '1',
+      ...amazonCarrierField(opts.carrier),
+      trackingNumber: opts.trackingNumber,
+      shipDate: opts.shipDate || new Date().toISOString(),
+      ...(orderItems.length ? { orderItems } : {}),
+    },
+  };
+
+  // confirmShipment returns 204 No Content on success (spPost tolerates an empty body).
+  await spPost(`/orders/v0/orders/${orderId}/shipmentConfirmation`, body, token, creds.endpoint);
+  return { shipped: true };
+}
+
 // ─── Returns (Reports API) ────────────────────────────────────────────────────
 // Amazon has no live returns endpoint for merchant-fulfilled (MFN) orders like
 // eBay's Post-Order API. Returns come via the Reports API: request a report, poll

@@ -27,6 +27,7 @@ function generateUUID(): string {
 // per-marketplace setting below starts governing them automatically.
 const FULFILMENT_ENDPOINTS: Partial<Record<string, string>> = {
   ebay: '/api/ebay/orders/fulfillment',
+  amazon: '/api/amazon/orders/fulfillment',
 };
 
 const fulfilmentPushed = new Set<string>();
@@ -48,11 +49,11 @@ function pushMarketplaceFulfillment(order: Order): void {
   }).then(async (res) => {
     if (!res.ok) {
       fulfilmentPushed.delete(order.orderNumber); // allow a retry on the next shipped move
-      console.warn('[fulfilment] eBay tracking upload failed', order.salesRecordNumber, (await res.text()).slice(0, 200));
+      console.warn(`[fulfilment] ${platform} tracking upload failed`, order.salesRecordNumber, (await res.text()).slice(0, 200));
     }
   }).catch((e) => {
     fulfilmentPushed.delete(order.orderNumber);
-    console.warn('[fulfilment] eBay tracking upload error', order.salesRecordNumber, e);
+    console.warn(`[fulfilment] ${platform} tracking upload error`, order.salesRecordNumber, e);
   });
 }
 
