@@ -5,7 +5,8 @@ import { Order, OrderNote, OrderStatus, Batch, DeliveryCarrier, DeliveryType, Ap
 import { syncAttendance, syncLeaveRequest, syncLeaveBalance, syncOrder, syncBatch, syncUser, deleteUserFromSupabase, syncReturn, syncTicket, deleteTicketFromSupabase, syncMissingItem, syncInventoryPart, syncStockUnit, syncStockLevel, syncGoodsReceipt, syncBuild, softDeleteOrderInSupabase, hardDeleteOrderFromSupabase } from './supabase-store';
 import { buildSku, INVENTORY_CATEGORY_MAP } from './inventory-config';
 import { allPackItemsConfirmed } from './inventory-build';
-import { SettingsValues, resolveSetting, asBool } from './settings';
+import { SettingsValues, resolveSetting, asBool, asList } from './settings';
+import { getOrderPlatform } from './order-platform';
 
 // Generate proper UUID v4 for PostgreSQL compatibility
 function generateUUID(): string {
@@ -21,16 +22,26 @@ function generateUUID(): string {
 // via an order message (sent at label booking) — this is the moment it goes
 // live on eBay. Fire-and-forget; the endpoint is idempotent (skips orders that
 // already have a fulfilment), and a session-level set avoids repeat calls.
+// Marketplaces we can actually push a despatch to. eBay is the only channel with
+// a live fulfilment API today; add an entry here as others gain one and the
+// per-marketplace setting below starts governing them automatically.
+const FULFILMENT_ENDPOINTS: Partial<Record<string, string>> = {
+  ebay: '/api/ebay/orders/fulfillment',
+};
+
 const fulfilmentPushed = new Set<string>();
 function pushMarketplaceFulfillment(order: Order): void {
   if (typeof window === 'undefined') return;
-  if (!asBool(resolveSetting(useOrderStore.getState().appSettings, 'fulfilment.uploadOnShipped'))) return;
+  const settings = useOrderStore.getState().appSettings;
+  if (!asBool(resolveSetting(settings, 'fulfilment.uploadOnShipped'))) return;
   if (!order.trackingNumber || !order.orderNumber) return;
-  // eBay order ids look like 12-34567-89012 (or the batch says eBay).
-  const isEbay = /^\d{2}-\d{5}-\d{5}$/.test(order.orderNumber) || order.batchId?.startsWith('ebay-');
-  if (!isEbay || fulfilmentPushed.has(order.orderNumber)) return;
+  // Despatch is scoped per marketplace (Settings → Shipping & Labels).
+  const platform = getOrderPlatform(order);
+  if (!asList(resolveSetting(settings, 'fulfilment.marketplaces')).includes(platform)) return;
+  const endpoint = FULFILMENT_ENDPOINTS[platform];
+  if (!endpoint || fulfilmentPushed.has(order.orderNumber)) return;
   fulfilmentPushed.add(order.orderNumber);
-  fetch('/api/ebay/orders/fulfillment', {
+  fetch(endpoint, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ orderNumber: order.orderNumber, trackingNumber: order.trackingNumber, carrier: order.deliveryCarrier }),

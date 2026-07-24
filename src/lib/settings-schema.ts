@@ -86,6 +86,20 @@ const CARRIER_OPTIONS: SettingOption[] = [
   { value: 'Other', label: 'Other' },
 ];
 
+// Sales channels an order can arrive from. Used to scope automatic despatch,
+// label booking and invoicing per marketplace — e.g. book labels for eBay but
+// not Amazon while an Amazon integration is still being proved out.
+// Values match Order.batchId's platform prefix / ReturnRecord['platform'].
+const MARKETPLACE_OPTIONS: SettingOption[] = [
+  { value: 'ebay', label: 'eBay' },
+  { value: 'amazon', label: 'Amazon' },
+  { value: 'backmarket', label: 'Back Market' },
+  { value: 'onbuy', label: 'OnBuy' },
+  { value: 'temu', label: 'Temu' },
+  { value: 'manual', label: 'Manual / imported' },
+];
+const ALL_MARKETPLACES = MARKETPLACE_OPTIONS.map((m) => m.value);
+
 const DPD_SERVICE_OPTIONS: SettingOption[] = [
   { value: 'next_day', label: 'Next Day' },
   { value: 'by_1030', label: 'By 10:30' },
@@ -256,6 +270,9 @@ export const SETTINGS_SCHEMA: SettingsGroup[] = [
           { key: 'autobook.carriers', type: 'multiselect', default: ['DPD', 'FedEx'],
             label: 'Book with', options: CARRIER_OPTIONS.filter((c) => c.value === 'DPD' || c.value === 'FedEx'),
             help: 'Only carriers with a live API integration can be auto-booked.' },
+          { key: 'autobook.marketplaces', type: 'multiselect', default: ALL_MARKETPLACES,
+            label: 'Book labels for', options: MARKETPLACE_OPTIONS,
+            help: 'Only orders from these marketplaces get a label booked automatically. Clear a marketplace to book its labels by hand.' },
           { key: 'autobook.notifyBuyer', type: 'boolean', default: false,
             label: 'Send the tracking number to the buyer',
             help: 'Posts an order message when the label is booked. This is NOT a despatch confirmation. OFF by default — a sandbox tracking number sent to a real buyer cannot be taken back.' },
@@ -272,6 +289,9 @@ export const SETTINGS_SCHEMA: SettingsGroup[] = [
           { key: 'fulfilment.uploadOnShipped', type: 'boolean', default: false,
             label: 'Upload tracking when order ships',
             help: 'Marks the order despatched on the marketplace at the moment it leaves the warehouse. OFF by default — uploading a sandbox tracking number to eBay affects real buyers and seller metrics.' },
+          { key: 'fulfilment.marketplaces', type: 'multiselect', default: ALL_MARKETPLACES,
+            label: 'Despatch to', options: MARKETPLACE_OPTIONS,
+            help: 'Only orders from these marketplaces are marked despatched automatically. Useful while one channel is still being proved out.' },
         ],
       },
       {
@@ -308,6 +328,9 @@ export const SETTINGS_SCHEMA: SettingsGroup[] = [
         fields: [
           { key: 'print.autoInvoiceOnPull', type: 'boolean', default: true,
             label: 'Print invoices for auto-pulled orders' },
+          { key: 'print.invoiceMarketplaces', type: 'multiselect', default: ALL_MARKETPLACES,
+            label: 'Print invoices for', options: MARKETPLACE_OPTIONS,
+            help: 'Only auto-pulled orders from these marketplaces get an invoice printed.' },
           { key: 'print.combineLabelAndInvoice', type: 'boolean', default: true,
             label: 'Offer combined label + invoice at packing',
             help: 'Adds the one-tap "Print Label + Invoice" action. Separate buttons remain available either way.' },

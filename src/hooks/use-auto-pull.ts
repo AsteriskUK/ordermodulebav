@@ -4,6 +4,7 @@ import { useEffect, useRef } from 'react';
 import { useOrderStore } from '@/lib/store';
 import { supabase, isSupabaseConfigured } from '@/lib/supabase-client';
 import { Order, Batch } from '@/lib/types';
+import { getOrderPlatform } from '@/lib/order-utils';
 import { fetchPrinterConfig, printInvoicesFor } from '@/lib/print-agent';
 import { autoBookLabels } from '@/lib/auto-book';
 import { useSettingBool, useSettingNumber, useSettingList } from '@/hooks/use-settings';
@@ -45,6 +46,7 @@ export function useAutoPull() {
   const windowDays = useSettingNumber('autopull.windowDays');
   const sources = useSettingList('autopull.sources');
   const autoInvoiceEnabled = useSettingBool('print.autoInvoiceOnPull');
+  const invoiceMarketplaces = useSettingList('print.invoiceMarketplaces');
 
   useEffect(() => {
     if (!isSupabaseConfigured() || !enabled) return;
@@ -77,9 +79,11 @@ export function useAutoPull() {
           // Auto-print invoices for the new orders (if a printer is configured).
           try {
             const cfg = await fetchPrinterConfig();
-            if (autoInvoiceEnabled && cfg.autoInvoice) {
-              const printed = await printInvoicesFor(fresh, cfg);
-              if (printed) toast.success(`Printing ${fresh.length} invoice${fresh.length !== 1 ? 's' : ''}`, { icon: '🖨️' });
+            // Invoicing is scoped per marketplace (Settings → Printing & Documents).
+            const toInvoice = fresh.filter((o) => invoiceMarketplaces.includes(getOrderPlatform(o)));
+            if (autoInvoiceEnabled && cfg.autoInvoice && toInvoice.length > 0) {
+              const printed = await printInvoicesFor(toInvoice, cfg);
+              if (printed) toast.success(`Printing ${toInvoice.length} invoice${toInvoice.length !== 1 ? 's' : ''}`, { icon: '🖨️' });
             }
           } catch (e) {
             console.error('[auto-pull] invoice print failed', e);
@@ -95,5 +99,5 @@ export function useAutoPull() {
     maybePull();                                    // check on mount — pulls if due
     const timer = setInterval(maybePull, CHECK_INTERVAL_MS);
     return () => { cancelled = true; clearInterval(timer); };
-  }, [addOrders, enabled, intervalMinutes, windowDays, sources, autoInvoiceEnabled]);
+  }, [addOrders, enabled, intervalMinutes, windowDays, sources, autoInvoiceEnabled, invoiceMarketplaces]);
 }

@@ -21,11 +21,14 @@ interface ShipResult {
   labelHtmls?: string[];
 }
 
-function isBookable(o: Order, carriers: string[]): boolean {
+function isBookable(o: Order, carriers: string[], marketplaces: string[]): boolean {
   return !o.trackingNumber
     && !(o.labelData?.length)
     && o.deliveryType !== 'collection'
     && carriers.includes(o.deliveryCarrier)
+    // Booking is scoped per marketplace (Settings → Shipping & Labels), so a
+    // channel still being proved out can be booked by hand instead.
+    && marketplaces.includes(getOrderPlatform(o))
     && !!o.postToAddress1 && !!o.postToPostcode;
 }
 
@@ -35,8 +38,9 @@ export async function autoBookLabels(orders: Order[]): Promise<number> {
   if (!asBool(resolveSetting(settings, 'autobook.enabled'))) return 0;
 
   const carriers = asList(resolveSetting(settings, 'autobook.carriers'));
+  const marketplaces = asList(resolveSetting(settings, 'autobook.marketplaces'));
   const dpdService = asString(resolveSetting(settings, 'shipping.defaultDpdService'));
-  const bookable = orders.filter((o) => isBookable(o, carriers));
+  const bookable = orders.filter((o) => isBookable(o, carriers, marketplaces));
   if (bookable.length === 0) return 0;
 
   const { updateOrderTracking, saveOrderLabels } = useOrderStore.getState();
