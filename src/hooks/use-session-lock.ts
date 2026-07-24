@@ -14,15 +14,34 @@ import { toast } from 'sonner';
 const HEARTBEAT_MS = 30_000;
 const SESSION_KEY = 'app_session_id';
 
-/** Stable per-tab session id, kept in sessionStorage so a reload keeps the claim. */
+/** Stable per-BROWSER session id, kept in localStorage.
+ *
+ *  This must NOT be sessionStorage: that is scoped per tab, so opening the app in
+ *  a second tab would mint a fresh id, claim the row, and kick the first tab out
+ *  (and the second tab would itself be signed out on its first heartbeat, forcing
+ *  a re-login). localStorage is shared by every tab of the same browser, so tabs
+ *  share one claim — while a different device/browser still has its own id, which
+ *  is what the "one active login per user" lock is actually there to enforce.
+ *
+ *  Falls back to an in-memory id if storage is unavailable (private mode, etc.).
+ */
+let memorySessionId = '';
 export function getSessionId(): string {
   if (typeof window === 'undefined') return '';
-  let id = sessionStorage.getItem(SESSION_KEY);
-  if (!id) {
-    id = `${Math.random().toString(36).slice(2)}${Date.now().toString(36)}`;
-    sessionStorage.setItem(SESSION_KEY, id);
+  try {
+    let id = localStorage.getItem(SESSION_KEY);
+    if (!id) {
+      // Adopt an id this tab already had under the old per-tab key so the switch
+      // to localStorage doesn't force one extra re-claim on existing sessions.
+      id = sessionStorage.getItem(SESSION_KEY)
+        ?? `${Math.random().toString(36).slice(2)}${Date.now().toString(36)}`;
+      localStorage.setItem(SESSION_KEY, id);
+    }
+    return id;
+  } catch {
+    if (!memorySessionId) memorySessionId = `${Math.random().toString(36).slice(2)}${Date.now().toString(36)}`;
+    return memorySessionId;
   }
-  return id;
 }
 
 /** Coarse device hint for the "already signed in on…" message. No fingerprinting. */
