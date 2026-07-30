@@ -153,3 +153,20 @@
    Deliberately narrow in scope — it must not squash form controls. */
 html[data-density='compact'] table :is(th, td) { padding-top: .3rem; padding-bottom: .3rem; }
 html[data-density='compact'] .density-row { padding-top: .3rem; padding-bottom: .3rem; }
+
+/* ── Read-only viewer lockdown ─────────────────────────────────────────────────
+   When a 'viewer' is signed in, the guard adds `ro-mode` to <body>. Page content
+   (.ro-content = the <main>) and any portalled dialog become non-interactive, so
+   a viewer can look at every screen but cannot click a button, type in a field,
+   or change a control. The sidebar (navigation) and header (sign-out) are outside
+   .ro-content and not dialogs, so they keep working — as does anything marked
+   [data-ro-allow] (e.g. a close button). This is the visible half of read-only;
+   the store/Supabase/API write-guards are the enforcing half. */
+body.ro-mode .ro-content :is(button, input, select, textarea, [role="button"], [role="tab"], [role="switch"], [role="checkbox"], [contenteditable="true"]):not([data-ro-allow]),
+body.ro-mode [role="dialog"] :is(button, input, select, textarea, [role="button"], [role="tab"], [role="switch"], [role="checkbox"], [contenteditable="true"]):not([data-ro-allow]) {
+  pointer-events: none !important;
+  opacity: 0.55;
+  cursor: not-allowed !important;
+}
+/* Keep controls readable (not double-dimmed) inside already-muted areas. */
+body.ro-mode .ro-content :is(button, input, select, textarea):disabled { opacity: 0.55; }

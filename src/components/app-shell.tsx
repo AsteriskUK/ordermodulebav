@@ -369,7 +369,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
           </div>
         </header>
         {openTicket && <TicketDialog ticket={openTicket} onClose={() => setOpenTicket(null)} />}
-        <main className="flex-1 bg-slate-50 overflow-auto">
+        <main className={`flex-1 bg-slate-50 overflow-auto${readOnly ? ' ro-content' : ''}`}>
           <div className="p-6">
             {children}
           </div>

@@ -62,7 +62,14 @@ export function useInstallReadOnlyGuard(): void {
   readOnlyActive = readOnly;
   setSupabaseReadOnly(readOnly);
   setStoreReadOnly(readOnly);
-  useEffect(() => { readOnlyActive = readOnly; setSupabaseReadOnly(readOnly); setStoreReadOnly(readOnly); }, [readOnly]);
+  useEffect(() => {
+    readOnlyActive = readOnly;
+    setSupabaseReadOnly(readOnly);
+    setStoreReadOnly(readOnly);
+    // Drives the CSS lockdown (globals.css `body.ro-mode`) so page content and
+    // dialogs become non-interactive — the visible half of read-only.
+    if (typeof document !== 'undefined') document.body.classList.toggle('ro-mode', readOnly);
+  }, [readOnly]);
 
   useEffect(() => {
     if (installed || typeof window === 'undefined') return;
