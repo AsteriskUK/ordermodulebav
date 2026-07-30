@@ -64,8 +64,9 @@ export interface AppUser {
   email?: string;
   role: UserRole;
   roles: UserRole[];
-  /** Primary department (kept for backwards compat) */
-  department: Department;
+  /** Primary department (kept for backwards compat). Optional: read-only viewers
+   *  have no department (it would be a meaningless, misleading label on them). */
+  department?: Department;
   /** All departments this user belongs to — used for queue filtering */
   departments: Department[];
   pin?: string;

@@ -169,7 +169,7 @@ export function Reports() {
     if (tab === 'revenue') {
       csv = ['Date,Orders,Revenue', ...revenueByDate.map(([d, v]) => `${d},${v.count},${v.revenue.toFixed(2)}`)].join('\n');
     } else if (tab === 'productivity') {
-      csv = ['User,Department,Total Actions', ...productivityData.map((p) => `${p.user.name},${p.user.department},${p.total}`)].join('\n');
+      csv = ['User,Department,Total Actions', ...productivityData.map((p) => `${p.user.name},${p.user.department ?? ""},${p.total}`)].join('\n');
     } else if (tab === 'categories') {
       csv = ['Category,Orders,Revenue', ...categoryData.map(([c, v]) => `"${c}",${v.count},${v.revenue.toFixed(2)}`)].join('\n');
     } else if (tab === 'returns') {
@@ -322,7 +322,7 @@ export function Reports() {
                 {productivityData.map(({ user, total, byAction, lastActive }) => (
                   <TableRow key={user.id}>
                     <TableCell className="text-xs font-medium">{user.name}</TableCell>
-                    <TableCell><Badge variant="outline" className="text-xs capitalize">{user.department}</Badge></TableCell>
+                    <TableCell><Badge variant="outline" className="text-xs capitalize">{user.department ?? "—"}</Badge></TableCell>
                     <TableCell className="text-xs font-bold">{total}</TableCell>
                     {(['assembling', 'checking', 'packing', 'packed', 'shipped', 'held'] as OrderStatus[]).map((s) => (
                       <TableCell key={s} className="text-xs">{byAction[s] || 0}</TableCell>
@@ -492,7 +492,7 @@ export function Reports() {
                 <CardHeader className="pb-2">
                   <div className="flex items-center justify-between">
                     <CardTitle className="text-sm">{user.name}
-                      <Badge variant="outline" className="ml-2 text-xs capitalize">{user.department}</Badge>
+                      <Badge variant="outline" className="ml-2 text-xs capitalize">{user.department ?? "—"}</Badge>
                     </CardTitle>
                     <Button size="sm" variant="outline" className="h-7 text-xs"
                       onClick={() => { setEditTargetUserId(editTargetUserId === user.id ? null : user.id); }}>

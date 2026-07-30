@@ -21,7 +21,7 @@ export function MyTicketsWidget({ limit = 6 }: { limit?: number }) {
   const role = currentUser?.role;
   const seesAll = role === 'admin' || role === 'manager' || role === 'comms';
   const userDepts = useMemo<Department[]>(() => (
-    currentUser ? (currentUser.departments?.length ? currentUser.departments : [currentUser.department]) : []
+    currentUser ? (currentUser.departments?.length ? currentUser.departments : currentUser.department ? [currentUser.department] : []) : []
   ), [currentUser]);
 
   const relevant = useMemo(() => {

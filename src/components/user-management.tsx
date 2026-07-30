@@ -131,7 +131,7 @@ export function UserManagement() {
       name: editName.trim(),
       role: editRole,
       roles: [editRole],
-      department: editDepts[0] ?? 'management',
+      department: editRole === 'viewer' ? undefined : (editDepts[0] ?? 'management'),
       departments: editRole === 'viewer' ? [] : editDepts,
       pin: editPin || undefined,
     });
@@ -148,7 +148,7 @@ export function UserManagement() {
       email: newEmail.trim() || undefined,
       role: newRole,
       roles: [newRole],
-      department: newDepts[0] ?? 'management',
+      department: newRole === 'viewer' ? undefined : (newDepts[0] ?? 'management'),
       departments: newRole === 'viewer' ? [] : newDepts,
       pin: newPin || undefined,
     });

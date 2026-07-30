@@ -21,7 +21,7 @@ export function TicketsPanel() {
   const role = currentUser?.role;
   const canCreate = role === 'admin' || role === 'manager' || role === 'comms';
   const userDepts = useMemo<Department[]>(() => (
-    currentUser ? (currentUser.departments?.length ? currentUser.departments : [currentUser.department]) : []
+    currentUser ? (currentUser.departments?.length ? currentUser.departments : currentUser.department ? [currentUser.department] : []) : []
   ), [currentUser]);
   const seesAll = role === 'admin' || role === 'manager' || role === 'comms';
 
