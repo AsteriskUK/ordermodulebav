@@ -6,7 +6,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/u
 import { toast } from 'sonner';
 import { Printer, Package, CheckCircle, FileText } from 'lucide-react';
 import { useOrderStore } from '@/lib/store';
-import { fetchPrinterConfig, printLabel, printerForCarrier, printInvoicesFor } from '@/lib/print-agent';
+import { fetchPrinterConfig, printLabel, printerForCarrier, printInvoicesFor, isZplBase64 } from '@/lib/print-agent';
 import { buildInvoicesHtml, printHtml } from '@/lib/order-utils';
 import { useEffect, useState } from 'react';
 import { useSettingBool, useSettingNumber } from '@/hooks/use-settings';
@@ -63,9 +63,24 @@ export function LabelPrintDialog({ order, onClose }: Props) {
 
   function printLabels() {
     const labels = order.labelData ?? [];
-    if (!labels.length) { toast.error('No label PDF available'); return; }
+    if (!labels.length) { toast.error('No label available'); return; }
     labels.forEach((data, i) => {
       const isHtml = data.trimStart().startsWith('<');
+      if (isZplBase64(data)) {
+        // ZPL is a raw thermal-printer format the browser can't render. The real
+        // path is the print agent → thermal printer (which prints it raw). As a
+        // browser fallback, download the .zpl so it can be sent to the printer
+        // manually — no label data (incl. the buyer address) leaves the machine.
+        const bytes = Uint8Array.from(atob(data), (c) => c.charCodeAt(0));
+        const url = URL.createObjectURL(new Blob([bytes], { type: 'application/octet-stream' }));
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `label-${order.salesRecordNumber}-${i + 1}.zpl`;
+        a.click();
+        URL.revokeObjectURL(url);
+        toast.info('Thermal (ZPL) label downloaded — print it on the FedEx thermal printer, or set up the print agent to send it automatically.');
+        return;
+      }
       if (isHtml) {
         const win = window.open('', `_label_${i}`);
         if (!win) { toast.error('Pop-up blocked — allow pop-ups to print'); return; }

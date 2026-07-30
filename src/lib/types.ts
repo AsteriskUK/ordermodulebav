@@ -485,7 +485,7 @@ export interface Order {
   // Printed label storage
   labelPrintedAt?: string;
   labelCarrier?: string;
-  labelData?: string[]; // base64 PDF(s)
+  labelData?: string[]; // base64 label(s): PDF, or ZPL for FedEx thermal
   // Metadata
   importedAt: string;
   batchId: string;

@@ -56,7 +56,19 @@ export async function listAgentPrinters(agentUrl: string, token = ''): Promise<s
   return data.printers ?? [];
 }
 
-interface PrintJob { printer: string; html?: string; pdfBase64?: string; copies?: number; jobName?: string }
+interface PrintJob { printer: string; html?: string; pdfBase64?: string; zplBase64?: string; copies?: number; jobName?: string }
+
+/** True when a base64 payload decodes to ZPL (starts with the ^XA start command).
+ *  FedEx thermal labels come back as base64 ZPL and must be printed raw. */
+export function isZplBase64(base64: string): boolean {
+  try {
+    // Only need the first few bytes; decode a short prefix to keep it cheap.
+    const head = atob(base64.slice(0, 24));
+    return head.replace(/^[\s\0]+/, '').startsWith('^XA');
+  } catch {
+    return false;
+  }
+}
 
 async function sendPrintJob(cfg: PrinterConfig, job: PrintJob): Promise<void> {
   const res = await fetch(`${base(cfg.agentUrl)}/print`, { method: 'POST', headers: headers(cfg.token), body: JSON.stringify(job) });
@@ -78,13 +90,18 @@ export function printerForCarrier(cfg: PrinterConfig, carrier: string): string {
   return '';
 }
 
-/** Route a carrier label to its printer. `label` is a base64 PDF or raw HTML.
+/** Route a carrier label to its printer. `label` is a base64 PDF, base64 ZPL
+ *  (thermal — printed raw) or raw HTML.
  *  Returns false when no printer is mapped for the carrier / agent not set. */
 export async function printLabel(carrier: string, label: string, cfg?: PrinterConfig, jobName = 'Label'): Promise<boolean> {
   const c = cfg ?? await fetchPrinterConfig();
   const printer = printerForCarrier(c, carrier);
   if (!c.agentUrl || !printer) return false;
-  const isHtml = label.trimStart().startsWith('<');
-  await sendPrintJob(c, isHtml ? { printer, html: label, jobName } : { printer, pdfBase64: label, jobName });
+  const job: PrintJob = label.trimStart().startsWith('<')
+    ? { printer, html: label, jobName }
+    : isZplBase64(label)
+    ? { printer, zplBase64: label, jobName }   // FedEx thermal ZPL → print raw
+    : { printer, pdfBase64: label, jobName };
+  await sendPrintJob(c, job);
   return true;
 }

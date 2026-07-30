@@ -4,10 +4,12 @@
 //
 //   GET  /health            → { ok, platform }
 //   GET  /printers          → { printers: string[] }
-//   POST /print             → { printer, copies?, jobName?, pdfBase64? | html? }
+//   POST /print             → { printer, copies?, jobName?, pdfBase64? | html? | zplBase64? }
 //
 // Label PDFs are printed directly; invoice HTML is rendered to PDF via Puppeteer
-// (only required for HTML jobs — run `npm install` here to enable it).
+// (only required for HTML jobs — run `npm install` here to enable it). ZPL
+// (zplBase64) is sent to the printer RAW — no rendering or conversion — which is
+// what FedEx thermal-label certification requires.
 //
 // Config via env: PRINT_AGENT_PORT (default 17777), PRINT_AGENT_TOKEN (optional
 // shared secret), SUMATRA_PATH (Windows silent-print helper).
@@ -83,6 +85,27 @@ function spool(file, printer, copies) {
   });
 }
 
+// Send a file to the printer RAW (no driver rendering) — used for ZPL so the
+// thermal printer receives the exact ZPL buffer FedEx generated. On CUPS this is
+// `lp -o raw`; on Windows raw spooling is copied straight to the printer share.
+function spoolRaw(file, printer, copies) {
+  return new Promise((resolve, reject) => {
+    if (isWin) {
+      // COPY /B sends the bytes untouched to a shared printer (\\host\ShareName).
+      const share = printer.startsWith('\\\\') ? printer : `\\\\${process.env.COMPUTERNAME || 'localhost'}\\${printer}`;
+      const n = Math.max(1, copies || 1);
+      const cmd = Array.from({ length: n }, () => `COPY /B "${file}" "${share}"`).join(' & ');
+      execFile('cmd', ['/c', cmd], (err, _o, stderr) =>
+        err ? reject(new Error(`Windows raw printing failed (printer must be shared as "${printer}"): ${stderr || err.message}`)) : resolve()
+      );
+    } else {
+      execFile('lp', ['-d', printer, '-o', 'raw', '-n', String(copies || 1), file], (err, _o, stderr) =>
+        err ? reject(new Error(stderr || err.message)) : resolve()
+      );
+    }
+  });
+}
+
 const server = http.createServer((req, res) => {
   if (req.method === 'OPTIONS') { cors(res); res.writeHead(204); return res.end(); }
   if (TOKEN && req.headers['authorization'] !== `Bearer ${TOKEN}`) return json(res, 401, { error: 'unauthorized' });
@@ -96,15 +119,25 @@ const server = http.createServer((req, res) => {
     req.on('data', (c) => { body += c; if (body.length > 50 * 1024 * 1024) req.destroy(); });
     req.on('end', async () => {
       try {
-        const { printer, html, pdfBase64, copies, jobName } = JSON.parse(body || '{}');
+        const { printer, html, pdfBase64, zplBase64, copies, jobName } = JSON.parse(body || '{}');
         if (!printer) return json(res, 400, { error: 'printer required' });
+        const safeName = String(jobName || 'job').replace(/[^a-z0-9]+/gi, '_');
+        const dir = mkdtempSync(path.join(tmpdir(), 'printjob-'));
+
+        // Raw ZPL — write the exact bytes and send them to the printer untouched.
+        if (zplBase64) {
+          const file = path.join(dir, `${safeName}.zpl`);
+          writeFileSync(file, Buffer.from(zplBase64, 'base64'));
+          await spoolRaw(file, printer, copies);
+          return json(res, 200, { ok: true });
+        }
+
         let pdf;
         if (html) pdf = await htmlToPdf(html);
         else if (pdfBase64) pdf = Buffer.from(pdfBase64, 'base64');
-        else return json(res, 400, { error: 'html or pdfBase64 required' });
+        else return json(res, 400, { error: 'html, pdfBase64 or zplBase64 required' });
 
-        const dir = mkdtempSync(path.join(tmpdir(), 'printjob-'));
-        const file = path.join(dir, `${String(jobName || 'job').replace(/[^a-z0-9]+/gi, '_')}.pdf`);
+        const file = path.join(dir, `${safeName}.pdf`);
         writeFileSync(file, pdf);
         await spool(file, printer, copies);
         json(res, 200, { ok: true });

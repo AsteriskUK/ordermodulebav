@@ -42,6 +42,20 @@ function defaultParcelWeightKg(): number {
   return Number.isFinite(raw) && raw > 0 ? raw : 1;
 }
 
+// FedEx thermal-label certification requires raw ZPL (ZPLII) printed directly —
+// PDF/PNG are rejected (they scale and blur the barcodes). The stock type must
+// match the physical label in the printer; FedEx specified STOCK_4X675_TRAILING_
+// DOC_TAB. Both are env-overridable without a code change.
+type LabelImageType = FedExShipmentRequest['labelSpecification']['imageType'];
+type LabelStockType = FedExShipmentRequest['labelSpecification']['labelStockType'];
+function labelImageType(): LabelImageType {
+  const v = (process.env.FEDEX_LABEL_IMAGE_TYPE || 'ZPLII').trim().toUpperCase();
+  return (['PDF', 'ZPLII', 'PNG', 'EPL2'].includes(v) ? v : 'ZPLII') as LabelImageType;
+}
+function labelStockType(): LabelStockType {
+  return (process.env.FEDEX_LABEL_STOCK_TYPE || 'STOCK_4X675_TRAILING_DOC_TAB').trim() as LabelStockType;
+}
+
 function sanitizePostcode(postcode: string): string {
   return (postcode || '').trim().toUpperCase();
 }
@@ -143,8 +157,8 @@ export function buildFedExShipmentPayload(order: Order, shipDate: string): FedEx
     },
     labelSpecification: {
       labelFormatType: 'COMMON2D',
-      imageType: 'PDF',
-      labelStockType: 'PAPER_4X6',
+      imageType: labelImageType(),
+      labelStockType: labelStockType(),
     },
     requestedPackageLineItems: Array.from({ length: numberOfBoxes }, () => ({
       weight: { units: 'KG' as const, value: defaultParcelWeightKg() },

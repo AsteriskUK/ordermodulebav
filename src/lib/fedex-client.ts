@@ -117,7 +117,9 @@ export interface FedExShipmentRequest {
   };
   labelSpecification: {
     labelFormatType: 'COMMON2D';
-    imageType: 'PDF';
+    // ZPLII = raw ZPL for direct thermal printing (required for FedEx thermal
+    // label certification — PDF/PNG are rejected as they scale/distort barcodes).
+    imageType: 'PDF' | 'ZPLII' | 'PNG' | 'EPL2';
     labelStockType:
       | 'PAPER_4X6'
       | 'PAPER_4X8.25'
@@ -125,7 +127,15 @@ export interface FedExShipmentRequest {
       | 'PAPER_4X11'
       | 'PAPER_8.5X11_BOTTOM_HALF_LABEL'
       | 'PAPER_8.5X11_TOP_HALF_LABEL'
-      | 'PAPER_85X11_TOP_HALF_LABEL';
+      | 'PAPER_85X11_TOP_HALF_LABEL'
+      // Thermal stock (4x6.75 with a doc tab is what FedEx certification expects).
+      | 'STOCK_4X6'
+      | 'STOCK_4X675_LEADING_DOC_TAB'
+      | 'STOCK_4X675_TRAILING_DOC_TAB'
+      | 'STOCK_4X8'
+      | 'STOCK_4X9_LEADING_DOC_TAB'
+      | 'STOCK_4X9_TRAILING_DOC_TAB'
+      | 'STOCK_4X9';
   };
   requestedPackageLineItems: {
     weight: { units: 'KG'; value: number };
