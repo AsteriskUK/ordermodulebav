@@ -56,7 +56,7 @@ export async function listAgentPrinters(agentUrl: string, token = ''): Promise<s
   return data.printers ?? [];
 }
 
-interface PrintJob { printer: string; html?: string; pdfBase64?: string; zplBase64?: string; copies?: number; jobName?: string }
+interface PrintJob { printer: string; html?: string; pdfBase64?: string; zplBase64?: string; copies?: number; jobName?: string; isLabel?: boolean }
 
 /** True when a base64 payload decodes to ZPL (starts with the ^XA start command).
  *  FedEx thermal labels come back as base64 ZPL and must be printed raw. */
@@ -98,10 +98,10 @@ export async function printLabel(carrier: string, label: string, cfg?: PrinterCo
   const printer = printerForCarrier(c, carrier);
   if (!c.agentUrl || !printer) return false;
   const job: PrintJob = label.trimStart().startsWith('<')
-    ? { printer, html: label, jobName }
+    ? { printer, html: label, jobName, isLabel: true }
     : isZplBase64(label)
-    ? { printer, zplBase64: label, jobName }   // FedEx thermal ZPL → print raw
-    : { printer, pdfBase64: label, jobName };
+    ? { printer, zplBase64: label, jobName }   // FedEx thermal ZPL → print raw (size is in the ZPL)
+    : { printer, pdfBase64: label, jobName, isLabel: true };
   await sendPrintJob(c, job);
   return true;
 }

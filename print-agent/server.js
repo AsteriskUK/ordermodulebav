@@ -24,6 +24,13 @@ const PORT = process.env.PRINT_AGENT_PORT || 17777;
 const TOKEN = process.env.PRINT_AGENT_TOKEN || '';
 const isWin = process.platform === 'win32';
 
+// Media size for LABEL (PDF/HTML) jobs, e.g. "Custom.4x6in" or "w288h432".
+// Without it, a small label sent to a queue whose default is A4 prints in the
+// top-left corner of an A4 sheet. Set this to your label printer's media so the
+// label maps 1:1. Invoices are unaffected. ZPL labels ignore it (size is in the
+// ZPL). Empty by default = no change.
+const LABEL_MEDIA = (process.env.PRINT_AGENT_LABEL_MEDIA || '').trim();
+
 function cors(res) {
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'GET,POST,OPTIONS');
@@ -69,16 +76,26 @@ async function htmlToPdf(html) {
   }
 }
 
-function spool(file, printer, copies) {
+function spool(file, printer, copies, media) {
   return new Promise((resolve, reject) => {
     if (isWin) {
       // Silent Windows printing needs a helper; SumatraPDF is the usual choice.
+      // -print-settings "fit" scales the doc to the printer's selected paper so a
+      // label isn't stranded in the corner of a larger sheet.
       const sumatra = process.env.SUMATRA_PATH || 'SumatraPDF.exe';
-      execFile(sumatra, ['-print-to', printer, '-silent', file], (err) =>
+      const args = ['-print-to', printer, '-silent'];
+      if (media) args.push('-print-settings', 'fit');
+      args.push(file);
+      execFile(sumatra, args, (err) =>
         err ? reject(new Error(`Windows printing requires SumatraPDF (set SUMATRA_PATH): ${err.message}`)) : resolve()
       );
     } else {
-      execFile('lp', ['-d', printer, '-n', String(copies || 1), file], (err, _o, stderr) =>
+      // -o media forces the label paper size (else CUPS uses the queue default,
+      // often A4); -o fit-to-page maps the doc onto it 1:1.
+      const args = ['-d', printer, '-n', String(copies || 1)];
+      if (media) args.push('-o', `media=${media}`, '-o', 'fit-to-page');
+      args.push(file);
+      execFile('lp', args, (err, _o, stderr) =>
         err ? reject(new Error(stderr || err.message)) : resolve()
       );
     }
@@ -119,7 +136,7 @@ const server = http.createServer((req, res) => {
     req.on('data', (c) => { body += c; if (body.length > 50 * 1024 * 1024) req.destroy(); });
     req.on('end', async () => {
       try {
-        const { printer, html, pdfBase64, zplBase64, copies, jobName } = JSON.parse(body || '{}');
+        const { printer, html, pdfBase64, zplBase64, copies, jobName, isLabel } = JSON.parse(body || '{}');
         if (!printer) return json(res, 400, { error: 'printer required' });
         const safeName = String(jobName || 'job').replace(/[^a-z0-9]+/gi, '_');
         const dir = mkdtempSync(path.join(tmpdir(), 'printjob-'));
@@ -139,7 +156,8 @@ const server = http.createServer((req, res) => {
 
         const file = path.join(dir, `${safeName}.pdf`);
         writeFileSync(file, pdf);
-        await spool(file, printer, copies);
+        // Force the label media only for label jobs — invoices keep the queue default (A4).
+        await spool(file, printer, copies, isLabel ? LABEL_MEDIA : '');
         json(res, 200, { ok: true });
       } catch (e) {
         console.error('[print-agent] print error:', e.message || e);

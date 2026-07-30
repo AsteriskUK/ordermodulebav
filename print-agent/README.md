@@ -46,6 +46,13 @@ Scheduler "at logon"; macOS/Linux: a `launchd`/`systemd` unit or `pm2`).
 - `PRINT_AGENT_TOKEN` — optional shared secret; if set, requests must send
   `Authorization: Bearer <token>` (also set the same token in Settings → Printers).
 - `SUMATRA_PATH` — Windows only, path to `SumatraPDF.exe`.
+- `PRINT_AGENT_LABEL_MEDIA` — media size for **label** jobs (PDF/HTML), e.g.
+  `Custom.4x6in` or `w288h432` (points). Set this to your label printer's paper
+  so a 4×6 label doesn't print in the top-left corner of an A4 sheet. Invoices
+  are unaffected; ZPL labels ignore it (size is in the ZPL). Empty = no change.
+  Alternatively, set the queue default once: `lpadmin -p <printer> -o media-default=Custom.4x6in`.
 
 Invoice printing (HTML jobs) requires `npm install` (Puppeteer). Label printing
-(PDF jobs) works without it.
+(PDF/ZPL jobs) works without it. FedEx thermal labels are raw ZPL — printed
+directly (`lp -o raw`); make sure the label queue is a **raw** queue for a Zebra
+printer, or the ZPL will be rasterised.
