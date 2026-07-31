@@ -193,9 +193,9 @@ export async function fetchOrders(): Promise<Order[]> {
     maxEstimatedDeliveryDate: o.metadata?.max_estimated_delivery_date,
     importedAt: o.imported_at,
     returnId: o.return_id,
-    labelPrintedAt: o.label_printed_at,
-    labelCarrier: o.label_carrier,
-    labelData: o.label_data,
+    labelPrintedAt: o.metadata?.label_printed_at ?? o.label_printed_at,
+    labelCarrier: o.metadata?.label_carrier ?? o.label_carrier,
+    labelData: o.metadata?.label_data ?? o.label_data,
     isReplacement: o.metadata?.is_replacement,
     originalOrderId: o.metadata?.original_order_id,
     securityBarcode: o.metadata?.security_barcode,
@@ -305,10 +305,14 @@ export async function syncOrder(order: Order): Promise<void> {
         buyer_postcode: order.buyerPostcode,
         buyer_country: order.buyerCountry,
         max_estimated_delivery_date: order.maxEstimatedDeliveryDate,
+        // Booked carrier label(s) — stored in metadata (like security_barcode etc.)
+        // so they persist across devices/reloads. Without this, an order booked in
+        // Batch Shipping keeps its tracking number but the label is lost, leaving
+        // "Print label" greyed out at packing on any other session.
+        label_printed_at: order.labelPrintedAt,
+        label_carrier: order.labelCarrier,
+        label_data: order.labelData,
       },
-      // label_printed_at: order.labelPrintedAt, // TODO: Add column to Supabase
-      // label_carrier: order.labelCarrier, // TODO: Add column to Supabase
-      // label_data: order.labelData, // TODO: Add column to Supabase
     });
   
   if (error) {
