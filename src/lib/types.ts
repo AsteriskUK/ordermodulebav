@@ -32,6 +32,12 @@ export type Department =
   | 'monitor'
   | 'networking';
 
+/** The vinyl-film hand-off only applies to laptops (category 'LAPTOP'), and only
+ *  when enabled in Settings → Workflow. Every other product skips it entirely. */
+export function orderNeedsVinylStep(order: { category?: string }, requireVinyl: boolean): boolean {
+  return requireVinyl && order.category === 'LAPTOP';
+}
+
 export const DEPARTMENT_CONFIG: Record<Department, {
   label: string;
   color: string;

@@ -2,7 +2,8 @@
 
 import { useEffect, useMemo, useState } from 'react';
 import { useOrderStore } from '@/lib/store';
-import { Order, Build, BuildLine, BuildSwap, CatalogProduct } from '@/lib/types';
+import { Order, Build, BuildLine, BuildSwap, CatalogProduct, orderNeedsVinylStep } from '@/lib/types';
+import { useSettingBool } from '@/hooks/use-settings';
 import {
   INVENTORY_CATEGORIES, INVENTORY_CATEGORY_MAP, describeAttributes, buildSku,
   requiredSlotsForCategory, BUILD_STATUS_CONFIG, swapConfigForCategory, customSwapPreset, SwapPreset,
@@ -39,6 +40,7 @@ export function AssemblyBuilder({ order, onClose }: { order: Order; onClose: () 
   const setOrderVinylApplied = useOrderStore((s) => s.setOrderVinylApplied);
   const allOrders = useOrderStore((s) => s.orders);
   const liveOrder = allOrders.find((o) => o.id === order.id) ?? order;
+  const requireVinyl = useSettingBool('workflow.requireVinyl');
 
   // The assembly lock is intentionally NOT released when the builder closes — the
   // order stays claimed by this user (so no one else can pick it up) until it moves
@@ -57,9 +59,10 @@ export function AssemblyBuilder({ order, onClose }: { order: Order; onClose: () 
   //   - Vinyl Application (assembling after cleaning)
   const mode = useMemo(() => {
     if (liveOrder.status === 'pending') return 'pick';
-    if (liveOrder.status === 'assembling' && liveOrder.cleanedAt && !liveOrder.vinylAppliedAt) return 'vinyl';
+    // Vinyl only applies to laptops (and only when enabled in Settings → Workflow).
+    if (liveOrder.status === 'assembling' && orderNeedsVinylStep(liveOrder, requireVinyl) && liveOrder.cleanedAt && !liveOrder.vinylAppliedAt) return 'vinyl';
     return 'assemble';
-  }, [liveOrder.status, liveOrder.cleanedAt, liveOrder.vinylAppliedAt]);
+  }, [liveOrder.status, liveOrder.cleanedAt, liveOrder.vinylAppliedAt, requireVinyl]);
   const isPick = mode === 'pick';
   const isVinyl = mode === 'vinyl';
   const title = isPick ? 'Order Picker' : isVinyl ? 'Apply Vinyl' : 'Assemble';

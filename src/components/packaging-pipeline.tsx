@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useState } from 'react';
 import { useOrderStore, assemblyLockHolder } from '@/lib/store';
-import { ORDER_STATUS_CONFIG, PACKAGING_STAGES, Order, OrderStatus, PackagingStage, DEPARTMENT_CONFIG, Department, TicketRecord } from '@/lib/types';
+import { ORDER_STATUS_CONFIG, PACKAGING_STAGES, Order, OrderStatus, PackagingStage, DEPARTMENT_CONFIG, Department, TicketRecord, orderNeedsVinylStep } from '@/lib/types';
 import { useSettingNumber, useSettingBool, useSettingString } from '@/hooks/use-settings';
 import { getOrderRowClass, buildInvoicesHtml, printHtml } from '@/lib/order-utils';
 import { getOutstandingPackItems } from '@/lib/inventory-build';
@@ -801,8 +801,10 @@ export function PackagingPipeline() {
                                     const isAssembling = s.stage === 'assembling';
                                     // Cleaning / vinyl hand-offs are optional steps (Settings → Workflow).
                                     const needsCleaning = requireCleaning && isChecking && !order.cleanedAt;
-                                    const needsVinyl = requireVinyl && isAssembling && order.cleanedAt && !order.vinylAppliedAt;
-                                    const readyForPacking = isChecking && (!requireVinyl || order.vinylAppliedAt);
+                                    // Vinyl only applies to laptops (Settings → Workflow gates it globally).
+                                    const takesVinyl = orderNeedsVinylStep(order, requireVinyl);
+                                    const needsVinyl = takesVinyl && isAssembling && order.cleanedAt && !order.vinylAppliedAt;
+                                    const readyForPacking = isChecking && (!takesVinyl || order.vinylAppliedAt);
                                     const label = needsCleaning ? 'Cleaning done' : needsVinyl ? 'Vinyl applied' : readyForPacking ? 'To packing' : 'Done';
                                     const next = needsCleaning ? 'assembling' : needsVinyl ? 'checking' : s.nextStage;
                                     return (
@@ -816,6 +818,15 @@ export function PackagingPipeline() {
                                           size="sm"
                                           className={`h-6 text-xs px-2 ${needsCleaning ? 'bg-cyan-600 hover:bg-cyan-700' : needsVinyl ? 'bg-purple-600 hover:bg-purple-700' : readyForPacking ? 'bg-indigo-600 hover:bg-indigo-700' : ''}`}
                                           onClick={() => {
+                                            // Completing an assembly (incl. "no config required") requires the
+                                            // security label — it's what packing scans. The card can't skip it:
+                                            // route to the builder to scan + finish. The vinyl hand-off is
+                                            // exempt (the build was already completed + scanned before cleaning).
+                                            if (isAssembling && next === 'checking' && !needsVinyl && !order.securityBarcode) {
+                                              setAssemblyOrderId(order.id);
+                                              toast.info('Scan the security label to complete this build');
+                                              return;
+                                            }
                                             if (needsCleaning) setOrderCleaned(order.id, true);
                                             if (needsVinyl) setOrderVinylApplied(order.id, true);
                                             // Entering Packing requires a tracking number — otherwise the
