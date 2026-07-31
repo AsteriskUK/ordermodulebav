@@ -3,6 +3,7 @@ import { Order, Batch, AppUser, AttendanceRecord, LeaveRequest, LeaveBalance, Eo
 import { StockTracking, StockUnitStatus, BuildStatus } from './inventory-config';
 import { SettingsValues, SETTINGS_STORAGE_KEY } from './settings';
 import { SettingValue } from './settings-schema';
+import { stableUuid } from './utils';
 
 // Helper to check if string is valid UUID
 function isValidUUID(str: string): boolean {
@@ -193,6 +194,7 @@ export async function fetchOrders(): Promise<Order[]> {
     maxEstimatedDeliveryDate: o.metadata?.max_estimated_delivery_date,
     importedAt: o.imported_at,
     returnId: o.return_id,
+    deletedAt: o.metadata?.deleted_at ?? o.deleted_at ?? undefined,
     labelPrintedAt: o.metadata?.label_printed_at ?? o.label_printed_at,
     labelCarrier: o.metadata?.label_carrier ?? o.label_carrier,
     labelData: o.metadata?.label_data ?? o.label_data,
@@ -312,6 +314,9 @@ export async function syncOrder(order: Order): Promise<void> {
         label_printed_at: order.labelPrintedAt,
         label_carrier: order.labelCarrier,
         label_data: order.labelData,
+        // Soft-delete timestamp — persisted so a deleted order stays deleted on
+        // every device (previously local-only, so it reappeared elsewhere).
+        deleted_at: order.deletedAt ?? null,
       },
     });
   
@@ -361,6 +366,16 @@ export async function hardDeleteOrderFromSupabase(orderId: string): Promise<void
     .delete()
     .eq('id', orderId);
   if (error) console.error('Error hard-deleting order:', error);
+}
+
+// Delete a batch and all of its orders from the DB (matches deleteBatch, which
+// removes them from the local store). Without this the batch + orders reappear
+// on the next fetch on any device.
+export async function deleteBatchFromSupabase(batchId: string): Promise<void> {
+  const { error: ordersErr } = await supabase.from('orders').delete().eq('batch_id', batchId);
+  if (ordersErr) console.error('Error deleting batch orders:', ordersErr);
+  const { error: batchErr } = await supabase.from('batches').delete().eq('id', batchId);
+  if (batchErr) console.error('Error deleting batch:', batchErr);
 }
 
 // ==================== ATTENDANCE ====================
@@ -839,6 +854,52 @@ export async function fetchGoodsReceipts(): Promise<GoodsReceipt[]> {
   })) || [];
 }
 
+export async function deleteGoodsReceiptFromSupabase(id: string): Promise<void> {
+  if (!isValidUUID(id)) return;
+  const { error } = await supabase.from('goods_receipts').delete().eq('id', id);
+  if (error) console.error('Error deleting goods receipt:', error);
+}
+
+// ==================== EOD EVENTS ====================
+// Productivity audit trail (status transitions). Persisted so the EOD report is
+// consistent across every device, not just the browser that recorded the moves.
+
+export async function syncEodEvent(e: EodEvent): Promise<void> {
+  if (!isValidUUID(e.orderId)) return; // FK → orders(id); skip non-UUID/local ids
+  // Deterministic id so a re-sync of the same transition doesn't duplicate.
+  const id = stableUuid(`eod-${e.orderId}-${e.changedAt}-${e.toStatus}`);
+  const { error } = await supabase.from('eod_events').upsert({
+    id,
+    order_id: e.orderId,
+    sales_record_number: e.salesRecordNumber,
+    item_title: e.itemTitle,
+    from_status: e.fromStatus,
+    to_status: e.toStatus,
+    changed_at: e.changedAt,
+    user_id: isValidUUID(e.userId ?? '') ? e.userId : null,
+    user_name: e.userName,
+    department: e.department,
+  }, { onConflict: 'id' });
+  if (error) console.error('Error syncing EOD event:', error.message);
+}
+
+export async function fetchEodEvents(daysBack = 45): Promise<EodEvent[]> {
+  const since = new Date(Date.now() - daysBack * 24 * 60 * 60 * 1000).toISOString();
+  const { data, error } = await supabase
+    .from('eod_events').select('*').gte('changed_at', since).order('changed_at', { ascending: false });
+  if (error) { console.warn('[eod] fetch failed:', error.message); return []; }
+  return (data ?? []).map((r) => ({
+    orderId: r.order_id, salesRecordNumber: r.sales_record_number ?? '', itemTitle: r.item_title ?? '',
+    fromStatus: r.from_status, toStatus: r.to_status, changedAt: r.changed_at,
+    userId: r.user_id ?? undefined, userName: r.user_name ?? undefined, department: r.department ?? undefined,
+  }));
+}
+
+export async function clearEodEventsFromSupabase(): Promise<void> {
+  const { error } = await supabase.from('eod_events').delete().neq('id', '00000000-0000-0000-0000-000000000000');
+  if (error) console.error('Error clearing EOD events:', error);
+}
+
 export async function syncBuild(b: Build): Promise<void> {
   if (!isValidUUID(b.id)) return;
   const row: Record<string, unknown> = {
@@ -963,7 +1024,7 @@ export async function recordSettingsAudit(
 
 export async function loadAllFromSupabase() {
   const [users, batches, orders, returns, attendanceRecords, leaveRequests, leaveBalances, tickets, missingItems,
-         inventoryParts, stockUnits, stockLevels, goodsReceipts, builds, accessControl, appSettings] = await Promise.all([
+         inventoryParts, stockUnits, stockLevels, goodsReceipts, builds, accessControl, appSettings, eodEvents] = await Promise.all([
     fetchUsers(),
     fetchBatches(),
     fetchOrders(),
@@ -980,6 +1041,7 @@ export async function loadAllFromSupabase() {
     fetchBuilds(),
     fetchAccessControl(),
     fetchAppSettings(),
+    fetchEodEvents(),
   ]);
 
   return {
@@ -999,5 +1061,6 @@ export async function loadAllFromSupabase() {
     builds,
     accessControl,
     appSettings,
+    eodEvents,
   };
 }

@@ -2,7 +2,7 @@ import { create } from 'zustand';
 import { persist, createJSONStorage } from 'zustand/middleware';
 import { get, set as idbSet, del } from 'idb-keyval';
 import { Order, OrderNote, OrderStatus, Batch, DeliveryCarrier, DeliveryType, AppUser, EodEvent, ReturnRecord, ReplacementItem, MissingItemRecord, Department, AttendanceRecord, LeaveRequest, LeaveBalance, TicketRecord, TicketActivity, InventoryPart, StockUnit, StockLevel, GoodsReceipt, Build, BuildLine, BuildSwap, AccessConfig } from './types';
-import { syncAttendance, syncLeaveRequest, syncLeaveBalance, syncOrder, syncBatch, syncUser, deleteUserFromSupabase, syncReturn, syncTicket, deleteTicketFromSupabase, syncMissingItem, syncInventoryPart, syncStockUnit, syncStockLevel, syncGoodsReceipt, syncBuild, softDeleteOrderInSupabase, hardDeleteOrderFromSupabase } from './supabase-store';
+import { syncAttendance, syncLeaveRequest, syncLeaveBalance, syncOrder, syncBatch, syncUser, deleteUserFromSupabase, syncReturn, syncTicket, deleteTicketFromSupabase, syncMissingItem, syncInventoryPart, syncStockUnit, syncStockLevel, syncGoodsReceipt, syncBuild, hardDeleteOrderFromSupabase, deleteBatchFromSupabase, syncEodEvent, deleteGoodsReceiptFromSupabase, clearEodEventsFromSupabase } from './supabase-store';
 import { buildSku, INVENTORY_CATEGORY_MAP } from './inventory-config';
 import { allPackItemsConfirmed } from './inventory-build';
 import { SettingsValues, resolveSetting, asBool, asList } from './settings';
@@ -315,6 +315,7 @@ export const useOrderStore = create<OrderStore>()(
           );
           const updatedOrder = updatedOrders.find(o => o.id === orderId);
           if (updatedOrder) syncOrder(updatedOrder).catch(console.error);
+          syncEodEvent(event).catch(console.error); // persist the productivity event
           return {
             orders: updatedOrders,
             eodEvents: [...state.eodEvents, event],
@@ -353,11 +354,14 @@ export const useOrderStore = create<OrderStore>()(
           return { orders: updatedOrders };
         }),
       deleteOrderNote: (orderId, noteId) =>
-        set((state) => ({
-          orders: state.orders.map((o) =>
+        set((state) => {
+          const orders = state.orders.map((o) =>
             o.id === orderId ? { ...o, notes: (o.notes ?? []).filter((n) => n.id !== noteId) } : o
-          ),
-        })),
+          );
+          const updated = orders.find((o) => o.id === orderId);
+          if (updated) syncOrder(updated).catch(console.error);
+          return { orders };
+        }),
       updateOrderTracking: (orderId, trackingNumber) =>
         set((state) => {
           const updatedOrders = state.orders.map((o) =>
@@ -616,6 +620,7 @@ export const useOrderStore = create<OrderStore>()(
             // Shipped from the warehouse → put the tracking live on eBay.
             if (status === 'shipped') pushMarketplaceFulfillment(o);
           });
+          newEvents.forEach((e) => syncEodEvent(e).catch(console.error)); // persist productivity events
           return {
             orders: updatedOrders,
             eodEvents: [...state.eodEvents, ...newEvents],
@@ -642,19 +647,22 @@ export const useOrderStore = create<OrderStore>()(
         }),
       deleteOrder: (orderId) => {
         const deletedAt = new Date().toISOString();
-        set((state) => ({
-          orders: state.orders.map((o) =>
-            o.id === orderId ? { ...o, deletedAt } : o
-          ),
-        }));
-        softDeleteOrderInSupabase(orderId, deletedAt).catch(console.error);
+        set((state) => {
+          const orders = state.orders.map((o) => o.id === orderId ? { ...o, deletedAt } : o);
+          const updated = orders.find((o) => o.id === orderId);
+          // Persist via syncOrder (stores deleted_at in metadata) so the delete
+          // holds on every device — not just this browser's local store.
+          if (updated) syncOrder(updated).catch(console.error);
+          return { orders };
+        });
       },
       restoreOrder: (orderId) =>
-        set((state) => ({
-          orders: state.orders.map((o) =>
-            o.id === orderId ? { ...o, deletedAt: undefined } : o
-          ),
-        })),
+        set((state) => {
+          const orders = state.orders.map((o) => o.id === orderId ? { ...o, deletedAt: undefined } : o);
+          const updated = orders.find((o) => o.id === orderId);
+          if (updated) syncOrder(updated).catch(console.error);
+          return { orders };
+        }),
       getDeletedOrders: (): Order[] => {
         const state = get();
         return state.orders.filter((o) => o.deletedAt).sort((a, b) =>
@@ -667,11 +675,13 @@ export const useOrderStore = create<OrderStore>()(
         }));
         hardDeleteOrderFromSupabase(orderId).catch(console.error);
       },
-      deleteBatch: (batchId) =>
+      deleteBatch: (batchId) => {
         set((state) => ({
           orders: state.orders.filter((o) => o.batchId !== batchId),
           batches: state.batches.filter((b) => b.id !== batchId),
-        })),
+        }));
+        deleteBatchFromSupabase(batchId).catch(console.error);
+      },
       addUser: (user) => {
         set((state) => ({ users: [...state.users, user] }));
         syncUser(user).catch(console.error);
@@ -693,14 +703,18 @@ export const useOrderStore = create<OrderStore>()(
         set((state) => ({ emailConfig: { ...state.emailConfig, ...config } })),
       setAccessControl: (config) => set({ accessControl: config }),
       setAppSettings: (values) => set({ appSettings: values }),
-      clearEodEvents: () => set({ eodEvents: [] }),
+      clearEodEvents: () => { set({ eodEvents: [] }); clearEodEventsFromSupabase().catch(console.error); },
       addReturn: (ret) => {
-        set((state) => ({
-          returns: [...state.returns, ret],
-          orders: state.orders.map((o) =>
-            o.id === ret.orderId ? { ...o, status: 'returned', returnId: ret.id } : o
-          ),
-        }));
+        set((state) => {
+          const orders = state.orders.map((o) =>
+            o.id === ret.orderId ? { ...o, status: 'returned' as OrderStatus, returnId: ret.id } : o
+          );
+          // Persist the order's returned status/returnId too — previously only the
+          // return synced, so the order stayed non-returned on other devices.
+          const updated = orders.find((o) => o.id === ret.orderId);
+          if (updated) syncOrder(updated).catch(console.error);
+          return { returns: [...state.returns, ret], orders };
+        });
         syncReturn(ret).catch(console.error);
       },
       updateReturn: (returnId, updates) => {
@@ -899,6 +913,7 @@ export const useOrderStore = create<OrderStore>()(
       },
       deleteGoodsReceipt: (id) => {
         set((state) => ({ goodsReceipts: state.goodsReceipts.filter((r) => r.id !== id) }));
+        deleteGoodsReceiptFromSupabase(id).catch(console.error);
       },
       updateStockUnit: (id, updates) => {
         set((state) => {

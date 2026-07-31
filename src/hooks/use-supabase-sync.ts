@@ -28,28 +28,27 @@ export function useSupabaseSync() {
       const data = await loadAllFromSupabase();
       const currentState = useOrderStore.getState();
 
-      // Merge strategy: keep local data, add missing items from Supabase.
-      // Orders/batches — local is source of truth (imports happen locally and
-      // may not have synced to the DB yet). NEVER drop local orders here, or a
-      // just-imported (not-yet-synced) order is lost.
-      const existingOrderIds = new Set(currentState.orders.map(o => o.id));
-      const existingBatchIds = new Set(currentState.batches.map(b => b.id));
-      const existingReturnIds = new Set(currentState.returns.map(r => r.id));
-      const existingMissingIds = new Set(currentState.missingItems.map(m => m.id));
-      const newOrders = data.orders.filter(o => !existingOrderIds.has(o.id));
-      const newBatches = data.batches.filter(b => !existingBatchIds.has(b.id));
-      const newReturns = data.returns.filter(r => !existingReturnIds.has(r.id));
-      const newMissing = data.missingItems.filter(m => !existingMissingIds.has(m.id));
+      // Merge strategy: the DB is the source of truth (so changes made on another
+      // device — booked labels, status moves, soft-deletes — always propagate),
+      // but any record that exists only locally (a just-imported order not yet
+      // synced to the DB) is preserved so it's never lost. On a failed/empty fetch
+      // every record counts as local-only, so nothing is wiped.
+      const dbOrderIds = new Set(data.orders.map(o => o.id));
+      const dbBatchIds = new Set(data.batches.map(b => b.id));
+      const dbReturnIds = new Set(data.returns.map(r => r.id));
+      const dbMissingIds = new Set(data.missingItems.map(m => m.id));
+      const localOnlyOrders = currentState.orders.filter(o => !dbOrderIds.has(o.id));
+      const localOnlyBatches = currentState.batches.filter(b => !dbBatchIds.has(b.id));
+      const localOnlyReturns = currentState.returns.filter(r => !dbReturnIds.has(r.id));
+      const localOnlyMissing = currentState.missingItems.filter(m => !dbMissingIds.has(m.id));
 
       useOrderStore.setState({
         // Users: Supabase has more users, use it if available
         users: data.users.length > 0 ? data.users : currentState.users,
-        // Batches: merge local + any from Supabase
-        batches: [...currentState.batches, ...newBatches],
-        // Orders: merge local + any from Supabase (local never dropped)
-        orders: [...currentState.orders, ...newOrders],
-        // Returns: merge local + any from Supabase
-        returns: [...currentState.returns, ...newReturns],
+        // DB wins for synced records; keep local-only (unsynced) ones.
+        batches: [...data.batches, ...localOnlyBatches],
+        orders: [...data.orders, ...localOnlyOrders],
+        returns: [...data.returns, ...localOnlyReturns],
         // HR data: Supabase is source of truth for multi-device sync
         attendanceRecords: data.attendanceRecords.length > 0 
           ? data.attendanceRecords 
@@ -62,8 +61,8 @@ export function useSupabaseSync() {
           : currentState.leaveBalances,
         // Tickets: Supabase is source of truth for multi-device sync
         tickets: data.tickets.length > 0 ? data.tickets : currentState.tickets,
-        // Missing items: merge local + any from Supabase
-        missingItems: [...currentState.missingItems, ...newMissing],
+        // Missing items: DB wins; keep local-only ones.
+        missingItems: [...data.missingItems, ...localOnlyMissing],
         // Inventory: Supabase is source of truth for multi-device sync
         inventoryParts: data.inventoryParts.length > 0 ? data.inventoryParts : currentState.inventoryParts,
         stockUnits: data.stockUnits.length > 0 ? data.stockUnits : currentState.stockUnits,
@@ -74,10 +73,17 @@ export function useSupabaseSync() {
         accessControl: data.accessControl ?? currentState.accessControl,
         // App settings: Supabase is source of truth (null = all registry defaults).
         appSettings: data.appSettings ?? currentState.appSettings,
+        // EOD events: DB wins; keep any local-only (unsynced) events by their
+        // orderId+changedAt+toStatus identity so nothing recorded offline is lost.
+        eodEvents: (() => {
+          const dbKeys = new Set(data.eodEvents.map((e) => `${e.orderId}|${e.changedAt}|${e.toStatus}`));
+          const localOnly = currentState.eodEvents.filter((e) => !dbKeys.has(`${e.orderId}|${e.changedAt}|${e.toStatus}`));
+          return [...data.eodEvents, ...localOnly];
+        })(),
       });
 
       setLastSync(new Date());
-      console.log('Synced from Supabase:', { newOrders: newOrders.length, newBatches: newBatches.length, newReturns: newReturns.length, tickets: data.tickets.length });
+      console.log('Synced from Supabase:', { orders: data.orders.length, localOnlyOrders: localOnlyOrders.length, batches: data.batches.length, returns: data.returns.length, tickets: data.tickets.length });
     } catch (err) {
       console.error('Error syncing from Supabase:', err);
       toast.error('Failed to sync from cloud');
