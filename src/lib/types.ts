@@ -493,6 +493,10 @@ export interface Order {
   labelPrintedAt?: string;
   labelCarrier?: string;
   labelData?: string[]; // base64 label(s): PDF, or ZPL for FedEx thermal
+  // When the tracking was uploaded to the marketplace (eBay add-tracking /
+  // Amazon confirm-shipment). Set once the ship-by-date window opens; prevents
+  // re-uploading and marks that the marketplace has been told it's dispatched.
+  trackingUploadedAt?: string;
   // Metadata
   importedAt: string;
   batchId: string;

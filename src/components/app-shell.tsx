@@ -15,6 +15,7 @@ import { useSettingString } from '@/hooks/use-settings';
 import { AppearanceProvider } from './appearance-provider';
 import { CancellationAlert } from './cancellation-alert';
 import { TrackingScheduler } from './tracking-scheduler';
+import { FulfillmentScheduler } from './fulfillment-scheduler';
 import { FeedbackMonitor } from './feedback-monitor';
 import { useOrderStore } from '@/lib/store';
 import { SignIn } from './sign-in';
@@ -167,6 +168,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
       <AppearanceProvider />
       <EodScheduler />
       <TrackingScheduler />
+      <FulfillmentScheduler />
       <div className="flex-shrink-0">
         <Sidebar collapsed={sidebarCollapsed} onToggle={toggleSidebar} />
       </div>

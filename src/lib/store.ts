@@ -5,7 +5,7 @@ import { Order, OrderNote, OrderStatus, Batch, DeliveryCarrier, DeliveryType, Ap
 import { syncAttendance, syncLeaveRequest, syncLeaveBalance, syncOrder, syncBatch, syncUser, deleteUserFromSupabase, syncReturn, syncTicket, deleteTicketFromSupabase, syncMissingItem, syncInventoryPart, syncStockUnit, syncStockLevel, syncGoodsReceipt, syncBuild, hardDeleteOrderFromSupabase, deleteBatchFromSupabase, syncEodEvent, deleteGoodsReceiptFromSupabase, clearEodEventsFromSupabase } from './supabase-store';
 import { buildSku, INVENTORY_CATEGORY_MAP } from './inventory-config';
 import { allPackItemsConfirmed } from './inventory-build';
-import { SettingsValues, resolveSetting, asBool, asList } from './settings';
+import { SettingsValues, resolveSetting, asBool, asList, asNumber } from './settings';
 import { getOrderPlatform } from './order-platform';
 
 // Generate proper UUID v4 for PostgreSQL compatibility
@@ -30,31 +30,66 @@ const FULFILMENT_ENDPOINTS: Partial<Record<string, string>> = {
   amazon: '/api/amazon/orders/fulfillment',
 };
 
+// Is this order due to have its tracking uploaded to the marketplace now? The rule
+// (per the warehouse workflow): only within `leadHours` of the eBay ship-by date
+// (postByDate), so orders processed days early aren't marked despatched too soon.
+// Requires a booked label (tracking) and that the order is actually packed/shipped.
+function fulfilmentDue(order: Order, leadHours: number): boolean {
+  if (!order.trackingNumber || !order.orderNumber) return false;
+  if (order.trackingUploadedAt) return false;                       // already uploaded
+  if (!['packed', 'shipped', 'delivered'].includes(order.status)) return false; // must be ready to go
+  const shipBy = order.postByDate ? new Date(order.postByDate).getTime() : NaN;
+  if (isNaN(shipBy)) return order.status === 'shipped' || order.status === 'delivered'; // no ship-by → only when truly shipped
+  return Date.now() >= shipBy - leadHours * 3_600_000;
+}
+
 const fulfilmentPushed = new Set<string>();
 function pushMarketplaceFulfillment(order: Order): void {
   if (typeof window === 'undefined') return;
   const settings = useOrderStore.getState().appSettings;
   if (!asBool(resolveSetting(settings, 'fulfilment.uploadOnShipped'))) return;
-  if (!order.trackingNumber || !order.orderNumber) return;
   // Despatch is scoped per marketplace (Settings → Shipping & Labels).
   const platform = getOrderPlatform(order);
   if (!asList(resolveSetting(settings, 'fulfilment.marketplaces')).includes(platform)) return;
   const endpoint = FULFILMENT_ENDPOINTS[platform];
   if (!endpoint || fulfilmentPushed.has(order.orderNumber)) return;
+  const leadHours = asNumber(resolveSetting(settings, 'fulfilment.uploadLeadHours')) || 12;
+  if (!fulfilmentDue(order, leadHours)) return;                     // too early — the sweep will catch it later
   fulfilmentPushed.add(order.orderNumber);
   fetch(endpoint, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ orderNumber: order.orderNumber, trackingNumber: order.trackingNumber, carrier: order.deliveryCarrier }),
   }).then(async (res) => {
-    if (!res.ok) {
-      fulfilmentPushed.delete(order.orderNumber); // allow a retry on the next shipped move
+    if (res.ok) {
+      // Mark uploaded + persist so it isn't sent again (and other devices see it).
+      const st = useOrderStore.getState();
+      const orders = st.orders.map((o) => o.id === order.id ? { ...o, trackingUploadedAt: new Date().toISOString() } : o);
+      useOrderStore.setState({ orders });
+      const u = orders.find((o) => o.id === order.id);
+      if (u) syncOrder(u).catch(console.error);
+    } else {
+      fulfilmentPushed.delete(order.orderNumber); // allow a retry next sweep
       console.warn(`[fulfilment] ${platform} tracking upload failed`, order.salesRecordNumber, (await res.text()).slice(0, 200));
     }
   }).catch((e) => {
     fulfilmentPushed.delete(order.orderNumber);
     console.warn(`[fulfilment] ${platform} tracking upload error`, order.salesRecordNumber, e);
   });
+}
+
+// Sweep every order and upload tracking for any that have entered their ship-by
+// window (see fulfilmentDue). Called on a timer by <FulfillmentScheduler> so the
+// upload fires at the right time — not when the order happened to be processed.
+// Each call is internally gated (enable setting, marketplace scope, dedupe), so
+// running it often is cheap and safe.
+export function sweepDueFulfillments(): void {
+  const st = useOrderStore.getState();
+  if (!asBool(resolveSetting(st.appSettings, 'fulfilment.uploadOnShipped'))) return;
+  for (const o of st.orders) {
+    if (o.deletedAt || o.trackingUploadedAt) continue;
+    pushMarketplaceFulfillment(o);
+  }
 }
 
 // Advisory assembly locks auto-expire so a closed tab / abandoned build doesn't

@@ -287,8 +287,11 @@ export const SETTINGS_SCHEMA: SettingsGroup[] = [
         label: 'Marketplace despatch',
         fields: [
           { key: 'fulfilment.uploadOnShipped', type: 'boolean', default: false,
-            label: 'Upload tracking when order ships',
-            help: 'Marks the order despatched on the marketplace at the moment it leaves the warehouse. OFF by default — uploading a sandbox tracking number to eBay affects real buyers and seller metrics.' },
+            label: 'Upload tracking to the marketplace',
+            help: 'Marks the order despatched on the marketplace with its tracking number, timed to the ship-by date (below) — NOT the moment it is processed. OFF by default: uploading a sandbox tracking number to eBay affects real buyers and seller metrics.' },
+          { key: 'fulfilment.uploadLeadHours', type: 'number', default: 12, min: 0, max: 168, unit: 'hours',
+            label: 'Upload this long before the ship-by date',
+            help: 'Tracking is sent to the marketplace only once the order is within this many hours of its eBay ship-by date, so orders processed early are not marked despatched prematurely. Default 12h.' },
           { key: 'fulfilment.marketplaces', type: 'multiselect', default: ALL_MARKETPLACES,
             label: 'Despatch to', options: MARKETPLACE_OPTIONS,
             help: 'Only orders from these marketplaces are marked despatched automatically. Useful while one channel is still being proved out.' },

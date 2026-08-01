@@ -198,6 +198,7 @@ export async function fetchOrders(): Promise<Order[]> {
     labelPrintedAt: o.metadata?.label_printed_at ?? o.label_printed_at,
     labelCarrier: o.metadata?.label_carrier ?? o.label_carrier,
     labelData: o.metadata?.label_data ?? o.label_data,
+    trackingUploadedAt: o.metadata?.tracking_uploaded_at,
     isReplacement: o.metadata?.is_replacement,
     originalOrderId: o.metadata?.original_order_id,
     securityBarcode: o.metadata?.security_barcode,
@@ -314,6 +315,7 @@ export async function syncOrder(order: Order): Promise<void> {
         label_printed_at: order.labelPrintedAt,
         label_carrier: order.labelCarrier,
         label_data: order.labelData,
+        tracking_uploaded_at: order.trackingUploadedAt,
         // Soft-delete timestamp — persisted so a deleted order stays deleted on
         // every device (previously local-only, so it reappeared elsewhere).
         deleted_at: order.deletedAt ?? null,
