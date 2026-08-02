@@ -19,13 +19,13 @@ export function deriveShipping(
   if (isBT) {
     return { deliveryCarrier: 'DPD', deliveryType: 'two_day' };
   }
-  // Orders < £400 go FedEx standard
+  // Orders < £400 go FedEx (next-day is the default service)
   if (totalPrice < 400) {
-    return { deliveryCarrier: 'FedEx', deliveryType: 'standard' };
+    return { deliveryCarrier: 'FedEx', deliveryType: 'next_day' };
   }
-  // £400–£999: DPD pre-12 (standard)
+  // £400–£999: DPD next-day
   if (totalPrice < 1000) {
-    return { deliveryCarrier: 'DPD', deliveryType: 'standard' };
+    return { deliveryCarrier: 'DPD', deliveryType: 'next_day' };
   }
   // ≥ £1000: DPD next day
   return { deliveryCarrier: 'DPD', deliveryType: 'next_day' };

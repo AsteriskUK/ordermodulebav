@@ -1044,7 +1044,7 @@ export function BatchShipping() {
                         <TableCell onClick={(e) => e.stopPropagation()}>
                           <Select
                             value={primary.deliveryCarrier || 'FedEx'}
-                            onValueChange={(v) => ids.forEach((id) => updateOrderCarrier(id, v as DeliveryCarrier, primary.deliveryType || 'standard'))}
+                            onValueChange={(v) => ids.forEach((id) => updateOrderCarrier(id, v as DeliveryCarrier, primary.deliveryType || 'next_day'))}
                           >
                             <SelectTrigger className="h-7 text-xs w-[90px]"><SelectValue /></SelectTrigger>
                             <SelectContent>
@@ -1074,7 +1074,7 @@ export function BatchShipping() {
                             </Select>
                           ) : (
                             <Select
-                              value={primary.deliveryType || 'standard'}
+                              value={primary.deliveryType || 'next_day'}
                               onValueChange={(v) => ids.forEach((id) => updateOrderCarrier(id, primary.deliveryCarrier || 'FedEx', v as DeliveryType))}
                             >
                               <SelectTrigger className="h-7 text-xs w-[90px]"><SelectValue /></SelectTrigger>
