@@ -11,10 +11,17 @@
 // (zplBase64) is sent to the printer RAW — no rendering or conversion — which is
 // what FedEx thermal-label certification requires.
 //
+// The `printer` field may be a named CUPS/Windows queue OR a network printer's
+// IP address ("192.168.1.50", "192.168.1.50:9100", or "socket://…"). IP targets
+// are streamed straight to the printer's raw port (9100/JetDirect) — no queue
+// or driver setup needed. Ideal for the Zebra/FedEx thermal (raw ZPL); works for
+// DPD/invoice printers that support direct PDF printing.
+//
 // Config via env: PRINT_AGENT_PORT (default 17777), PRINT_AGENT_TOKEN (optional
 // shared secret), SUMATRA_PATH (Windows silent-print helper).
 
 const http = require('http');
+const net = require('net');
 const { execFile } = require('child_process');
 const { writeFileSync, mkdtempSync } = require('fs');
 const { tmpdir } = require('os');
@@ -123,6 +130,35 @@ function spoolRaw(file, printer, copies) {
   });
 }
 
+// A printer target can be a named CUPS/Windows queue OR a network printer given
+// by IP (optionally with a port, or a socket:// URL). IP targets are printed to
+// directly over TCP — see printToSocket.
+function parseNetworkTarget(printer) {
+  const s = String(printer || '').trim().replace(/^socket:\/\//i, '');
+  const m = s.match(/^(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})(?::(\d{1,5}))?$/);
+  if (!m) return null;
+  return { host: m[1], port: m[2] ? parseInt(m[2], 10) : 9100 };  // 9100 = raw/JetDirect
+}
+
+// Stream the exact bytes to a network printer's raw port (JetDirect/AppSocket).
+// The FedEx/Zebra thermal printer consumes raw ZPL this way; office/label
+// printers that support direct PDF printing accept the rendered PDF the same way.
+function printToSocket({ host, port }, buf, copies) {
+  const n = Math.max(1, copies || 1);
+  return new Promise((resolve, reject) => {
+    let sent = 0;
+    const sendOne = () => {
+      const sock = net.createConnection({ host, port });
+      sock.setTimeout(20000);
+      sock.on('connect', () => sock.end(buf));
+      sock.on('timeout', () => { sock.destroy(); reject(new Error(`printer ${host}:${port} timed out`)); });
+      sock.on('error', (e) => reject(new Error(`printer ${host}:${port}: ${e.message}`)));
+      sock.on('close', () => { sent++; sent < n ? sendOne() : resolve(); });
+    };
+    sendOne();
+  });
+}
+
 const server = http.createServer((req, res) => {
   if (req.method === 'OPTIONS') { cors(res); res.writeHead(204); return res.end(); }
   if (TOKEN && req.headers['authorization'] !== `Bearer ${TOKEN}`) return json(res, 401, { error: 'unauthorized' });
@@ -141,23 +177,28 @@ const server = http.createServer((req, res) => {
         const safeName = String(jobName || 'job').replace(/[^a-z0-9]+/gi, '_');
         const dir = mkdtempSync(path.join(tmpdir(), 'printjob-'));
 
-        // Raw ZPL — write the exact bytes and send them to the printer untouched.
-        if (zplBase64) {
-          const file = path.join(dir, `${safeName}.zpl`);
-          writeFileSync(file, Buffer.from(zplBase64, 'base64'));
-          await spoolRaw(file, printer, copies);
-          return json(res, 200, { ok: true });
-        }
-
-        let pdf;
-        if (html) pdf = await htmlToPdf(html);
-        else if (pdfBase64) pdf = Buffer.from(pdfBase64, 'base64');
+        // Resolve the job to a byte buffer once: ZPL raw, a supplied PDF, or an
+        // invoice rendered from HTML to PDF.
+        let buf, isZpl = false;
+        if (zplBase64) { buf = Buffer.from(zplBase64, 'base64'); isZpl = true; }
+        else if (html) buf = await htmlToPdf(html);
+        else if (pdfBase64) buf = Buffer.from(pdfBase64, 'base64');
         else return json(res, 400, { error: 'html, pdfBase64 or zplBase64 required' });
 
-        const file = path.join(dir, `${safeName}.pdf`);
-        writeFileSync(file, pdf);
+        // Network printer (IP) → stream the bytes straight to its raw port. No
+        // CUPS queue or driver needed; the printer receives the ZPL/PDF as-is.
+        const netTarget = parseNetworkTarget(printer);
+        if (netTarget) {
+          await printToSocket(netTarget, buf, copies);
+          return json(res, 200, { ok: true, via: `socket ${netTarget.host}:${netTarget.port}` });
+        }
+
+        // Named CUPS/Windows queue.
+        const file = path.join(dir, `${safeName}.${isZpl ? 'zpl' : 'pdf'}`);
+        writeFileSync(file, buf);
+        if (isZpl) await spoolRaw(file, printer, copies);
         // Force the label media only for label jobs — invoices keep the queue default (A4).
-        await spool(file, printer, copies, isLabel ? LABEL_MEDIA : '');
+        else await spool(file, printer, copies, isLabel ? LABEL_MEDIA : '');
         json(res, 200, { ok: true });
       } catch (e) {
         console.error('[print-agent] print error:', e.message || e);

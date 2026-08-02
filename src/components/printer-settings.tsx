@@ -57,19 +57,18 @@ export function PrinterSettings() {
     }
   }
 
-  // A printer picker — a dropdown of discovered printers, or a free-text input
-  // when we haven't loaded the list yet (so it works before the agent is reachable).
+  // A printer target — either a discovered CUPS/Windows queue name or a network
+  // printer's IP address. A datalist gives autocomplete of discovered printers
+  // while still letting you type an IP (e.g. 192.168.1.50 or 192.168.1.50:9100).
   function printerField(label: string, key: 'invoicePrinter' | 'fedexPrinter' | 'dpdPrinter') {
+    const listId = `printers-${key}`;
     return (
       <div>
         <label className="text-xs font-medium text-slate-600 mb-1 block">{label}</label>
-        {printers.length > 0 ? (
-          <select className={fieldCls} value={cfg[key]} onChange={(e) => set(key, e.target.value)}>
-            <option value="">— none —</option>
-            {printers.map((p) => <option key={p} value={p}>{p}</option>)}
-          </select>
-        ) : (
-          <Input value={cfg[key]} onChange={(e) => set(key, e.target.value)} placeholder="Printer name" className="h-9" />
+        <Input value={cfg[key]} onChange={(e) => set(key, e.target.value)} list={listId}
+          placeholder="Printer name or IP (e.g. 192.168.1.50)" className="h-9" />
+        {printers.length > 0 && (
+          <datalist id={listId}>{printers.map((p) => <option key={p} value={p} />)}</datalist>
         )}
       </div>
     );
@@ -88,6 +87,8 @@ export function PrinterSettings() {
         <p className="text-xs text-slate-500">
           Point this at the local <span className="font-mono">print-agent</span> running on the warehouse PC.
           Invoices auto-print when new orders arrive; labels route to the FedEx or DPD printer by carrier.
+          Each printer can be a discovered queue name <em>or</em> a network printer&rsquo;s IP address
+          (e.g. <span className="font-mono">192.168.1.50</span>) — IP printers are sent to directly on port 9100.
         </p>
 
         <div className="grid sm:grid-cols-[1fr_auto] gap-2 items-end">

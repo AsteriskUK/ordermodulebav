@@ -8,6 +8,17 @@ It runs on one machine (or a few) physically connected to the printers, on the
 same network as the tablets/PCs running the app. The browser talks to it over
 HTTP.
 
+## Network printers (by IP)
+
+In Settings → Printers, each printer can be a discovered queue name **or** a
+network printer's **IP address** — e.g. `192.168.1.50`, `192.168.1.50:9100`, or
+`socket://192.168.1.50:9100`. IP targets are streamed straight to the printer's
+raw port (`9100`/JetDirect) — no CUPS queue or driver needed on the agent PC.
+This is ideal for the Zebra/FedEx thermal printer (it takes raw ZPL). The DPD
+and invoice printers work this way too **if** they support direct PDF printing
+(most modern network printers do). If a printer rejects raw PDF, set it up as a
+named CUPS queue instead and use its queue name here.
+
 ## Setup
 
 1. Install [Node.js 18+](https://nodejs.org) on the warehouse PC.
