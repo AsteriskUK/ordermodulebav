@@ -134,7 +134,9 @@ function buildAmazonSlipPage(o: Order): string {
   const orderDate = o.saleDate
     ? new Date(o.saleDate).toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric', year: 'numeric' })
     : '—';
-  const service = AMAZON_DELIVERY_SERVICE[o.deliveryType] ?? 'Standard';
+  // Prefer Amazon's own shipment service (stored on the order) over our derived type.
+  const service = (o.deliveryService && o.deliveryService.trim())
+    || AMAZON_DELIVERY_SERVICE[o.deliveryType] || 'Standard';
   const qty = o.quantity || 1;
   const unitPrice = o.soldFor / qty;
   const itemSubtotal = o.soldFor;
@@ -155,11 +157,6 @@ function buildAmazonSlipPage(o: Order): string {
 
   return `
     <div class="invoice amz">
-      <p class="amz-dispatch-label">Dispatch to:</p>
-      <div class="amz-dispatch">${addressLines.map((l) => `<p>${l}</p>`).join('')}</div>
-      <div class="amz-dash"></div>
-      <p class="amz-order-id">Order ID: ${orderId}</p>
-      <p class="amz-thanks">Thank you for buying from ${cfg.sellerName} on Amazon Marketplace.</p>
       <table class="amz-details">
         <tr>
           <td class="amz-details-address" rowspan="4">
@@ -173,6 +170,11 @@ function buildAmazonSlipPage(o: Order): string {
         <tr><td class="amz-details-label">Buyer Name:</td><td>${o.buyerName || o.buyerUsername || '—'}</td></tr>
         <tr><td class="amz-details-label">Seller Name:</td><td>${cfg.sellerName}</td></tr>
       </table>
+      <p class="amz-dispatch-label">Dispatch to:</p>
+      <div class="amz-dispatch">${addressLines.map((l) => `<p>${l}</p>`).join('')}</div>
+      <div class="amz-dash"></div>
+      <p class="amz-order-id">Order ID: ${orderId}</p>
+      <p class="amz-thanks">Thank you for buying from ${cfg.sellerName} on Amazon Marketplace.</p>
       <table class="amz-items">
         <thead>
           <tr>
@@ -412,7 +414,7 @@ export function buildInvoicesHtml(orders: Order[]): string {
     .note { background:#fffbe6; border:1px solid #f0c040; padding:8px; border-radius:4px; font-size:11px; }
 
     /* ---- Amazon Marketplace packing slip ---- */
-    .amz { font-family: Arial, Helvetica, sans-serif; font-size:12px; color:#000; padding-top:40px; }
+    .amz { font-family: Arial, Helvetica, sans-serif; font-size:12px; color:#000; padding-top:16px; }
     .amz p { line-height:1.5; }
     .amz-dispatch-label { font-size:11px; margin-bottom:2px; }
     .amz-dispatch p { font-size:15px; font-weight:bold; line-height:1.35; }
