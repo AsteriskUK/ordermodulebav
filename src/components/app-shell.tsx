@@ -4,7 +4,7 @@ import { useState, useEffect, useRef, useMemo } from 'react';
 import { useRouter, usePathname } from 'next/navigation';
 import { Sidebar, pageTitleForPath } from './sidebar';
 import { EodScheduler } from './eod-scheduler';
-import { PanelLeftClose, PanelLeftOpen, LogOut, ChevronDown, Bell, MessageSquare, ChevronRight, ThumbsDown, ThumbsUp, Eye } from 'lucide-react';
+import { PanelLeftClose, PanelLeftOpen, LogOut, ChevronDown, Bell, MessageSquare, ChevronRight, ThumbsDown, ThumbsUp, Eye, PenLine } from 'lucide-react';
 import { supabase } from '@/lib/supabase-client';
 import { Button } from './ui/button';
 import { useSupabaseSync } from '@/hooks/use-supabase-sync';
@@ -16,6 +16,7 @@ import { AppearanceProvider } from './appearance-provider';
 import { CancellationAlert } from './cancellation-alert';
 import { TrackingScheduler } from './tracking-scheduler';
 import { FulfillmentScheduler } from './fulfillment-scheduler';
+import { SignatureDialog } from './signature-dialog';
 import { FeedbackMonitor } from './feedback-monitor';
 import { useOrderStore } from '@/lib/store';
 import { SignIn } from './sign-in';
@@ -75,6 +76,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   const setCurrentUser = useOrderStore((s) => s.setCurrentUser);
 
   const [menuOpen, setMenuOpen] = useState(false);
+  const [showSignature, setShowSignature] = useState(false);
   const [bellOpen, setBellOpen] = useState(false);
   const [msgOpen, setMsgOpen] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
@@ -357,7 +359,11 @@ export function AppShell({ children }: { children: React.ReactNode }) {
                     <p className="text-xs font-semibold text-slate-700">{currentUser.name}</p>
                     <p className="text-[10px] text-slate-400 capitalize">{currentUser.role}</p>
                   </div>
-                  <div className="px-2 pb-1.5 pt-1.5">
+                  <div className="px-2 pb-1.5 pt-1.5 space-y-0.5">
+                    <button onClick={() => { setShowSignature(true); setMenuOpen(false); }}
+                      className="w-full flex items-center gap-2 px-2 py-1.5 rounded-lg hover:bg-slate-100 text-slate-700 text-xs font-medium transition-colors">
+                      <PenLine className="h-3.5 w-3.5" /> My reply signature
+                    </button>
                     {/* Switching users requires signing out and re-authenticating
                         with a PIN — there is no in-app account switcher. */}
                     <button onClick={() => { if (currentUserId) releaseSession(currentUserId); fetch('/api/auth/logout', { method: 'POST' }).catch(() => {}); setCurrentUser(null); setMenuOpen(false); }}
@@ -371,6 +377,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
           </div>
         </header>
         {openTicket && <TicketDialog ticket={openTicket} onClose={() => setOpenTicket(null)} />}
+        {showSignature && <SignatureDialog onClose={() => setShowSignature(false)} />}
         <main className={`flex-1 bg-slate-50 overflow-auto${readOnly ? ' ro-content' : ''}`}>
           <div className="p-6">
             {children}

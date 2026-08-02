@@ -33,6 +33,7 @@ export async function fetchUsers(): Promise<AppUser[]> {
     department: u.department,
     departments: u.departments || [u.department],
     pin: u.pin,
+    signature: u.signature ?? undefined,
   })) || [];
 }
 
@@ -43,20 +44,25 @@ export async function syncUser(user: AppUser): Promise<void> {
     return;
   }
   
-  const { error } = await supabase
-    .from('users')
-    .upsert({
-      id: user.id,
-      name: user.name,
-      email: user.email,
-      role: user.role,
-      roles: user.roles,
-      department: user.department,
-      departments: user.departments,
-      pin: user.pin,
-      is_active: true,
-    });
-  
+  const row = {
+    id: user.id,
+    name: user.name,
+    email: user.email,
+    role: user.role,
+    roles: user.roles,
+    department: user.department,
+    departments: user.departments,
+    pin: user.pin,
+    signature: user.signature ?? null,
+    is_active: true,
+  };
+  let { error } = await supabase.from('users').upsert(row);
+  // Tolerate the signature column not existing yet (migration may be unapplied):
+  // 42703 = Postgres "column does not exist"; PGRST204 = PostgREST schema-cache miss.
+  if (error && (error.code === '42703' || error.code === 'PGRST204') && /signature/.test(error.message)) {
+    const { signature: _omit, ...rest } = row;
+    ({ error } = await supabase.from('users').upsert(rest));
+  }
   if (error) {
     console.error('Error syncing user:', JSON.stringify(error, null, 2));
     console.error('User data:', { id: user.id, name: user.name, email: user.email });

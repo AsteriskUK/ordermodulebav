@@ -77,6 +77,9 @@ export interface AppUser {
   departments: Department[];
   pin?: string;
   targets?: UserTarget[];
+  /** Personal message reply signature. Falls back to the global one (Settings →
+   *  Messaging) when unset, so comms staff can each sign off in their own name. */
+  signature?: string;
 }
 
 /**

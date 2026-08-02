@@ -282,7 +282,10 @@ export function NotesFeed() {
   // Configurable behaviour (Settings → Messaging).
   const sendShortcut = useSettingString('messaging.sendShortcut');
   const maxAttachments = useSettingNumber('messaging.maxAttachments');
-  const replySignature = useSettingString('messaging.signature');
+  // The sender's own signature wins; the global one (Settings → Messaging) is the
+  // fallback so comms staff can each sign off in their own name.
+  const globalSignature = useSettingString('messaging.signature');
+  const replySignature = (currentUser?.signature?.trim() || globalSignature);
   const strictOrderMatching = useSettingBool('messaging.strictOrderMatching');
   // Enter sends only when configured to; otherwise Ctrl/Cmd+Enter does.
   const isSendKey = (e: React.KeyboardEvent) =>
