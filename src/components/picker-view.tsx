@@ -185,8 +185,26 @@ function PickerCard({ order, onSubmit }: { order: Order; onSubmit: (specs: Picke
         </div>
       )}
 
+      {/* Warn when required component slots haven't been picked yet, so a build
+          isn't finalised with (e.g.) only a processor selected. */}
+      {(() => {
+        const missing = slots.filter((s) => countFor(s) === 0);
+        return missing.length > 0 ? (
+          <p className="mt-3 text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-md px-2 py-1.5">
+            Still needed: {missing.map((s) => SLOT_LABEL[s] ?? GENERIC_LABELS[s] ?? s).join(', ')}
+          </p>
+        ) : null;
+      })()}
+
       <Button
-        onClick={() => onSubmit(Object.values(picked))}
+        onClick={() => {
+          const missing = slots.filter((s) => countFor(s) === 0);
+          if (missing.length > 0) {
+            const names = missing.map((s) => SLOT_LABEL[s] ?? GENERIC_LABELS[s] ?? s).join(', ');
+            if (!window.confirm(`These parts haven't been picked for this build:\n\n${names}\n\nSubmit anyway and deduct only what you picked?`)) return;
+          }
+          onSubmit(Object.values(picked));
+        }}
         disabled={total === 0}
         className="w-full mt-3 bg-lime-600 hover:bg-lime-700 text-white disabled:opacity-50"
       >
