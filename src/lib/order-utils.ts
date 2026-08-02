@@ -90,6 +90,13 @@ function invoiceConfig() {
     supportEmail: asString(resolveSetting(values, 'business.supportEmail')),
     supportPhone: asString(resolveSetting(values, 'business.supportPhone')),
     currency: asString(resolveSetting(values, 'business.currency')),
+    ebayStoreUrl: asString(resolveSetting(values, 'business.ebayStoreUrl')),
+    address1: asString(resolveSetting(values, 'business.address1')),
+    address2: asString(resolveSetting(values, 'business.address2')),
+    city: asString(resolveSetting(values, 'business.city')),
+    county: asString(resolveSetting(values, 'business.county')),
+    postcode: asString(resolveSetting(values, 'business.postcode')),
+    country: asString(resolveSetting(values, 'business.country')),
   };
 }
 
@@ -210,6 +217,113 @@ function buildAmazonSlipPage(o: Order): string {
     </div>`;
 }
 
+// eBay invoice / packing slip — matches eBay's own layout: the eBay wordmark and
+// "INVOICE/PACKING SLIP" header, centred store name + URL (with a QR), the three
+// address blocks (Post to / Post from / Buyer registration address), buyer
+// contact line, order ref + date, the item table (Item / Quantity / Item price /
+// VAT rate / Item total), the postage-service line, and the seller message +
+// totals breakdown (Subtotal/Postage excl. VAT, Discount, VAT amount, Order total).
+function buildEbayInvoicePage(o: Order, cfg: ReturnType<typeof invoiceConfig>, sym: string): string {
+  const gbp = (n: number) => `${sym}${n.toFixed(2)}`;
+  const esc = (s?: string) => (s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+  const orderDate = o.saleDate
+    ? new Date(o.saleDate).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' })
+    : '—';
+
+  const shipLines = [o.postToAddress1, o.postToAddress2, [o.postToCity, o.postToCounty].filter(Boolean).join(', '),
+    o.postToPostcode, o.postToCountry || 'United Kingdom'].filter((l): l is string => !!l && l.trim() !== '');
+  const sellerLines = [cfg.address1, cfg.address2, [cfg.city, cfg.county].filter(Boolean).join(', '),
+    cfg.postcode, cfg.country || 'United Kingdom'].filter((l): l is string => !!l && l.trim() !== '');
+  // Buyer registration address falls back to the shipping address when unknown.
+  const regName = o.buyerName || o.postToName;
+  const regLines = (o.buyerAddress1 ? [o.buyerAddress1, o.buyerAddress2, [o.buyerCity, o.buyerCounty].filter(Boolean).join(', '),
+    o.buyerPostcode, o.buyerCountry] : shipLines).filter((l): l is string => !!l && l.trim() !== '');
+
+  const qty = o.quantity || 1;
+  const itemTotal = o.soldFor * qty;
+  const postage = o.postageAndPackaging || 0;
+  const orderTotal = o.totalPrice || itemTotal + postage;
+  const discount = Math.max(0, itemTotal + postage - orderTotal);
+  const rate = cfg.vatRegistered ? cfg.vatRate : 0;
+  const net = rate > 0 ? orderTotal / (1 + rate / 100) : orderTotal;
+  const vatAmount = orderTotal - net;
+  const postageNet = rate > 0 ? postage / (1 + rate / 100) : postage;
+  const subtotalNet = net - postageNet;
+
+  const service = { standard: 'Standard', next_day: 'Next Day', two_day: 'DPD Two Day', express: 'Express', collection: 'Collection' }[o.deliveryType] || o.deliveryService || 'Standard';
+  const specs = [o.customLabel && `CPU/SKU: ${o.customLabel}`, o.variation].filter(Boolean).join('  ');
+  const qrSrc = cfg.ebayStoreUrl ? `https://api.qrserver.com/v1/create-qr-code/?size=110x110&margin=0&data=${encodeURIComponent(cfg.ebayStoreUrl)}` : '';
+
+  return `
+    <div class="invoice eb">
+      <div class="eb-head">
+        <div class="eb-logo"><span style="color:#e53238">e</span><span style="color:#0064d2">b</span><span style="color:#f5af02">a</span><span style="color:#86b817">y</span></div>
+        <div class="eb-doctype">INVOICE/PACKING SLIP</div>
+      </div>
+      <div class="eb-store">
+        <div class="eb-store-name">${esc(cfg.sellerName)}</div>
+        ${cfg.ebayStoreUrl ? `<div class="eb-store-url">${esc(cfg.ebayStoreUrl)}</div>` : ''}
+      </div>
+      ${qrSrc ? `<div class="eb-qr"><p>Shop QR code link</p><img src="${qrSrc}" alt="QR" width="90" height="90"/></div>` : ''}
+      <div class="eb-addrs">
+        <div class="eb-addr">
+          <p class="eb-h">Post to</p>
+          <p><strong>${esc(o.postToName)}</strong></p>
+          ${shipLines.map((l) => `<p>${esc(l)}</p>`).join('')}
+          <div class="eb-contact">
+            ${o.postToPhone ? `<p>${esc(o.postToPhone)}</p>` : ''}
+            ${o.buyerEmail ? `<p>${esc(o.buyerEmail)}</p>` : ''}
+            ${o.buyerUsername ? `<p>Username: ${esc(o.buyerUsername)}</p>` : ''}
+          </div>
+        </div>
+        <div class="eb-addr">
+          <p class="eb-h">Post from</p>
+          <p><strong>${esc(cfg.legalName || cfg.sellerName)}</strong></p>
+          ${sellerLines.map((l) => `<p>${esc(l)}</p>`).join('')}
+          ${cfg.vatRegistered && cfg.vatNumber ? `<p>VAT ID: ${esc(cfg.vatNumber)}</p>` : ''}
+        </div>
+        <div class="eb-addr">
+          <p class="eb-h">Buyer registration address</p>
+          <p><strong>${esc(regName)}</strong></p>
+          ${regLines.map((l) => `<p>${esc(l)}</p>`).join('')}
+        </div>
+      </div>
+      <div class="eb-orderline">
+        <div><span class="eb-order">Order: ${esc(o.orderNumber || o.salesRecordNumber)}</span><br/><span class="eb-sr">Sales record #: ${esc(o.salesRecordNumber)}</span></div>
+        <div class="eb-date">Order date: ${orderDate}</div>
+      </div>
+      <table class="eb-items">
+        <thead><tr><th>Item</th><th class="eb-c">Quantity</th><th class="eb-r">Item price</th><th class="eb-c">VAT rate</th><th class="eb-r">Item total</th></tr></thead>
+        <tbody>
+          <tr>
+            <td>
+              <p class="eb-item-title">${esc(o.itemTitle)}${o.itemNumber ? ` (Item ID: ${esc(o.itemNumber)})` : ''}</p>
+              ${specs ? `<p class="eb-specs">${esc(specs)}</p>` : ''}
+            </td>
+            <td class="eb-c">${qty}</td>
+            <td class="eb-r">${gbp(o.soldFor)}</td>
+            <td class="eb-c">${rate}%</td>
+            <td class="eb-r">${gbp(itemTotal)}</td>
+          </tr>
+        </tbody>
+      </table>
+      <p class="eb-postage">Buyer selected postage service : ${esc(service)}</p>
+      <div class="eb-bottom">
+        <div class="eb-msg">
+          <p><strong>A message from ${esc(cfg.legalName || cfg.sellerName)}</strong></p>
+          <p>${esc(cfg.footer) || 'Thanks for your purchase!'}</p>
+        </div>
+        <table class="eb-totals">
+          <tr><td>Subtotal (excl. VAT)</td><td>${gbp(subtotalNet)}</td></tr>
+          <tr><td>Postage (excl. VAT)</td><td>${gbp(postageNet)}</td></tr>
+          ${discount > 0 ? `<tr><td>Discount</td><td>-${gbp(discount)}</td></tr>` : ''}
+          <tr><td>VAT amount</td><td>${gbp(vatAmount)}</td></tr>
+          <tr class="eb-total"><td>Order total</td><td>${gbp(orderTotal)}</td></tr>
+        </table>
+      </div>
+    </div>`;
+}
+
 /** Build printable invoice HTML for one or more orders. */
 export function buildInvoicesHtml(orders: Order[]): string {
   const cfg = invoiceConfig();
@@ -219,6 +333,7 @@ export function buildInvoicesHtml(orders: Order[]): string {
     // Amazon orders print the official Amazon Marketplace packing slip layout
     // (unless marketplace-native templates are switched off in Settings).
     if (platform === 'amazon' && cfg.useMarketplaceTemplates) return buildAmazonSlipPage(o);
+    if (platform === 'ebay' && cfg.useMarketplaceTemplates) return buildEbayInvoicePage(o, cfg, sym);
     const brand = INVOICE_BRANDS[platform];
     const orderRef = o.salesRecordNumber;
     return `
@@ -329,6 +444,43 @@ export function buildInvoicesHtml(orders: Order[]): string {
     .amz-grand { text-align:right; font-size:13px; font-weight:bold; margin:8px 0 18px; }
     .amz-footer { font-size:11.5px; line-height:1.6; margin-top:6px; }
     .amz-link { color:#0066c0; }
+
+    /* ---- eBay invoice / packing slip ---- */
+    .eb { font-family: Arial, Helvetica, sans-serif; font-size:11px; color:#111; position:relative; padding-top:10px; }
+    .eb p { line-height:1.5; }
+    .eb-head { display:flex; justify-content:space-between; align-items:flex-start; }
+    .eb-logo { font-size:34px; font-weight:800; letter-spacing:-1px; font-family: Arial, sans-serif; }
+    .eb-doctype { font-size:11px; color:#555; letter-spacing:0.5px; padding-top:8px; }
+    .eb-store { text-align:center; margin:-24px 0 8px; }
+    .eb-store-name { font-size:16px; font-weight:bold; color:#555; }
+    .eb-store-url { font-size:11px; color:#555; margin-top:2px; }
+    .eb-qr { position:absolute; top:44px; right:0; text-align:center; }
+    .eb-qr p { font-size:10px; color:#555; margin-bottom:3px; }
+    .eb-addrs { display:flex; gap:20px; margin-top:18px; padding-right:120px; }
+    .eb-addr { flex:1; }
+    .eb-h { font-weight:bold; font-size:11px; margin-bottom:5px; }
+    .eb-addr p { font-size:11px; line-height:1.45; }
+    .eb-contact { margin-top:14px; }
+    .eb-contact p { font-size:11px; line-height:1.5; }
+    .eb-orderline { display:flex; justify-content:space-between; align-items:flex-start; margin:22px 0 4px; }
+    .eb-order { font-size:15px; font-weight:bold; }
+    .eb-sr { font-size:11px; color:#555; }
+    .eb-date { font-size:12px; }
+    .eb-items { width:100%; border-collapse:collapse; margin-top:10px; }
+    .eb-items th { border-bottom:1px solid #333; padding:7px 6px; font-size:11px; font-weight:bold; text-align:left; }
+    .eb-items td { border-bottom:1px solid #e2e2e2; padding:10px 6px; font-size:11px; vertical-align:top; }
+    .eb-items .eb-c { text-align:center; }
+    .eb-items .eb-r { text-align:right; }
+    .eb-item-title { font-weight:600; line-height:1.4; }
+    .eb-specs { color:#555; margin-top:4px; font-size:10.5px; }
+    .eb-postage { text-align:right; font-size:11px; margin:10px 0 16px; }
+    .eb-bottom { display:flex; justify-content:space-between; gap:30px; }
+    .eb-msg { font-size:11px; max-width:9cm; }
+    .eb-msg p { line-height:1.5; }
+    .eb-totals { border-collapse:collapse; min-width:6.5cm; }
+    .eb-totals td { padding:3px 0; font-size:11px; }
+    .eb-totals td:last-child { text-align:right; padding-left:30px; }
+    .eb-total td { font-weight:bold; font-size:12px; padding-top:6px; }
     @media print { body { margin:0; } }
   </style></head><body>${pages.join('')}</body></html>`;
 }

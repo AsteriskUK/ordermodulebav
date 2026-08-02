@@ -140,6 +140,9 @@ export const SETTINGS_SCHEMA: SettingsGroup[] = [
         fields: [
           { key: 'business.tradingName', type: 'string', default: 'BIRMINGHAM AV',
             label: 'Trading name', help: 'Shown as the seller name on packing slips and invoices.' },
+          { key: 'business.ebayStoreUrl', type: 'string', default: '',
+            label: 'eBay store URL', placeholder: 'https://www.ebay.co.uk/str/yourstore',
+            help: 'Shown under the eBay logo on eBay invoices, with a QR code linking to it. Leave blank to hide.' },
           { key: 'business.legalName', type: 'string', default: '',
             label: 'Legal / registered name', placeholder: 'e.g. Birmingham AV Ltd' },
           { key: 'business.companyNumber', type: 'string', default: '', label: 'Company number', advanced: true },

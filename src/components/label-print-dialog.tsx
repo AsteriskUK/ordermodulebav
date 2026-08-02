@@ -61,26 +61,38 @@ export function LabelPrintDialog({ order, onClose }: Props) {
     }
   }
 
-  function printLabels() {
+  async function printLabels() {
     const labels = order.labelData ?? [];
     if (!labels.length) { toast.error('No label available'); return; }
-    labels.forEach((data, i) => {
-      const isHtml = data.trimStart().startsWith('<');
+    for (let i = 0; i < labels.length; i++) {
+      const data = labels[i];
       if (isZplBase64(data)) {
-        // ZPL is a raw thermal-printer format the browser can't render. The real
-        // path is the print agent → thermal printer (which prints it raw). As a
-        // browser fallback, download the .zpl so it can be sent to the printer
-        // manually — no label data (incl. the buyer address) leaves the machine.
-        const bytes = Uint8Array.from(atob(data), (c) => c.charCodeAt(0));
-        const url = URL.createObjectURL(new Blob([bytes], { type: 'application/octet-stream' }));
-        const a = document.createElement('a');
-        a.href = url;
-        a.download = `label-${order.salesRecordNumber}-${i + 1}.zpl`;
-        a.click();
-        URL.revokeObjectURL(url);
-        toast.info('Thermal (ZPL) label downloaded — print it on the FedEx thermal printer, or set up the print agent to send it automatically.');
-        return;
+        // ZPL is a raw thermal-printer format the browser can't render natively.
+        // Render it to an image (Labelary) so it shows a real print preview — the
+        // thermal printer still gets the raw ZPL via the print agent. Falls back to
+        // downloading the .zpl if the renderer is unreachable.
+        try {
+          const zpl = atob(data);
+          const res = await fetch('https://api.labelary.com/v1/printers/8dpmm/labels/4x6.75/0/', {
+            method: 'POST', headers: { Accept: 'image/png' }, body: zpl,
+          });
+          if (!res.ok) throw new Error(String(res.status));
+          const imgUrl = URL.createObjectURL(await res.blob());
+          const win = window.open('', `_label_${i}`);
+          if (!win) { toast.error('Pop-up blocked — allow pop-ups to print'); return; }
+          win.document.write(`<html><head><title>Label ${order.salesRecordNumber}</title></head><body style="margin:0;text-align:center"><img src="${imgUrl}" style="width:4in;max-width:100%" onload="window.focus();window.print()"/></body></html>`);
+          win.document.close();
+        } catch {
+          const bytes = Uint8Array.from(atob(data), (c) => c.charCodeAt(0));
+          const dl = URL.createObjectURL(new Blob([bytes], { type: 'application/octet-stream' }));
+          const a = document.createElement('a');
+          a.href = dl; a.download = `label-${order.salesRecordNumber}-${i + 1}.zpl`; a.click();
+          URL.revokeObjectURL(dl);
+          toast.info('Couldn’t render a preview — downloaded the .zpl instead. It still prints on the thermal printer via the print agent.');
+        }
+        continue;
       }
+      const isHtml = data.trimStart().startsWith('<');
       if (isHtml) {
         const win = window.open('', `_label_${i}`);
         if (!win) { toast.error('Pop-up blocked — allow pop-ups to print'); return; }
@@ -97,7 +109,7 @@ export function LabelPrintDialog({ order, onClose }: Props) {
         win.document.close();
         win.onload = () => win.print();
       }
-    });
+    }
   }
 
   // Invoice — via the print-agent invoice printer when configured, otherwise
@@ -122,7 +134,7 @@ export function LabelPrintDialog({ order, onClose }: Props) {
   async function printBoth() {
     if (canPrint) {
       if (agentPrinter) await printViaAgent();
-      else printLabels();
+      else await printLabels();
     }
     await printInvoice();
   }
