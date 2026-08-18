@@ -53,7 +53,10 @@ function labelImageType(): LabelImageType {
   return (['PDF', 'ZPLII', 'PNG', 'EPL2'].includes(v) ? v : 'ZPLII') as LabelImageType;
 }
 function labelStockType(): LabelStockType {
-  return (process.env.FEDEX_LABEL_STOCK_TYPE || 'STOCK_4X675_TRAILING_DOC_TAB').trim() as LabelStockType;
+  // FedEx cert: must match the physical stock in the printer — 4x6.75 with a
+  // LEADING doc tab (a trailing-tab transaction on leading-tab stock prints the
+  // sender block on the tab). Overridable via FEDEX_LABEL_STOCK_TYPE.
+  return (process.env.FEDEX_LABEL_STOCK_TYPE || 'STOCK_4X675_LEADING_DOC_TAB').trim() as LabelStockType;
 }
 
 function sanitizePostcode(postcode: string): string {

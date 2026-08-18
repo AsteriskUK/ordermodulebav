@@ -72,38 +72,25 @@ export function LabelPrintDialog({ order, onClose }: Props) {
     for (let i = 0; i < labels.length; i++) {
       const data = labels[i];
       if (isZplBase64(data)) {
+        // FedEx thermal labels MUST reach the printer as raw ZPL — never as a
+        // rendered image (rendering distorts the barcodes and fails FedEx
+        // certification). So: WebUSB straight to the printer, else hand back the
+        // raw .zpl to print raw. No image conversion, ever.
         const zplBytes = Uint8Array.from(atob(data), (c) => c.charCodeAt(0));
-        // Direct-to-USB (Chrome/Edge): stream the raw ZPL straight to the FedEx/
-        // Zebra printer connected to this PC — no agent, no download.
         if (isWebUsbAvailable()) {
           try {
             if (await printRawToUsbPrinter(zplBytes)) { toast.success('Printed to the USB label printer'); continue; }
           } catch (e) {
             toast.error(`USB print failed: ${e instanceof Error ? e.message : 'error'}`);
-            // fall through to the preview/download fallback
           }
         }
-        // No WebUSB (e.g. Safari) — ZPL can't render natively, so show it via
-        // Labelary as a print preview; fall back to downloading the .zpl.
-        try {
-          const zpl = atob(data);
-          const res = await fetch('https://api.labelary.com/v1/printers/8dpmm/labels/4x6.75/0/', {
-            method: 'POST', headers: { Accept: 'image/png' }, body: zpl,
-          });
-          if (!res.ok) throw new Error(String(res.status));
-          const imgUrl = URL.createObjectURL(await res.blob());
-          const win = window.open('', `_label_${i}`);
-          if (!win) { toast.error('Pop-up blocked — allow pop-ups to print'); return; }
-          win.document.write(`<html><head><title>Label ${order.salesRecordNumber}</title></head><body style="margin:0;text-align:center"><img src="${imgUrl}" style="width:4in;max-width:100%" onload="window.focus();window.print()"/></body></html>`);
-          win.document.close();
-        } catch {
-          const bytes = Uint8Array.from(atob(data), (c) => c.charCodeAt(0));
-          const dl = URL.createObjectURL(new Blob([bytes], { type: 'application/octet-stream' }));
-          const a = document.createElement('a');
-          a.href = dl; a.download = `label-${order.salesRecordNumber}-${i + 1}.zpl`; a.click();
-          URL.revokeObjectURL(dl);
-          toast.info('Couldn’t render a preview — downloaded the .zpl instead. It still prints on the thermal printer via the print agent.');
-        }
+        // No direct raw path here → download the raw ZPL so it can be sent to the
+        // printer unmodified (or configure the print agent / use Chrome for USB).
+        const dl = URL.createObjectURL(new Blob([zplBytes], { type: 'application/octet-stream' }));
+        const a = document.createElement('a');
+        a.href = dl; a.download = `label-${order.salesRecordNumber}-${i + 1}.zpl`; a.click();
+        URL.revokeObjectURL(dl);
+        toast.info('Raw ZPL downloaded. For direct printing use Chrome (USB) or the print agent — do not print it as an image.');
         continue;
       }
       const isHtml = data.trimStart().startsWith('<');
