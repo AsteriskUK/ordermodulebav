@@ -7,6 +7,7 @@ import { toast } from 'sonner';
 import { Printer, Package, CheckCircle, FileText } from 'lucide-react';
 import { useOrderStore } from '@/lib/store';
 import { fetchPrinterConfig, printLabel, printerForCarrier, printInvoicesFor, isZplBase64 } from '@/lib/print-agent';
+import { isWebUsbAvailable, printRawToUsbPrinter } from '@/lib/webusb-print';
 import { buildInvoicesHtml, printHtml } from '@/lib/order-utils';
 import { useEffect, useState } from 'react';
 import { useSettingBool, useSettingNumber } from '@/hooks/use-settings';
@@ -36,6 +37,10 @@ export function LabelPrintDialog({ order, onClose }: Props) {
   // Is a printer mapped for this carrier on the print agent? If so, we can send
   // the label straight to the FedEx/DPD printer instead of the browser dialog.
   const [agentPrinter, setAgentPrinter] = useState<string | null>(null);
+  // WebUSB (Chrome/Edge) lets us print raw ZPL straight to a USB-connected label
+  // printer. Checked after mount to avoid an SSR/hydration mismatch.
+  const [usbAvailable, setUsbAvailable] = useState(false);
+  useEffect(() => { setUsbAvailable(isWebUsbAvailable()); }, []);
   useEffect(() => {
     let alive = true;
     if (!carrier) return;
@@ -67,10 +72,19 @@ export function LabelPrintDialog({ order, onClose }: Props) {
     for (let i = 0; i < labels.length; i++) {
       const data = labels[i];
       if (isZplBase64(data)) {
-        // ZPL is a raw thermal-printer format the browser can't render natively.
-        // Render it to an image (Labelary) so it shows a real print preview — the
-        // thermal printer still gets the raw ZPL via the print agent. Falls back to
-        // downloading the .zpl if the renderer is unreachable.
+        const zplBytes = Uint8Array.from(atob(data), (c) => c.charCodeAt(0));
+        // Direct-to-USB (Chrome/Edge): stream the raw ZPL straight to the FedEx/
+        // Zebra printer connected to this PC — no agent, no download.
+        if (isWebUsbAvailable()) {
+          try {
+            if (await printRawToUsbPrinter(zplBytes)) { toast.success('Printed to the USB label printer'); continue; }
+          } catch (e) {
+            toast.error(`USB print failed: ${e instanceof Error ? e.message : 'error'}`);
+            // fall through to the preview/download fallback
+          }
+        }
+        // No WebUSB (e.g. Safari) — ZPL can't render natively, so show it via
+        // Labelary as a print preview; fall back to downloading the .zpl.
         try {
           const zpl = atob(data);
           const res = await fetch('https://api.labelary.com/v1/printers/8dpmm/labels/4x6.75/0/', {
@@ -234,6 +248,11 @@ export function LabelPrintDialog({ order, onClose }: Props) {
               <button onClick={printLabels} className="text-xs text-slate-400 hover:text-slate-600 underline w-fit mx-auto">
                 Print label via browser instead
               </button>
+            )}
+            {canPrint && !agentPrinter && usbAvailable && (
+              <p className="text-[11px] text-slate-400 text-center">
+                Prints straight to the USB label printer. The first time, your browser asks which printer to use.
+              </p>
             )}
 
             <Button
