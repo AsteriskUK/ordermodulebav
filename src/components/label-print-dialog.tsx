@@ -8,6 +8,7 @@ import { Printer, Package, CheckCircle, FileText } from 'lucide-react';
 import { useOrderStore } from '@/lib/store';
 import { fetchPrinterConfig, printLabel, printerForCarrier, printInvoicesFor, isZplBase64 } from '@/lib/print-agent';
 import { isWebUsbAvailable, printRawToUsbPrinter } from '@/lib/webusb-print';
+import { printZplViaBrowserPrint, browserPrintReachable } from '@/lib/zebra-browser-print';
 import { buildInvoicesHtml, printHtml } from '@/lib/order-utils';
 import { useEffect, useState } from 'react';
 import { useSettingBool, useSettingNumber } from '@/hooks/use-settings';
@@ -40,7 +41,11 @@ export function LabelPrintDialog({ order, onClose }: Props) {
   // WebUSB (Chrome/Edge) lets us print raw ZPL straight to a USB-connected label
   // printer. Checked after mount to avoid an SSR/hydration mismatch.
   const [usbAvailable, setUsbAvailable] = useState(false);
-  useEffect(() => { setUsbAvailable(isWebUsbAvailable()); }, []);
+  const [bpReachable, setBpReachable] = useState<boolean | null>(null);
+  useEffect(() => {
+    setUsbAvailable(isWebUsbAvailable());
+    browserPrintReachable().then(setBpReachable).catch(() => setBpReachable(false));
+  }, []);
   useEffect(() => {
     let alive = true;
     if (!carrier) return;
@@ -76,17 +81,22 @@ export function LabelPrintDialog({ order, onClose }: Props) {
         // rendered image (rendering distorts the barcodes and fails FedEx
         // certification). So: WebUSB straight to the printer, else hand back the
         // raw .zpl to print raw. No image conversion, ever.
-        const zplBytes = Uint8Array.from(atob(data), (c) => c.charCodeAt(0));
+        const zplStr = atob(data);
+        const zplBytes = Uint8Array.from(zplStr, (c) => c.charCodeAt(0));
+        // 1) Zebra Browser Print — the reliable raw-ZPL path (works on Windows,
+        //    any browser; the printer firmware renders the ZPL — FedEx-compliant).
+        const bp = await printZplViaBrowserPrint(zplStr);
+        if (bp.ok) { toast.success('Sent to the Zebra printer (Browser Print)'); continue; }
+        if (bp.reachable) { toast.error(bp.message, { duration: 12000 }); continue; } // running but couldn't print
+        // 2) WebUSB (Chrome direct) — if Browser Print isn't installed/running.
         if (isWebUsbAvailable()) {
           const r = await printRawToUsbPrinter(zplBytes);
           if (r.ok) { toast.success('Printed to the USB label printer'); continue; }
-          // A real failure (device held by Windows, transfer error): tell the user
-          // exactly what happened rather than silently downloading.
           if (r.reason === 'failed') { toast.error(r.message, { duration: 12000 }); continue; }
           // 'cancelled'/'unsupported' → fall through to the raw download.
         }
-        // No direct raw path → download the raw ZPL so it can be sent to the
-        // printer unmodified (configure the print agent, or use Chrome for USB).
+        // 3) No direct raw path → download the raw ZPL so it can be sent to the
+        // printer unmodified (install Zebra Browser Print, or use Chrome for USB).
         const dl = URL.createObjectURL(new Blob([zplBytes], { type: 'application/octet-stream' }));
         const a = document.createElement('a');
         a.href = dl; a.download = `label-${order.salesRecordNumber}-${i + 1}.zpl`; a.click();
@@ -237,10 +247,21 @@ export function LabelPrintDialog({ order, onClose }: Props) {
                 Print label via browser instead
               </button>
             )}
-            {canPrint && !agentPrinter && usbAvailable && (
-              <p className="text-[11px] text-slate-400 text-center">
-                Prints straight to the USB label printer. The first time, your browser asks which printer to use.
-              </p>
+            {canPrint && !agentPrinter && (
+              bpReachable ? (
+                <p className="text-[11px] text-green-600 text-center flex items-center justify-center gap-1">
+                  <CheckCircle className="h-3 w-3" /> Zebra Browser Print connected — labels send as raw ZPL.
+                </p>
+              ) : usbAvailable ? (
+                <p className="text-[11px] text-slate-400 text-center">
+                  Prints straight to the USB label printer. First time, the browser asks which printer to use.
+                  For most reliable printing, install Zebra Browser Print.
+                </p>
+              ) : (
+                <p className="text-[11px] text-slate-400 text-center">
+                  Install Zebra Browser Print on this PC to print labels directly to the Zebra printer.
+                </p>
+              )
             )}
 
             <Button
