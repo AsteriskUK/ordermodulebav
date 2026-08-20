@@ -78,19 +78,20 @@ export function LabelPrintDialog({ order, onClose }: Props) {
         // raw .zpl to print raw. No image conversion, ever.
         const zplBytes = Uint8Array.from(atob(data), (c) => c.charCodeAt(0));
         if (isWebUsbAvailable()) {
-          try {
-            if (await printRawToUsbPrinter(zplBytes)) { toast.success('Printed to the USB label printer'); continue; }
-          } catch (e) {
-            toast.error(`USB print failed: ${e instanceof Error ? e.message : 'error'}`);
-          }
+          const r = await printRawToUsbPrinter(zplBytes);
+          if (r.ok) { toast.success('Printed to the USB label printer'); continue; }
+          // A real failure (device held by Windows, transfer error): tell the user
+          // exactly what happened rather than silently downloading.
+          if (r.reason === 'failed') { toast.error(r.message, { duration: 12000 }); continue; }
+          // 'cancelled'/'unsupported' → fall through to the raw download.
         }
-        // No direct raw path here → download the raw ZPL so it can be sent to the
-        // printer unmodified (or configure the print agent / use Chrome for USB).
+        // No direct raw path → download the raw ZPL so it can be sent to the
+        // printer unmodified (configure the print agent, or use Chrome for USB).
         const dl = URL.createObjectURL(new Blob([zplBytes], { type: 'application/octet-stream' }));
         const a = document.createElement('a');
         a.href = dl; a.download = `label-${order.salesRecordNumber}-${i + 1}.zpl`; a.click();
         URL.revokeObjectURL(dl);
-        toast.info('Raw ZPL downloaded. For direct printing use Chrome (USB) or the print agent — do not print it as an image.');
+        toast.info('Raw ZPL downloaded. For direct printing use Chrome (USB) or the print agent — never print it as an image.');
         continue;
       }
       const isHtml = data.trimStart().startsWith('<');

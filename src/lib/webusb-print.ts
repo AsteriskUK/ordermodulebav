@@ -4,14 +4,21 @@
 // Direct raw printing to a USB-connected printer (e.g. a Zebra / FedEx thermal
 // label printer) straight from the browser via WebUSB — no print agent, driver
 // or download needed. The exact ZPL bytes are streamed to the printer's bulk
-// endpoint, which is what the thermal printer wants.
+// endpoint, which is what the thermal printer wants (no image conversion).
 //
-// Support: Chrome/Edge over HTTPS (or localhost). Safari and Firefox do NOT
-// implement WebUSB — callers must fall back (print agent, or a preview/download).
-// The first print shows a one-time device picker; the grant is then remembered
-// (navigator.usb.getDevices), so later prints go straight through.
+// Support: Chrome/Edge over HTTPS (or localhost). Safari/Firefox lack WebUSB.
+// On Windows the system print driver often "claims" the printer, which blocks
+// the browser from grabbing the interface — printRawToUsbPrinter surfaces that
+// so the UI can tell the user to use the print agent instead of silently
+// downloading. The first print shows a one-time picker; the grant is remembered.
 
-const PRINTER_CLASS = 7; // USB base class 7 = Printer
+const PRINTER_CLASS = 7;       // USB base class 7 = Printer
+const VENDOR_CLASS = 0xff;     // vendor-specific (some printers expose raw here)
+
+export type UsbPrintResult =
+  | { ok: true }
+  | { ok: false; reason: 'unsupported' | 'cancelled'; message?: string }
+  | { ok: false; reason: 'failed'; message: string };
 
 export function isWebUsbAvailable(): boolean {
   return typeof navigator !== 'undefined' && !!(navigator as any).usb;
@@ -24,7 +31,6 @@ function deviceIsPrinter(d: any): boolean {
     (i.alternates ?? [i.alternate]).some((a: any) => a?.interfaceClass === PRINTER_CLASS));
 }
 
-/** A previously-authorised USB printer, if any (no prompt). */
 async function knownPrinter(): Promise<any | null> {
   const usb = (navigator as any).usb;
   if (!usb) return null;
@@ -32,40 +38,60 @@ async function knownPrinter(): Promise<any | null> {
   return devices.find(deviceIsPrinter) ?? devices[0] ?? null;
 }
 
-/** Send raw bytes to a USB printer. Returns false if WebUSB is unavailable or the
- *  user cancels the picker; throws only on a real transfer error. */
-export async function printRawToUsbPrinter(bytes: Uint8Array): Promise<boolean> {
+// Rank interfaces we might write to: real printer class first, then vendor
+// specific, then anything else — but only ones that expose a bulk OUT endpoint.
+function candidateInterfaces(device: any): { num: number; ep: number; cls: number }[] {
+  const out: { num: number; ep: number; cls: number }[] = [];
+  for (const iface of device.configuration?.interfaces ?? []) {
+    const alt = iface.alternate ?? iface.alternates?.[0];
+    const ep = alt?.endpoints?.find((e: any) => e.direction === 'out' && e.type === 'bulk');
+    if (ep) out.push({ num: iface.interfaceNumber, ep: ep.endpointNumber, cls: alt.interfaceClass });
+  }
+  const rank = (c: number) => (c === PRINTER_CLASS ? 0 : c === VENDOR_CLASS ? 1 : 2);
+  return out.sort((a, b) => rank(a.cls) - rank(b.cls));
+}
+
+/** Stream raw bytes to a USB printer. See UsbPrintResult for outcomes. */
+export async function printRawToUsbPrinter(bytes: Uint8Array): Promise<UsbPrintResult> {
   const usb = (navigator as any).usb;
-  if (!usb) return false;
+  if (!usb) return { ok: false, reason: 'unsupported' };
 
   let device = await knownPrinter();
   if (!device) {
     try {
-      // requestDevice must run inside a user gesture (the print-button click).
       device = await usb.requestDevice({ filters: [{ classCode: PRINTER_CLASS }] });
     } catch {
-      return false; // user dismissed the picker
+      return { ok: false, reason: 'cancelled' };
     }
   }
-  if (!device) return false;
+  if (!device) return { ok: false, reason: 'cancelled' };
 
-  await device.open();
+  try {
+    await device.open();
+  } catch (e: any) {
+    return { ok: false, reason: 'failed', message: `Couldn't open the printer: ${e?.message || e}` };
+  }
+
   try {
     if (!device.configuration) await device.selectConfiguration(1);
-    // Find the printer interface and its bulk OUT endpoint.
-    let ifaceNum = -1, epNum = -1;
-    for (const iface of device.configuration.interfaces) {
-      const alt = iface.alternate ?? iface.alternates?.[0];
-      const isPrinterIface = alt?.interfaceClass === PRINTER_CLASS || device.deviceClass === PRINTER_CLASS;
-      if (!isPrinterIface) continue;
-      const ep = alt.endpoints.find((e: any) => e.direction === 'out' && e.type === 'bulk');
-      if (ep) { ifaceNum = iface.interfaceNumber; epNum = ep.endpointNumber; break; }
+    const candidates = candidateInterfaces(device);
+    if (candidates.length === 0) return { ok: false, reason: 'failed', message: 'No writable interface found on this device.' };
+
+    let claimed: { num: number; ep: number } | null = null;
+    let lastErr = '';
+    for (const c of candidates) {
+      try { await device.claimInterface(c.num); claimed = c; break; }
+      catch (e: any) { lastErr = e?.message || String(e); }
     }
-    if (ifaceNum < 0) throw new Error('No printer interface found on the selected USB device');
-    await device.claimInterface(ifaceNum);
-    await device.transferOut(epNum, bytes);
-    try { await device.releaseInterface(ifaceNum); } catch { /* ignore */ }
-    return true;
+    if (!claimed) {
+      return { ok: false, reason: 'failed',
+        message: `Windows won't let the browser take the printer (it's held by the print driver): ${lastErr}. Use the print agent for direct ZPL printing.` };
+    }
+    await device.transferOut(claimed.ep, bytes);
+    try { await device.releaseInterface(claimed.num); } catch { /* ignore */ }
+    return { ok: true };
+  } catch (e: any) {
+    return { ok: false, reason: 'failed', message: `Print transfer failed: ${e?.message || e}` };
   } finally {
     try { await device.close(); } catch { /* ignore */ }
   }
