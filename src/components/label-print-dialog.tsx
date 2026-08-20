@@ -229,7 +229,7 @@ export function LabelPrintDialog({ order, onClose }: Props) {
             )}
             <div className="grid grid-cols-2 gap-2">
               <Button
-                onClick={() => (canPrint && agentPrinter ? printViaAgent() : printLabels())}
+                onClick={() => { (canPrint && agentPrinter ? printViaAgent() : printLabels()).catch((e) => toast.error(`Print failed: ${e instanceof Error ? e.message : 'error'}`)); }}
                 variant="outline"
                 disabled={!canPrint}
                 title={!canPrint ? 'No label booked yet — book it in Batch Shipping' : agentPrinter ? `Sends to ${agentPrinter}` : 'Opens the browser print dialog'}

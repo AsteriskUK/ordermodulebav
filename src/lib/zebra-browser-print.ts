@@ -48,20 +48,33 @@ export type BpResult = { ok: true } | { ok: false; reachable: boolean; message: 
 
 /** Send a raw ZPL string to the default Zebra via Browser Print. */
 export async function printZplViaBrowserPrint(zpl: string): Promise<BpResult> {
-  if (!(await browserPrintReachable())) {
+  const reachable = await browserPrintReachable();
+  console.log('[BrowserPrint] reachable:', reachable);
+  if (!reachable) {
     return { ok: false, reachable: false, message: 'Zebra Browser Print not reachable.' };
   }
   const device = await defaultDevice();
+  console.log('[BrowserPrint] device:', device);
   if (!device) {
     return { ok: false, reachable: true, message: 'Browser Print is running but no Zebra printer is selected — open Browser Print and choose the printer.' };
   }
-  const res = await bpFetch('/write', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ device, data: zpl }),
-  });
+  // /write with an application/json body triggers a CORS preflight that Browser
+  // Print only answers for approved hosts. Use text/plain to keep it a "simple"
+  // request (no preflight), which is how Zebra's own SDK sends it.
+  let res: Response | null = null;
+  try {
+    res = await bpFetch('/write', {
+      method: 'POST',
+      headers: { 'Content-Type': 'text/plain;charset=UTF-8' },
+      body: JSON.stringify({ device, data: zpl }),
+    });
+  } catch (e: any) {
+    console.error('[BrowserPrint] /write threw:', e);
+    return { ok: false, reachable: true, message: `Browser Print write error: ${e?.message || e}. Add this site to Browser Print's approved hosts.` };
+  }
+  console.log('[BrowserPrint] /write status:', res?.status);
   if (!res || !res.ok) {
-    return { ok: false, reachable: true, message: `Browser Print couldn't print (${res ? res.status : 'no response'}).` };
+    return { ok: false, reachable: true, message: `Browser Print couldn't print (${res ? res.status : 'no response / CORS'}). Add this site to Browser Print's approved hosts.` };
   }
   return { ok: true };
 }
