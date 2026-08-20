@@ -101,7 +101,7 @@ export function LabelPrintDialog({ order, onClose }: Props) {
         const a = document.createElement('a');
         a.href = dl; a.download = `label-${order.salesRecordNumber}-${i + 1}.zpl`; a.click();
         URL.revokeObjectURL(dl);
-        toast.info('Raw ZPL downloaded. For direct printing use Chrome (USB) or the print agent — never print it as an image.');
+        toast.info('Zebra Browser Print not detected, so the raw ZPL was downloaded. Install Browser Print and open https://localhost:9101 once to trust it, then retry. Never print the file as an image.', { duration: 14000 });
         continue;
       }
       const isHtml = data.trimStart().startsWith('<');
