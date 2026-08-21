@@ -56,7 +56,10 @@ function labelStockType(): LabelStockType {
   // FedEx cert: must match the physical stock in the printer — 4x6.75 with a
   // LEADING doc tab (a trailing-tab transaction on leading-tab stock prints the
   // sender block on the tab). Overridable via FEDEX_LABEL_STOCK_TYPE.
-  return (process.env.FEDEX_LABEL_STOCK_TYPE || 'STOCK_4X675_LEADING_DOC_TAB').trim() as LabelStockType;
+  // NB: the FedEx REST enum uses a decimal point — STOCK_4X6.75_… — NOT
+  // "4X675". The no-dot form is invalid and FedEx silently defaults it to
+  // STOCK_4X6 (which prints the sender block on the doc tab).
+  return (process.env.FEDEX_LABEL_STOCK_TYPE || 'STOCK_4X6.75_LEADING_DOC_TAB').trim() as LabelStockType;
 }
 
 function sanitizePostcode(postcode: string): string {
