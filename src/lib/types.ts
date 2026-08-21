@@ -495,7 +495,11 @@ export interface Order {
   // Printed label storage
   labelPrintedAt?: string;
   labelCarrier?: string;
-  labelData?: string[]; // base64 label(s): PDF, or ZPL for FedEx thermal
+  labelData?: string[]; // base64 label(s): PDF, or ZPL for FedEx thermal — one per box
+  // A packer flagged that the label(s) need re-booking (e.g. box count changed).
+  // Set when re-label is requested; cleared when Comms re-books (saveOrderLabels).
+  needsRelabel?: boolean;
+  relabelReason?: string;
   // When the tracking was uploaded to the marketplace (eBay add-tracking /
   // Amazon confirm-shipment). Set once the ship-by-date window opens; prevents
   // re-uploading and marks that the marketplace has been told it's dispatched.

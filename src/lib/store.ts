@@ -169,6 +169,7 @@ interface OrderStore {
   updateOrderCategory: (orderId: string, category: string) => void;
   updateOrderPriority: (orderId: string, priority: number) => void;
   updateOrderNumberOfBoxes: (orderId: string, numberOfBoxes: number) => void;
+  requestRelabel: (orderId: string, opts?: { numberOfBoxes?: number; reason?: string }) => void;
   updateOrderExtendedLiability: (orderId: string, extendedLiability: boolean) => void;
   updateOrderDeliveryService: (orderId: string, deliveryService: string) => void;
   saveOrderLabels: (orderId: string, carrier: string, labels: string[]) => void;
@@ -460,6 +461,54 @@ export const useOrderStore = create<OrderStore>()(
           updatedAt: now,
         });
       },
+      // A packer flags that the label(s) need re-booking (box count changed, damaged
+      // label, wrong service …). Updates the box count, marks the order needsRelabel,
+      // and raises an urgent Comms ticket to re-book. Comms re-books in Batch
+      // Shipping, which overwrites the stored label(s) and clears the flag.
+      requestRelabel: (orderId, opts) => {
+        const { orders, tickets, users, currentUserId, addTicket } = get();
+        const order = orders.find((o) => o.id === orderId);
+        if (!order) return;
+        const boxes = Math.max(1, opts?.numberOfBoxes ?? order.numberOfBoxes ?? 1);
+        const reason = (opts?.reason ?? '').trim();
+        const now = new Date().toISOString();
+        const user = users.find((u) => u.id === currentUserId);
+        set((state) => {
+          const updated = state.orders.map((o) => o.id === orderId
+            ? { ...o, numberOfBoxes: boxes, labelQty: boxes, needsRelabel: true, relabelReason: reason || undefined }
+            : o);
+          const u = updated.find((o) => o.id === orderId);
+          if (u) syncOrder(u).catch(console.error);
+          return { orders: updated };
+        });
+        // One open relabel ticket per order — update rather than duplicate.
+        const existing = tickets.find((t) => t.orderId === orderId && t.category === 'relabel' && t.status !== 'closed' && t.status !== 'resolved');
+        const detail = `Re-book label — ${boxes} box${boxes !== 1 ? 'es' : ''}${reason ? ` — ${reason}` : ''}`;
+        if (existing) {
+          get().updateTicket(existing.id, { priority: 'urgent', status: 'open' }, { byId: user?.id, byName: user?.name, type: 'note', text: detail });
+          return;
+        }
+        addTicket({
+          id: generateUUID(),
+          subject: `Re-book label — #${order.salesRecordNumber} (${boxes} box${boxes !== 1 ? 'es' : ''})`,
+          body: `Packer requested a re-book/relabel.\nBoxes: ${boxes}.${reason ? `\nReason: ${reason}` : ''}\nRe-book in Batch Shipping — it overwrites the stored label(s).`,
+          category: 'relabel',
+          status: 'open',
+          priority: 'urgent',
+          department: 'comms',
+          orderId: order.id,
+          salesRecordNumber: order.salesRecordNumber,
+          orderNumber: order.orderNumber,
+          buyerUsername: order.buyerUsername,
+          buyerName: order.buyerName,
+          itemTitle: order.itemTitle,
+          createdById: user?.id,
+          createdByName: user?.name,
+          activity: [{ at: now, byId: user?.id, byName: user?.name, type: 'create', text: detail }],
+          createdAt: now,
+          updatedAt: now,
+        });
+      },
       acquireAssemblyLock: (orderId, force = false) => {
         const { orders, users, currentUserId } = get();
         const order = orders.find((o) => o.id === orderId);
@@ -621,7 +670,8 @@ export const useOrderStore = create<OrderStore>()(
         set((state) => {
           const updatedOrders = state.orders.map((o) =>
             o.id === orderId
-              ? { ...o, labelPrintedAt: new Date().toISOString(), labelCarrier: carrier, labelData: labels }
+              // Fresh labels overwrite the old ones and clear any relabel request.
+              ? { ...o, labelPrintedAt: new Date().toISOString(), labelCarrier: carrier, labelData: labels, needsRelabel: false, relabelReason: undefined }
               : o
           );
           const updatedOrder = updatedOrders.find(o => o.id === orderId);

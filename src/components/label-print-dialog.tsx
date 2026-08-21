@@ -22,8 +22,21 @@ type Carrier = 'DPD' | 'FedEx';
 
 export function LabelPrintDialog({ order, onClose }: Props) {
   const updateOrderStatus = useOrderStore((s) => s.updateOrderStatus);
+  const requestRelabel = useOrderStore((s) => s.requestRelabel);
   const combineLabelAndInvoice = useSettingBool('print.combineLabelAndInvoice');
   const invoiceCopies = useSettingNumber('print.copiesPerInvoice');
+
+  // Packer can flag a re-book (box count changed / damaged label) → raises a
+  // Comms ticket to regenerate the label(s), which then overwrite the stored ones.
+  const [showRebook, setShowRebook] = useState(false);
+  const [boxes, setBoxes] = useState(order.numberOfBoxes ?? 1);
+  const [rebookReason, setRebookReason] = useState('');
+  function submitRebook() {
+    requestRelabel(order.id, { numberOfBoxes: boxes, reason: rebookReason.trim() || undefined });
+    toast.success(`Re-book requested for ${boxes} box${boxes !== 1 ? 'es' : ''} — Comms notified`);
+    setShowRebook(false);
+    setRebookReason('');
+  }
 
   const carrier: Carrier | null =
     order.labelCarrier === 'DPD' || order.labelCarrier === 'FedEx'
@@ -206,6 +219,47 @@ export function LabelPrintDialog({ order, onClose }: Props) {
               <span className="text-sm font-mono font-medium text-slate-800">
                 {order.trackingNumber}
               </span>
+            </div>
+          )}
+
+          {/* Boxes / labels + re-book request */}
+          {carrier && (
+            <div className="rounded-lg border border-slate-200 p-3 space-y-2">
+              <div className="flex items-center justify-between">
+                <span className="text-xs text-slate-500">
+                  {(order.numberOfBoxes ?? 1)} box{(order.numberOfBoxes ?? 1) !== 1 ? 'es' : ''}
+                  {hasLabelData ? ` · ${order.labelData!.length} label${order.labelData!.length !== 1 ? 's' : ''} stored` : ''}
+                </span>
+                {!showRebook && !order.needsRelabel && (
+                  <button onClick={() => { setBoxes(order.numberOfBoxes ?? 1); setShowRebook(true); }}
+                    className="text-xs text-blue-600 hover:text-blue-700 font-medium">Change boxes / re-book</button>
+                )}
+              </div>
+
+              {order.needsRelabel && (
+                <div className="bg-amber-50 border border-amber-200 rounded-md px-2.5 py-2 text-xs text-amber-800">
+                  <p className="font-medium">Re-book requested — Comms notified.</p>
+                  <p className="text-amber-600 mt-0.5">The stored label may be out of date; a new one will replace it once re-booked.{order.relabelReason ? ` (${order.relabelReason})` : ''}</p>
+                </div>
+              )}
+
+              {showRebook && (
+                <div className="space-y-2">
+                  <div className="flex items-center gap-2">
+                    <span className="text-xs text-slate-600">Boxes</span>
+                    <button onClick={() => setBoxes((b) => Math.max(1, b - 1))} className="h-7 w-7 rounded-md border text-slate-600 hover:bg-slate-50">−</button>
+                    <span className="text-sm font-medium w-6 text-center">{boxes}</span>
+                    <button onClick={() => setBoxes((b) => b + 1)} className="h-7 w-7 rounded-md border text-slate-600 hover:bg-slate-50">+</button>
+                  </div>
+                  <textarea value={rebookReason} onChange={(e) => setRebookReason(e.target.value)} rows={2}
+                    placeholder="Reason (e.g. now 3 boxes, label damaged, wrong service)…"
+                    className="w-full rounded-md border border-slate-300 px-2.5 py-1.5 text-xs resize-y focus:outline-none focus:ring-2 focus:ring-blue-500" />
+                  <div className="flex gap-2">
+                    <Button size="sm" onClick={submitRebook} className="bg-amber-600 hover:bg-amber-700 text-white">Request re-book from Comms</Button>
+                    <Button size="sm" variant="outline" onClick={() => setShowRebook(false)}>Cancel</Button>
+                  </div>
+                </div>
+              )}
             </div>
           )}
 

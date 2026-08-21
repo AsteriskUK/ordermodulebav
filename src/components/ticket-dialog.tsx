@@ -28,6 +28,7 @@ const CATEGORY_LABELS: Record<string, string> = Object.fromEntries([
   { value: 'refund-request', label: 'Refund request' },
   { value: 'return-request', label: 'Return request' },
   { value: 'cancellation', label: 'Cancellation' },
+  { value: 'relabel', label: 'Re-book / relabel' },
   { value: 'callback', label: 'Callback request' },
   { value: 'question', label: 'General question' },
   { value: 'other', label: 'Other' },

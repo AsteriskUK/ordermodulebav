@@ -431,7 +431,7 @@ export const SETTINGS_SCHEMA: SettingsGroup[] = [
         label: 'Tickets',
         fields: [
           { key: 'tickets.categories', type: 'list',
-            default: ['cancellation', 'tracking', 'refund', 'return', 'callback', 'missing-item', 'other'],
+            default: ['cancellation', 'relabel', 'tracking', 'refund', 'return', 'callback', 'missing-item', 'other'],
             label: 'Ticket categories' },
           { key: 'tickets.defaultPriority', type: 'select', default: 'normal', label: 'Default priority',
             options: [

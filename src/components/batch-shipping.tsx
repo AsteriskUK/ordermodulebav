@@ -969,6 +969,11 @@ export function BatchShipping() {
                         <TableCell className="font-mono text-xs">
                           {primary.amazonOrderId || primary.salesRecordNumber}
                           {isMultiItem && <span title="Multi-item order"><PackageOpen className="h-3 w-3 inline ml-1 text-amber-500" /></span>}
+                          {primary.needsRelabel && (
+                            <span className="ml-1 inline-flex items-center rounded border border-amber-300 bg-amber-100 text-amber-800 text-[10px] px-1 py-0.5 align-middle" title={primary.relabelReason || 'Packer requested a re-book'}>
+                              Re-book {primary.numberOfBoxes ?? 1}×
+                            </span>
+                          )}
                         </TableCell>
                         <TableCell className="text-xs font-medium">
                           <div>{primary.postToName}</div>
@@ -1231,6 +1236,11 @@ export function BatchShipping() {
                               <span className="flex-1 truncate text-slate-700">{order.itemTitle}</span>
                               <span className="text-slate-500 whitespace-nowrap">×{order.quantity}</span>
                               <span className="font-medium whitespace-nowrap">£{order.totalPrice.toFixed(2)}</span>
+                              {order.needsRelabel && (
+                                <Badge variant="outline" className="text-xs bg-amber-100 text-amber-800 border-amber-300 whitespace-nowrap" title={order.relabelReason || 'Packer requested a re-book'}>
+                                  Re-book {order.numberOfBoxes ?? 1}×
+                                </Badge>
+                              )}
                               <Badge variant="outline" className={`text-xs ${ORDER_STATUS_CONFIG[order.status].color}`}>
                                 {ORDER_STATUS_CONFIG[order.status].label}
                               </Badge>
