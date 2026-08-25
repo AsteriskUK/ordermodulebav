@@ -38,6 +38,17 @@ export function useSupabaseSync() {
       const dbReturnIds = new Set(data.returns.map(r => r.id));
       const dbMissingIds = new Set(data.missingItems.map(m => m.id));
       const localOnlyOrders = currentState.orders.filter(o => !dbOrderIds.has(o.id));
+      // Preserve a label just booked locally that the DB hasn't received yet, so a
+      // background sync landing mid-write doesn't blank label_data (DB still wins
+      // whenever it actually has a label).
+      const localById = new Map(currentState.orders.map(o => [o.id, o]));
+      const mergedDbOrders = data.orders.map((dbO) => {
+        const localO = localById.get(dbO.id);
+        if (localO && !(dbO.labelData?.length) && localO.labelData?.length) {
+          return { ...dbO, labelData: localO.labelData, labelPrintedAt: localO.labelPrintedAt, labelCarrier: localO.labelCarrier, trackingNumber: dbO.trackingNumber || localO.trackingNumber };
+        }
+        return dbO;
+      });
       const localOnlyBatches = currentState.batches.filter(b => !dbBatchIds.has(b.id));
       const localOnlyReturns = currentState.returns.filter(r => !dbReturnIds.has(r.id));
       const localOnlyMissing = currentState.missingItems.filter(m => !dbMissingIds.has(m.id));
@@ -47,7 +58,7 @@ export function useSupabaseSync() {
         users: data.users.length > 0 ? data.users : currentState.users,
         // DB wins for synced records; keep local-only (unsynced) ones.
         batches: [...data.batches, ...localOnlyBatches],
-        orders: [...data.orders, ...localOnlyOrders],
+        orders: [...mergedDbOrders, ...localOnlyOrders],
         returns: [...data.returns, ...localOnlyReturns],
         // HR data: Supabase is source of truth for multi-device sync
         attendanceRecords: data.attendanceRecords.length > 0 

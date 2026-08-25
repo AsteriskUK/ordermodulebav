@@ -23,8 +23,7 @@ type Carrier = 'DPD' | 'FedEx';
 export function LabelPrintDialog({ order, onClose }: Props) {
   const updateOrderStatus = useOrderStore((s) => s.updateOrderStatus);
   const requestRelabel = useOrderStore((s) => s.requestRelabel);
-  const updateOrderTracking = useOrderStore((s) => s.updateOrderTracking);
-  const saveOrderLabels = useOrderStore((s) => s.saveOrderLabels);
+  const saveBookedLabel = useOrderStore((s) => s.saveBookedLabel);
   const updateOrderNumberOfBoxes = useOrderStore((s) => s.updateOrderNumberOfBoxes);
   const currentUser = useOrderStore((s) => s.users.find((u) => u.id === s.currentUserId));
   const canRebookDirect = currentUser?.role === 'admin' || currentUser?.role === 'manager';
@@ -67,9 +66,9 @@ export function LabelPrintDialog({ order, onClose }: Props) {
       if (!s) { toast.error(`Re-book failed: ${(data.failed || [])[0]?.error || 'no label returned'}`); return; }
       const tracking = s.trackingNumber || s.parcelNumber || s.consignmentNumber || '';
       const labels: string[] = s.labelHtmls?.length ? s.labelHtmls : s.labelPdfs?.length ? s.labelPdfs : s.allLabels?.length ? s.allLabels : s.labelBase64 ? [s.labelBase64] : [];
-      if (tracking) updateOrderTracking(order.id, tracking);
       if (labels.length) {
-        saveOrderLabels(order.id, carrierNow, labels);
+        // One atomic write — tracking + labels together (no race that nulls labels).
+        saveBookedLabel(order.id, carrierNow, tracking, labels);
         setShowRebook(false);
         toast.success(`Re-booked — new tracking ${tracking || '—'}, ${labels.length} label${labels.length !== 1 ? 's' : ''}. Print again.`, { duration: 8000 });
       } else {

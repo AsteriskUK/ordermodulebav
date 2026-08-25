@@ -173,6 +173,7 @@ interface OrderStore {
   updateOrderExtendedLiability: (orderId: string, extendedLiability: boolean) => void;
   updateOrderDeliveryService: (orderId: string, deliveryService: string) => void;
   saveOrderLabels: (orderId: string, carrier: string, labels: string[]) => void;
+  saveBookedLabel: (orderId: string, carrier: string, tracking: string, labels: string[]) => void;
   bulkUpdateStatus: (orderIds: string[], status: OrderStatus) => void;
   deleteOrder: (orderId: string) => void;
   restoreOrder: (orderId: string) => void;
@@ -672,6 +673,29 @@ export const useOrderStore = create<OrderStore>()(
             o.id === orderId
               // Fresh labels overwrite the old ones and clear any relabel request.
               ? { ...o, labelPrintedAt: new Date().toISOString(), labelCarrier: carrier, labelData: labels, needsRelabel: false, relabelReason: undefined }
+              : o
+          );
+          const updatedOrder = updatedOrders.find(o => o.id === orderId);
+          if (updatedOrder) syncOrder(updatedOrder).catch(console.error);
+          return { orders: updatedOrders };
+        }),
+      // Persist a freshly-booked label in ONE write: tracking + label(s) together,
+      // so the tracking write can't race and overwrite the label (which nulled
+      // label_data before). Use this instead of updateOrderTracking + saveOrderLabels.
+      saveBookedLabel: (orderId, carrier, tracking, labels) =>
+        set((state) => {
+          const now = new Date().toISOString();
+          const updatedOrders = state.orders.map((o) =>
+            o.id === orderId
+              ? {
+                  ...o,
+                  trackingNumber: tracking || o.trackingNumber,
+                  labelData: labels.length ? labels : o.labelData,
+                  labelCarrier: carrier,
+                  labelPrintedAt: now,
+                  needsRelabel: false,
+                  relabelReason: undefined,
+                }
               : o
           );
           const updatedOrder = updatedOrders.find(o => o.id === orderId);

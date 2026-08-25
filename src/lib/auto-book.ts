@@ -43,7 +43,7 @@ export async function autoBookLabels(orders: Order[]): Promise<number> {
   const bookable = orders.filter((o) => isBookable(o, carriers, marketplaces));
   if (bookable.length === 0) return 0;
 
-  const { updateOrderTracking, saveOrderLabels } = useOrderStore.getState();
+  const { updateOrderTracking, saveBookedLabel } = useOrderStore.getState();
   const shipDate = new Date().toISOString().slice(0, 10);
   let booked = 0;
 
@@ -73,9 +73,11 @@ export async function autoBookLabels(orders: Order[]): Promise<number> {
           : s.labelPdfs?.length ? s.labelPdfs
           : s.allLabels?.length ? s.allLabels
           : s.labelBase64 ? [s.labelBase64] : [];
-        if (labels.length > 0) saveOrderLabels(order.id, order.deliveryCarrier, labels);
+        // One atomic write (tracking + labels) so the tracking write can't race
+        // and null the label; fall back to tracking-only when no label came back.
+        if (labels.length > 0) saveBookedLabel(order.id, order.deliveryCarrier, tracking, labels);
+        else if (tracking) updateOrderTracking(order.id, tracking);
         if (tracking) {
-          updateOrderTracking(order.id, tracking);
           booked++;
           notifyBuyerTracking(order, tracking).catch((e) => console.warn('[auto-book] buyer note failed', order.salesRecordNumber, e));
         }

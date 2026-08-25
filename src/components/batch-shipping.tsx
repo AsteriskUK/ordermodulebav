@@ -221,6 +221,7 @@ export function BatchShipping() {
   const updateOrderExtendedLiability = useOrderStore((s) => s.updateOrderExtendedLiability);
   const purgeOrphanOrders = useOrderStore((s) => s.purgeOrphanOrders);
   const saveOrderLabels = useOrderStore((s) => s.saveOrderLabels);
+  const saveBookedLabel = useOrderStore((s) => s.saveBookedLabel);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [bookingLabels, setBookingLabels] = useState(false);
   const [bundleMode, setBundleMode] = useState(false);
@@ -594,7 +595,6 @@ export function BatchShipping() {
       for (const s of succeeded) {
         console.log('[Book Labels] processing result:', s.orderId, 'tracking=', s.trackingNumber, 'labelPdfs=', s.labelPdfs?.length, 'allLabels=', s.allLabels?.length, 'labelBase64=', !!s.labelBase64, 'labelHtmls=', s.labelHtmls?.length);
         const tracking = s.trackingNumber || s.parcelNumber || s.consignmentNumber || '';
-        if (tracking) updateOrderTracking(s.orderId, tracking);
         const carrier = ordersToBook.find((o) => o.id === s.orderId)?.deliveryCarrier ?? 'DPD';
         const storageLabels = s.labelHtmls?.length ? s.labelHtmls
           : s.labelPdfs?.length ? s.labelPdfs
@@ -602,8 +602,11 @@ export function BatchShipping() {
           : s.labelBase64 ? [s.labelBase64] : [];
         console.log('[Book Labels] storageLabels count:', storageLabels.length, 'carrier:', carrier);
         if (storageLabels.length > 0) {
-          saveOrderLabels(s.orderId, carrier, storageLabels);
+          // One atomic write: tracking + labels together (avoids the race that nulled label_data).
+          saveBookedLabel(s.orderId, carrier, tracking, storageLabels);
           totalLabels += storageLabels.length;
+        } else if (tracking) {
+          updateOrderTracking(s.orderId, tracking);
         }
       }
       if (succeeded.length > 0) toast.success(`${succeeded.length} shipment${succeeded.length !== 1 ? 's' : ''} booked — ${totalLabels} label${totalLabels !== 1 ? 's' : ''} saved for printing at packing`);
