@@ -129,10 +129,11 @@ export interface FedExShipmentRequest {
       | 'PAPER_8.5X11_TOP_HALF_LABEL'
       | 'PAPER_85X11_TOP_HALF_LABEL'
       // Thermal stock (4x6.75 with a doc tab is what FedEx certification expects).
-      // NB: the REST enum uses a decimal point — "4X6.75", not "4X675".
+      // NB: the REST enum is the NO-DOT form — "STOCK_4X675_…" (the dotted
+      // "4X6.75" is legacy SOAP and REST rejects it).
       | 'STOCK_4X6'
-      | 'STOCK_4X6.75_LEADING_DOC_TAB'
-      | 'STOCK_4X6.75_TRAILING_DOC_TAB'
+      | 'STOCK_4X675_LEADING_DOC_TAB'
+      | 'STOCK_4X675_TRAILING_DOC_TAB'
       | 'STOCK_4X8'
       | 'STOCK_4X9_LEADING_DOC_TAB'
       | 'STOCK_4X9_TRAILING_DOC_TAB';
