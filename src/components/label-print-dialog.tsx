@@ -11,7 +11,7 @@ import { isWebUsbAvailable, printRawToUsbPrinter } from '@/lib/webusb-print';
 import { printZplViaBrowserPrint, browserPrintReachable } from '@/lib/zebra-browser-print';
 import { buildInvoicesHtml, printHtml } from '@/lib/order-utils';
 import { useEffect, useState } from 'react';
-import { useSettingBool, useSettingNumber } from '@/hooks/use-settings';
+import { useSettingBool, useSettingNumber, useSettingString } from '@/hooks/use-settings';
 
 interface Props {
   order: Order;
@@ -23,19 +23,59 @@ type Carrier = 'DPD' | 'FedEx';
 export function LabelPrintDialog({ order, onClose }: Props) {
   const updateOrderStatus = useOrderStore((s) => s.updateOrderStatus);
   const requestRelabel = useOrderStore((s) => s.requestRelabel);
+  const updateOrderTracking = useOrderStore((s) => s.updateOrderTracking);
+  const saveOrderLabels = useOrderStore((s) => s.saveOrderLabels);
+  const updateOrderNumberOfBoxes = useOrderStore((s) => s.updateOrderNumberOfBoxes);
+  const currentUser = useOrderStore((s) => s.users.find((u) => u.id === s.currentUserId));
+  const canRebookDirect = currentUser?.role === 'admin' || currentUser?.role === 'manager';
   const combineLabelAndInvoice = useSettingBool('print.combineLabelAndInvoice');
   const invoiceCopies = useSettingNumber('print.copiesPerInvoice');
+  const defaultDpdService = useSettingString('shipping.defaultDpdService');
 
   // Packer can flag a re-book (box count changed / damaged label) → raises a
   // Comms ticket to regenerate the label(s), which then overwrite the stored ones.
   const [showRebook, setShowRebook] = useState(false);
   const [boxes, setBoxes] = useState(order.numberOfBoxes ?? 1);
   const [rebookReason, setRebookReason] = useState('');
+  const [rebooking, setRebooking] = useState(false);
   function submitRebook() {
     requestRelabel(order.id, { numberOfBoxes: boxes, reason: rebookReason.trim() || undefined });
     toast.success(`Re-book requested for ${boxes} box${boxes !== 1 ? 'es' : ''} — Comms notified`);
     setShowRebook(false);
     setRebookReason('');
+  }
+
+  // Admin/manager: re-book the carrier label for THIS order right now (regardless
+  // of order status) and overwrite the stored label(s) + tracking. Fixes stale
+  // labels (e.g. booked before a stock-type change) without going via Batch Shipping.
+  async function rebookNow() {
+    const carrierNow: Carrier | null = order.deliveryCarrier === 'DPD' || order.deliveryCarrier === 'FedEx' ? order.deliveryCarrier : carrier;
+    if (!carrierNow) { toast.error('Set the carrier to DPD or FedEx first'); return; }
+    setRebooking(true);
+    try {
+      updateOrderNumberOfBoxes(order.id, boxes);
+      const orderForBooking = { ...order, numberOfBoxes: boxes, labelQty: boxes };
+      const shipDate = new Date().toISOString().slice(0, 10);
+      const endpoint = carrierNow === 'DPD' ? '/api/dpd/create-shipment' : '/api/fedex/create-shipment';
+      const body = carrierNow === 'DPD'
+        ? { orders: [orderForBooking], collectionDate: shipDate, service: defaultDpdService }
+        : { orders: [orderForBooking], shipDate };
+      const res = await fetch(endpoint, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+      const data = await res.json();
+      if (!res.ok) { toast.error(`Re-book failed: ${data.message || data.error || res.status}`); return; }
+      const s = (data.succeeded || [])[0];
+      if (!s) { toast.error(`Re-book failed: ${(data.failed || [])[0]?.error || 'no label returned'}`); return; }
+      const tracking = s.trackingNumber || s.parcelNumber || s.consignmentNumber || '';
+      const labels: string[] = s.labelHtmls?.length ? s.labelHtmls : s.labelPdfs?.length ? s.labelPdfs : s.allLabels?.length ? s.allLabels : s.labelBase64 ? [s.labelBase64] : [];
+      if (tracking) updateOrderTracking(order.id, tracking);
+      if (labels.length) saveOrderLabels(order.id, carrierNow, labels);
+      setShowRebook(false);
+      toast.success(`Re-booked — new tracking ${tracking || '—'}, ${labels.length} label${labels.length !== 1 ? 's' : ''}. Print again.`, { duration: 8000 });
+    } catch (e) {
+      toast.error(`Re-book failed: ${e instanceof Error ? e.message : 'error'}`);
+    } finally {
+      setRebooking(false);
+    }
   }
 
   const carrier: Carrier | null =
@@ -254,10 +294,18 @@ export function LabelPrintDialog({ order, onClose }: Props) {
                   <textarea value={rebookReason} onChange={(e) => setRebookReason(e.target.value)} rows={2}
                     placeholder="Reason (e.g. now 3 boxes, label damaged, wrong service)…"
                     className="w-full rounded-md border border-slate-300 px-2.5 py-1.5 text-xs resize-y focus:outline-none focus:ring-2 focus:ring-blue-500" />
-                  <div className="flex gap-2">
-                    <Button size="sm" onClick={submitRebook} className="bg-amber-600 hover:bg-amber-700 text-white">Request re-book from Comms</Button>
-                    <Button size="sm" variant="outline" onClick={() => setShowRebook(false)}>Cancel</Button>
+                  <div className="flex gap-2 flex-wrap">
+                    {canRebookDirect && (
+                      <Button size="sm" onClick={rebookNow} disabled={rebooking} className="bg-green-600 hover:bg-green-700 text-white">
+                        {rebooking ? 'Re-booking…' : 'Re-book now'}
+                      </Button>
+                    )}
+                    <Button size="sm" onClick={submitRebook} disabled={rebooking} className="bg-amber-600 hover:bg-amber-700 text-white">Request re-book from Comms</Button>
+                    <Button size="sm" variant="outline" onClick={() => setShowRebook(false)} disabled={rebooking}>Cancel</Button>
                   </div>
+                  {canRebookDirect && (
+                    <p className="text-[10px] text-slate-400">&ldquo;Re-book now&rdquo; calls the carrier immediately and replaces the stored label + tracking (use this to fix a stale label).</p>
+                  )}
                 </div>
               )}
             </div>
