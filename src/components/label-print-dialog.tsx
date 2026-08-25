@@ -68,9 +68,15 @@ export function LabelPrintDialog({ order, onClose }: Props) {
       const tracking = s.trackingNumber || s.parcelNumber || s.consignmentNumber || '';
       const labels: string[] = s.labelHtmls?.length ? s.labelHtmls : s.labelPdfs?.length ? s.labelPdfs : s.allLabels?.length ? s.allLabels : s.labelBase64 ? [s.labelBase64] : [];
       if (tracking) updateOrderTracking(order.id, tracking);
-      if (labels.length) saveOrderLabels(order.id, carrierNow, labels);
-      setShowRebook(false);
-      toast.success(`Re-booked — new tracking ${tracking || '—'}, ${labels.length} label${labels.length !== 1 ? 's' : ''}. Print again.`, { duration: 8000 });
+      if (labels.length) {
+        saveOrderLabels(order.id, carrierNow, labels);
+        setShowRebook(false);
+        toast.success(`Re-booked — new tracking ${tracking || '—'}, ${labels.length} label${labels.length !== 1 ? 's' : ''}. Print again.`, { duration: 8000 });
+      } else {
+        // Shipment created (tracking) but no label came back — usually an invalid
+        // labelStockType / label spec. Don't pretend it worked.
+        toast.error(`Booked tracking ${tracking || '—'} but FedEx returned NO label (likely a label-spec/stock-type issue). Not saved — check settings and re-book.`, { duration: 14000 });
+      }
     } catch (e) {
       toast.error(`Re-book failed: ${e instanceof Error ? e.message : 'error'}`);
     } finally {
