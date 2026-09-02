@@ -43,7 +43,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   const router = useRouter();
 
   // Initialize Supabase sync (auto-syncs on load and periodically)
-  useSupabaseSync();
+  const { syncNow } = useSupabaseSync();
   // Automatically pull new marketplace orders every 30 minutes.
   useAutoPull();
   // One active login per profile — signs this device out if superseded.
@@ -91,6 +91,13 @@ export function AppShell({ children }: { children: React.ReactNode }) {
       .then((ok) => { if (!ok) supabase.auth.signOut().catch(() => {}); })
       .finally(() => { resolvingRef.current = false; });
   }, [authRequired, session, currentUserId]);
+
+  // Under RLS the anon (pre-login) reads return nothing, and the app's initial
+  // sync fires before the session is restored. Re-sync once a session is present
+  // so authenticated data actually loads (and again after a token refresh).
+  useEffect(() => {
+    if (session) syncNow();
+  }, [session, syncNow]);
 
   const [menuOpen, setMenuOpen] = useState(false);
   const [showSignature, setShowSignature] = useState(false);
