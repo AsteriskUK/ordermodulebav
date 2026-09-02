@@ -10,6 +10,7 @@ import { Button } from './ui/button';
 import { useSupabaseSync } from '@/hooks/use-supabase-sync';
 import { useAutoPull } from '@/hooks/use-auto-pull';
 import { useSessionLock, releaseSession } from '@/hooks/use-session-lock';
+import { useAuthSession, resolveAppUserFromSession } from '@/hooks/use-auth';
 import { useReadOnly, useInstallReadOnlyGuard } from '@/hooks/use-read-only';
 import { useSettingString } from '@/hooks/use-settings';
 import { AppearanceProvider } from './appearance-provider';
@@ -47,6 +48,9 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   useAutoPull();
   // One active login per profile — signs this device out if superseded.
   useSessionLock();
+  // A live Supabase session is the real gate; without one the app is locked to
+  // the sign-in screen no matter what a stale browser store says.
+  const { session, loading: authLoading, authRequired } = useAuthSession();
   // Read-only 'viewer' role: install the client write-guard (UX complement to
   // the server proxy) and expose whether the current session is read-only.
   useInstallReadOnlyGuard();
@@ -74,6 +78,19 @@ export function AppShell({ children }: { children: React.ReactNode }) {
     if (target !== resourceId && target !== pathname) router.replace(target);
   }, [pathname, currentUser, accessControl, router, preferredLanding]);
   const setCurrentUser = useOrderStore((s) => s.setCurrentUser);
+
+  // On reload the Supabase session persists but the in-app identity may not
+  // (cleared store, another tab). Re-resolve it from the session exactly once so
+  // a signed-in user isn't bounced to the sign-in screen. Guarded to avoid a
+  // resolve storm while the async round-trip is in flight.
+  const resolvingRef = useRef(false);
+  useEffect(() => {
+    if (!authRequired || !session || currentUserId || resolvingRef.current) return;
+    resolvingRef.current = true;
+    resolveAppUserFromSession(session)
+      .then((ok) => { if (!ok) supabase.auth.signOut().catch(() => {}); })
+      .finally(() => { resolvingRef.current = false; });
+  }, [authRequired, session, currentUserId]);
 
   const [menuOpen, setMenuOpen] = useState(false);
   const [showSignature, setShowSignature] = useState(false);
@@ -156,11 +173,24 @@ export function AppShell({ children }: { children: React.ReactNode }) {
     return () => document.removeEventListener('mousedown', handleClick);
   }, []);
 
-  if (!hydrated) {
+  if (!hydrated || (authRequired && authLoading)) {
     return <div className="h-screen w-screen bg-slate-900" />;
   }
 
-  // Not signed in → lock everything down to the sign-in screen (no sidebar, no content).
+  // A live Supabase session is required before anything renders. Without one,
+  // lock down to the sign-in screen regardless of any lingering store identity.
+  if (authRequired && !session) {
+    return <SignIn />;
+  }
+
+  // Session present but identity not yet resolved (first paint after a reload) —
+  // hold on a neutral loading screen while the resolve effect above populates
+  // currentUser; on genuine failure it signs out and the gate above takes over.
+  if (authRequired && session && !currentUser) {
+    return <div className="h-screen w-screen bg-slate-900" />;
+  }
+
+  // No session-enforcement (Supabase unconfigured, local dev) → old gate.
   if (!currentUser) {
     return <SignIn />;
   }
@@ -364,9 +394,9 @@ export function AppShell({ children }: { children: React.ReactNode }) {
                       className="w-full flex items-center gap-2 px-2 py-1.5 rounded-lg hover:bg-slate-100 text-slate-700 text-xs font-medium transition-colors">
                       <PenLine className="h-3.5 w-3.5" /> My reply signature
                     </button>
-                    {/* Switching users requires signing out and re-authenticating
-                        with a PIN — there is no in-app account switcher. */}
-                    <button onClick={() => { if (currentUserId) releaseSession(currentUserId); fetch('/api/auth/logout', { method: 'POST' }).catch(() => {}); setCurrentUser(null); setMenuOpen(false); }}
+                    {/* Switching users means a full sign-out and re-authenticating
+                        with your own email code — there is no account switcher. */}
+                    <button onClick={() => { if (currentUserId) releaseSession(currentUserId); supabase.auth.signOut().catch(() => {}); fetch('/api/auth/logout', { method: 'POST' }).catch(() => {}); setCurrentUser(null); setMenuOpen(false); }}
                       className="w-full flex items-center gap-2 px-2 py-1.5 rounded-lg hover:bg-red-50 text-red-600 text-xs font-medium transition-colors">
                       <LogOut className="h-3.5 w-3.5" /> Sign out
                     </button>

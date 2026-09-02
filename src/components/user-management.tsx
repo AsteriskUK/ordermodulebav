@@ -16,6 +16,8 @@ import {
 } from '@/components/ui/select';
 import { Users, Plus, Trash2, Pencil, Check, X, ShieldCheck, User, Briefcase, Eye } from 'lucide-react';
 import { toast } from 'sonner';
+import { supabase } from '@/lib/supabase-client';
+import { releaseSession } from '@/hooks/use-session-lock';
 
 const ROLE_CONFIG: Record<UserRole, { label: string; color: string; icon: React.ElementType; description: string }> = {
   admin: {
@@ -102,6 +104,7 @@ export function UserManagement() {
 
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editName, setEditName] = useState('');
+  const [editEmail, setEditEmail] = useState('');
   const [editRole, setEditRole] = useState<UserRole>('staff');
   const [editDepts, setEditDepts] = useState<Department[]>([]);
   const [editPin, setEditPin] = useState('');
@@ -118,17 +121,27 @@ export function UserManagement() {
   const startEdit = (user: AppUser) => {
     setEditingId(user.id);
     setEditName(user.name);
+    setEditEmail(user.email || '');
     setEditRole(user.role);
     setEditDepts(user.role === 'viewer' ? [] : (user.departments?.length ? user.departments : [user.department ?? 'management']));
     setEditPin(user.pin || '');
   };
 
+  // Email is the sign-in credential, so it's required and must be unique — a
+  // second user with the same address would collide on login.
+  const emailTaken = (email: string, exceptId?: string) =>
+    users.some((u) => u.id !== exceptId && (u.email || '').trim().toLowerCase() === email);
+
   const saveEdit = () => {
     if (!editName.trim()) { toast.error('Name is required'); return; }
+    const email = editEmail.trim().toLowerCase();
+    if (!email.includes('@')) { toast.error('A valid email is required — it is how the user signs in'); return; }
+    if (emailTaken(email, editingId!)) { toast.error('Another user already has that email'); return; }
     // Viewers see everything read-only, so a department is meaningless for them.
     if (editRole !== 'viewer' && !editDepts.length) { toast.error('Select at least one department'); return; }
     updateUser(editingId!, {
       name: editName.trim(),
+      email,
       role: editRole,
       roles: [editRole],
       department: editRole === 'viewer' ? undefined : (editDepts[0] ?? 'management'),
@@ -141,11 +154,14 @@ export function UserManagement() {
 
   const handleAdd = () => {
     if (!newName.trim()) { toast.error('Name is required'); return; }
+    const email = newEmail.trim().toLowerCase();
+    if (!email.includes('@')) { toast.error('A valid email is required — it is how the user signs in'); return; }
+    if (emailTaken(email)) { toast.error('Another user already has that email'); return; }
     if (newRole !== 'viewer' && !newDepts.length) { toast.error('Select at least one department'); return; }
     addUser({
       id: generateUUID(),
       name: newName.trim(),
-      email: newEmail.trim() || undefined,
+      email,
       role: newRole,
       roles: [newRole],
       department: newRole === 'viewer' ? undefined : (newDepts[0] ?? 'management'),
@@ -197,7 +213,13 @@ export function UserManagement() {
             size="sm"
             variant="outline"
             className="ml-auto h-7 text-xs"
-            onClick={() => { setCurrentUser(null); toast.success('Signed out'); }}
+            onClick={() => {
+              if (currentUserId) releaseSession(currentUserId);
+              supabase.auth.signOut().catch(() => {});
+              fetch('/api/auth/logout', { method: 'POST' }).catch(() => {});
+              setCurrentUser(null);
+              toast.success('Signed out');
+            }}
           >
             Sign Out
           </Button>
@@ -240,7 +262,7 @@ export function UserManagement() {
                 />
               </div>
               <div>
-                <label className="text-xs text-slate-500 block mb-1">Email</label>
+                <label className="text-xs text-slate-500 block mb-1">Email <span className="text-red-400">*</span> <span className="text-slate-400">(sign-in)</span></label>
                 <Input
                   value={newEmail}
                   onChange={(e) => setNewEmail(e.target.value)}
@@ -263,11 +285,11 @@ export function UserManagement() {
                 </Select>
               </div>
               <div>
-                <label className="text-xs text-slate-500 block mb-1">PIN (optional)</label>
+                <label className="text-xs text-slate-500 block mb-1">Confirm code <span className="text-slate-400">(optional)</span></label>
                 <Input
                   value={newPin}
                   onChange={(e) => setNewPin(e.target.value)}
-                  placeholder="4-digit PIN"
+                  placeholder="e.g. 4 digits"
                   maxLength={6}
                   className="w-28 h-8 text-sm font-mono"
                 />
@@ -326,7 +348,15 @@ export function UserManagement() {
                         <Input
                           value={editName}
                           onChange={(e) => setEditName(e.target.value)}
-                          className="w-36 h-7 text-sm"
+                          placeholder="Name"
+                          className="w-32 h-7 text-sm"
+                        />
+                        <Input
+                          value={editEmail}
+                          onChange={(e) => setEditEmail(e.target.value)}
+                          placeholder="email@company.com"
+                          type="email"
+                          className="w-48 h-7 text-sm"
                         />
                         <Select value={editRole} onValueChange={(v) => setEditRole(v as UserRole)}>
                           <SelectTrigger className="w-28 h-7 text-sm"><SelectValue /></SelectTrigger>
@@ -341,9 +371,9 @@ export function UserManagement() {
                         <Input
                           value={editPin}
                           onChange={(e) => setEditPin(e.target.value)}
-                          placeholder="PIN"
+                          placeholder="Confirm code"
                           maxLength={6}
-                          className="w-24 h-7 text-sm font-mono"
+                          className="w-28 h-7 text-sm font-mono"
                         />
                         <div className="flex gap-1 ml-auto">
                           <Button size="sm" variant="outline" className="h-7 w-7 p-0" onClick={saveEdit}>
@@ -370,6 +400,9 @@ export function UserManagement() {
                         <div className="flex items-center gap-2">
                           <span className="text-sm font-medium">{user.name}</span>
                           {isActive && <span className="text-xs text-blue-500 font-medium">• Active</span>}
+                          {user.email
+                            ? <span className="text-xs text-slate-400 truncate">{user.email}</span>
+                            : <span className="text-xs text-red-500 font-medium">⚠ no email — can’t sign in</span>}
                         </div>
                         <div className="flex items-center gap-1.5 mt-1 flex-wrap">
                           <Badge variant="outline" className={`text-xs ${cfg.color}`}>{cfg.label}</Badge>
@@ -378,20 +411,12 @@ export function UserManagement() {
                               {DEPARTMENT_CONFIG[d]?.label ?? d}
                             </Badge>
                           ))}
-                          {user.pin && <span className="text-xs text-slate-400 ml-1">PIN set</span>}
+                          {user.pin && <span className="text-xs text-slate-400 ml-1">Confirm code set</span>}
                         </div>
                       </div>
                       <div className="flex items-center gap-1 shrink-0">
-                        {!isActive && (
-                          <Button
-                            size="sm"
-                            variant="outline"
-                            className="h-7 text-xs"
-                            onClick={() => { setCurrentUser(user.id); toast.success(`Switched to ${user.name}`); }}
-                          >
-                            Switch To
-                          </Button>
-                        )}
+                        {/* No "Switch To": changing user requires a full sign-out and
+                            the person signing in with their own email code. */}
                         <Button size="sm" variant="outline" className="h-7 w-7 p-0" onClick={() => startEdit(user)}>
                           <Pencil className="h-3 w-3" />
                         </Button>
