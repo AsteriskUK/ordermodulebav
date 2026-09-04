@@ -42,7 +42,16 @@ export function SignIn() {
         return;
       }
       if (!res.ok) {
-        setError('Could not send the code. Check the address and try again.');
+        // Surface the real reason when there is one — most often Supabase's
+        // short cooldown between requests ("you can only request this after N
+        // seconds") — so a rate-limited retry doesn't look like a hard failure.
+        const body = await res.json().catch(() => null) as { message?: string } | null;
+        const msg = body?.message || '';
+        if (/after\s+\d+\s+second/i.test(msg) || res.status === 429) {
+          setError('Please wait a moment before requesting another code, then try again.');
+        } else {
+          setError(msg || 'Could not send the code. Check the address and try again.');
+        }
         return;
       }
       setEmail(addr);
