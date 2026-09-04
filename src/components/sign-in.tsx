@@ -56,7 +56,9 @@ export function SignIn() {
 
   const verifyCode = async () => {
     const token = code.trim();
-    if (token.length < 6) { setError('Enter the 6-digit code from your email.'); return; }
+    // Supabase's OTP length is configurable (6–10 digits), so accept any length
+    // in that range rather than assuming 6.
+    if (token.length < 6) { setError('Enter the code from your email.'); return; }
     setBusy(true);
     setError('');
     try {
@@ -153,12 +155,12 @@ export function SignIn() {
               type="text"
               inputMode="numeric"
               autoComplete="one-time-code"
-              maxLength={6}
+              maxLength={10}
               value={code}
               onChange={(e) => { setCode(e.target.value.replace(/\D/g, '')); setError(''); }}
               onKeyDown={(e) => { if (e.key === 'Enter') verifyCode(); }}
-              placeholder="••••••"
-              className="w-full rounded-lg border border-slate-200 px-3 py-2.5 text-center text-lg tracking-[0.5em] outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
+              placeholder="Enter code"
+              className="w-full rounded-lg border border-slate-200 px-3 py-2.5 text-center text-lg tracking-[0.3em] outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
             />
             {error && <p className="text-center text-xs text-red-500">{error}</p>}
             <Button className="h-11 w-full" onClick={verifyCode} disabled={code.length < 6 || busy}>
