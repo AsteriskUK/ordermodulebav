@@ -118,10 +118,16 @@ function spoolRaw(file, printer, copies) {
       // COPY /B sends the bytes untouched to a shared printer (\\host\ShareName).
       const share = printer.startsWith('\\\\') ? printer : `\\\\${process.env.COMPUTERNAME || 'localhost'}\\${printer}`;
       const n = Math.max(1, copies || 1);
-      const cmd = Array.from({ length: n }, () => `COPY /B "${file}" "${share}"`).join(' & ');
-      execFile('cmd', ['/c', cmd], (err, _o, stderr) =>
-        err ? reject(new Error(`Windows raw printing failed (printer must be shared as "${printer}"): ${stderr || err.message}`)) : resolve()
-      );
+      // Pass copy's arguments as separate array items — NOT one quoted string.
+      // Building `COPY /B "file" "share"` and handing it to cmd gets Windows-arg-
+      // escaped into `\"file\"`, which COPY rejects as "syntax is incorrect".
+      let i = 0;
+      const one = () => execFile('cmd', ['/c', 'copy', '/b', file, share], (err, _o, stderr) => {
+        if (err) return reject(new Error(`Windows raw printing failed (printer must be shared as "${printer}"): ${stderr || err.message}`));
+        if (++i < n) return one();
+        resolve();
+      });
+      one();
     } else {
       execFile('lp', ['-d', printer, '-o', 'raw', '-n', String(copies || 1), file], (err, _o, stderr) =>
         err ? reject(new Error(stderr || err.message)) : resolve()
