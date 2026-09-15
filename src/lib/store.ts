@@ -1539,28 +1539,27 @@ export const useOrderStore = create<OrderStore>()(
     {
       name: 'ebay-orders-idb-v6',
       storage: idbStorage(),
-      version: 6,
+      version: 7,
+      // ------------------------------------------------------------------
+      // Persist ONLY per-device session state — never the datasets.
+      // ------------------------------------------------------------------
+      // Orders, batches, returns, tickets, inventory, HR data, etc. are the
+      // source of truth in Supabase and are loaded fresh on every device by
+      // the sync, so all counts/statistics are identical everywhere. They must
+      // NOT be cached in the browser: a per-device IndexedDB copy is exactly
+      // what made "total orders" and other numbers differ from machine to
+      // machine (each device kept its own accumulated, partly-stale pile).
+      // Only the signed-in user id and the local EOD email config are kept.
+      partialize: (state) => ({
+        currentUserId: state.currentUserId,
+        emailConfig: state.emailConfig,
+      }),
       migrate: async (persistedState: unknown, _fromVersion: number) => {
-        // Always carry forward everything and patch any missing fields
+        // Upgrading from a build that cached full datasets (v6 and earlier):
+        // keep only the session bits and drop every dataset so the old cache
+        // can't skew counts. Everything else re-loads from the DB on sync.
         const s = (persistedState ?? {}) as Partial<OrderStore>;
         return {
-          orders:      s.orders      ?? [],
-          batches:     s.batches     ?? [],
-          eodEvents:   s.eodEvents   ?? [],
-          returns:     s.returns     ?? [],
-          missingItems: (s as OrderStore).missingItems ?? [],
-          tickets: (s as OrderStore).tickets ?? [],
-          inventoryParts: (s as OrderStore).inventoryParts ?? [],
-          stockUnits: (s as OrderStore).stockUnits ?? [],
-          stockLevels: (s as OrderStore).stockLevels ?? [],
-          goodsReceipts: (s as OrderStore).goodsReceipts ?? [],
-          builds: (s as OrderStore).builds ?? [],
-          attendanceRecords: (s as OrderStore).attendanceRecords ?? [],
-          leaveRequests: (s as OrderStore).leaveRequests ?? [],
-          leaveBalances: (s as OrderStore).leaveBalances ?? [],
-          users:       s.users       ?? [
-            { id: 'admin-1', name: 'Admin', role: 'admin', roles: ['admin'], department: 'management', departments: ['management'] as Department[], pin: '1234' },
-          ],
           currentUserId: s.currentUserId ?? null,
           emailConfig: (s as OrderStore).emailConfig ?? {
             enabled: false,
@@ -1572,7 +1571,7 @@ export const useOrderStore = create<OrderStore>()(
             fromAddress: '',
             autoSendAt8pm: true,
           },
-        } as OrderStore;
+        } as Partial<OrderStore> as OrderStore;
       },
     }
   )
