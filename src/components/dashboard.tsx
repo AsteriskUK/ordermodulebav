@@ -4,6 +4,7 @@ import Image from 'next/image';
 import { useRouter } from 'next/navigation';
 import { useOrderStore } from '@/lib/store';
 import { ORDER_STATUS_CONFIG, OrderStatus } from '@/lib/types';
+import { useOrderStats } from '@/hooks/use-order-stats';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import {
   Package,
@@ -76,10 +77,19 @@ export function Dashboard() {
   const currentUser = users.find((u) => u.id === currentUserId);
   const isCommsOnly = currentUser?.role === 'comms' || currentUser?.roles?.includes('comms') || currentUser?.department === 'comms' || currentUser?.departments?.includes('comms');
 
-  const statusCounts = orders.reduce(
+  // DB-truth counts (total + per status), so the numbers are the real, complete
+  // figures from Supabase and identical on every device — not a count over the
+  // ~1000-row slice the client can hold, and never a stale browser cache.
+  const { stats: dbStats } = useOrderStats();
+
+  // Fallback to the loaded slice only until the DB counts arrive (avoids a flash
+  // of 0s); once loaded, dbStats is authoritative.
+  const loadedCounts = orders.reduce(
     (acc, order) => { acc[order.status] = (acc[order.status] || 0) + 1; return acc; },
     {} as Record<string, number>
   );
+  const statusCount = (status: OrderStatus): number =>
+    dbStats ? (dbStats.byStatus[status] ?? 0) : (loadedCounts[status] || 0);
 
   const sourceStats = batches.reduce((acc, batch) => {
     const src = batch.source ?? 'manual';
@@ -160,12 +170,19 @@ export function Dashboard() {
       {!isCommsOnly && (
         <div className="space-y-3">
           {/* Pipeline stages — large cards */}
-          <p className="text-xs font-semibold text-slate-400 uppercase tracking-wider px-0.5">Pipeline</p>
+          <div className="flex items-center justify-between px-0.5">
+            <p className="text-xs font-semibold text-slate-400 uppercase tracking-wider">Pipeline</p>
+            {dbStats && (
+              <p className="text-xs text-slate-500">
+                <span className="font-bold text-slate-700">{dbStats.total.toLocaleString('en-GB')}</span> orders total
+              </p>
+            )}
+          </div>
           <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
             {PIPELINE.map((status) => {
               const config = ORDER_STATUS_CONFIG[status];
               const Icon = statusIcons[status];
-              const count = statusCounts[status] || 0;
+              const count = statusCount(status);
               const accent = STATUS_ACCENT[status];
               return (
                 <button
@@ -188,7 +205,7 @@ export function Dashboard() {
             {TERMINAL.map((status) => {
               const config = ORDER_STATUS_CONFIG[status];
               const Icon = statusIcons[status];
-              const count = statusCounts[status] || 0;
+              const count = statusCount(status);
               return (
                 <button
                   key={status}
