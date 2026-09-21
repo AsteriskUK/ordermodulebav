@@ -78,19 +78,19 @@ async function htmlToPdf(html, isLabel) {
     const page = await browser.newPage();
     await page.setContent(html, { waitUntil: 'networkidle0' });
     if (isLabel) {
-      // A carrier LABEL (e.g. DPD's HTML) must render as ONE page sized to its
-      // own content — otherwise a fixed A4/6in page either strands it in a
-      // corner or, when the content is a touch taller than the page, splits it
-      // across TWO thermal labels. Measure the content and emit a single page
-      // exactly that size (zero margin); SumatraPDF then scales it to fit the
-      // physical label. pageRanges:'1' guarantees it can never paginate.
-      const dims = await page.evaluate(() => ({
-        w: Math.ceil(document.documentElement.scrollWidth),
-        h: Math.ceil(document.documentElement.scrollHeight),
-      }));
+      // A carrier LABEL (e.g. DPD's HTML) must render UPRIGHT as ONE page: a
+      // fixed 6in page split anything a touch taller across two labels, while
+      // sizing the page to the raw content made it landscape and got auto-
+      // rotated. So pin the WIDTH to the 4in label (keeps it portrait) and set
+      // the HEIGHT to whatever the content needs at that width — one page, no
+      // split, no rotation. SumatraPDF then scales it to the physical label.
+      const LABEL_WIDTH_PX = 384; // 4in at 96dpi
+      await page.setViewport({ width: LABEL_WIDTH_PX, height: 600, deviceScaleFactor: 1 });
+      await page.emulateMediaType('print'); // measure the same layout page.pdf will use
+      const h = await page.evaluate(() => Math.ceil(document.documentElement.scrollHeight));
       return await page.pdf({
-        width: `${Math.max(dims.w, 1)}px`,
-        height: `${Math.max(dims.h, 1)}px`,
+        width: '4in',
+        height: `${Math.max(h, 1)}px`,
         printBackground: true,
         margin: { top: '0', bottom: '0', left: '0', right: '0' },
         pageRanges: '1',
