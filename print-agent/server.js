@@ -23,7 +23,7 @@
 const http = require('http');
 const net = require('net');
 const { execFile } = require('child_process');
-const { writeFileSync, mkdtempSync } = require('fs');
+const { writeFileSync, mkdtempSync, existsSync } = require('fs');
 const { tmpdir } = require('os');
 const path = require('path');
 
@@ -83,18 +83,34 @@ async function htmlToPdf(html) {
   }
 }
 
+// Locate SumatraPDF: an explicit SUMATRA_PATH wins, otherwise probe the usual
+// install locations (per-user, Program Files, and the portable exe next to this
+// agent), and finally fall back to the bare name so a PATH install still works.
+function findSumatra() {
+  if (process.env.SUMATRA_PATH) return process.env.SUMATRA_PATH;
+  const home = process.env.LOCALAPPDATA || process.env.USERPROFILE || '';
+  const candidates = [
+    home && path.join(home, 'SumatraPDF', 'SumatraPDF.exe'),
+    'C:\\Program Files\\SumatraPDF\\SumatraPDF.exe',
+    'C:\\Program Files (x86)\\SumatraPDF\\SumatraPDF.exe',
+    path.join(__dirname, 'SumatraPDF.exe'),
+  ].filter(Boolean);
+  for (const c of candidates) { try { if (existsSync(c)) return c; } catch { /* ignore */ } }
+  return 'SumatraPDF.exe'; // last resort: rely on PATH
+}
+
 function spool(file, printer, copies, media) {
   return new Promise((resolve, reject) => {
     if (isWin) {
       // Silent Windows printing needs a helper; SumatraPDF is the usual choice.
       // -print-settings "fit" scales the doc to the printer's selected paper so a
       // label isn't stranded in the corner of a larger sheet.
-      const sumatra = process.env.SUMATRA_PATH || 'SumatraPDF.exe';
+      const sumatra = findSumatra();
       const args = ['-print-to', printer, '-silent'];
       if (media) args.push('-print-settings', 'fit');
       args.push(file);
       execFile(sumatra, args, (err) =>
-        err ? reject(new Error(`Windows printing requires SumatraPDF (set SUMATRA_PATH): ${err.message}`)) : resolve()
+        err ? reject(new Error(`Windows PDF printing needs SumatraPDF. Install it from https://www.sumatrapdfreader.org/ (or set SUMATRA_PATH to SumatraPDF.exe). Details: ${err.message}`)) : resolve()
       );
     } else {
       // -o media forces the label paper size (else CUPS uses the queue default,

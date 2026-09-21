@@ -10,7 +10,11 @@ const SANDBOX_BASE = 'https://apis-sandbox.fedex.com';
 const PROD_BASE = 'https://apis.fedex.com';
 
 function getBase(): string {
-  return process.env.FEDEX_ENV === 'production' ? PROD_BASE : SANDBOX_BASE;
+  // Accept the common spellings/casings so a stray "Production"/"prod"/"live"
+  // doesn't silently leave you on the sandbox printing DEMO labels.
+  const env = (process.env.FEDEX_ENV || '').trim().toLowerCase();
+  const isProd = env === 'production' || env === 'prod' || env === 'live';
+  return isProd ? PROD_BASE : SANDBOX_BASE;
 }
 
 let _cachedToken: { token: string; expiresAt: number } | null = null;
