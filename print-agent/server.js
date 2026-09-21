@@ -64,7 +64,7 @@ function listPrinters() {
   });
 }
 
-async function htmlToPdf(html) {
+async function htmlToPdf(html, isLabel) {
   let puppeteer;
   try {
     puppeteer = require('puppeteer');
@@ -77,7 +77,14 @@ async function htmlToPdf(html) {
   try {
     const page = await browser.newPage();
     await page.setContent(html, { waitUntil: 'networkidle0' });
-    return await page.pdf({ format: 'A4', printBackground: true, margin: { top: '10mm', bottom: '10mm', left: '8mm', right: '8mm' } });
+    // A carrier LABEL (e.g. DPD's HTML) must render at label size, not A4 — else
+    // the label ends up in the corner of an A4 page and prints tiny at the top
+    // of the thermal label. Honour the label's own @page CSS if it sets one,
+    // otherwise default to 4x6in with zero margin. Invoices stay A4.
+    const opts = isLabel
+      ? { width: '4in', height: '6in', printBackground: true, margin: { top: '0', bottom: '0', left: '0', right: '0' }, preferCSSPageSize: true }
+      : { format: 'A4', printBackground: true, margin: { top: '10mm', bottom: '10mm', left: '8mm', right: '8mm' } };
+    return await page.pdf(opts);
   } finally {
     await browser.close();
   }
@@ -99,7 +106,7 @@ function findSumatra() {
   return 'SumatraPDF.exe'; // last resort: rely on PATH
 }
 
-function spool(file, printer, copies, media) {
+function spool(file, printer, copies, media, isLabel) {
   return new Promise((resolve, reject) => {
     if (isWin) {
       // Silent Windows printing needs a helper; SumatraPDF is the usual choice.
@@ -107,7 +114,7 @@ function spool(file, printer, copies, media) {
       // label isn't stranded in the corner of a larger sheet.
       const sumatra = findSumatra();
       const args = ['-print-to', printer, '-silent'];
-      if (media) args.push('-print-settings', 'fit');
+      if (media || isLabel) args.push('-print-settings', 'fit');
       args.push(file);
       execFile(sumatra, args, (err) =>
         err ? reject(new Error(`Windows PDF printing needs SumatraPDF. Install it from https://www.sumatrapdfreader.org/ (or set SUMATRA_PATH to SumatraPDF.exe). Details: ${err.message}`)) : resolve()
@@ -203,7 +210,7 @@ const server = http.createServer((req, res) => {
         // invoice rendered from HTML to PDF.
         let buf, isZpl = false;
         if (zplBase64) { buf = Buffer.from(zplBase64, 'base64'); isZpl = true; }
-        else if (html) buf = await htmlToPdf(html);
+        else if (html) buf = await htmlToPdf(html, isLabel);
         else if (pdfBase64) buf = Buffer.from(pdfBase64, 'base64');
         else return json(res, 400, { error: 'html, pdfBase64 or zplBase64 required' });
 
@@ -220,7 +227,7 @@ const server = http.createServer((req, res) => {
         writeFileSync(file, buf);
         if (isZpl) await spoolRaw(file, printer, copies);
         // Force the label media only for label jobs — invoices keep the queue default (A4).
-        else await spool(file, printer, copies, isLabel ? LABEL_MEDIA : '');
+        else await spool(file, printer, copies, isLabel ? LABEL_MEDIA : '', isLabel);
         json(res, 200, { ok: true });
       } catch (e) {
         console.error('[print-agent] print error:', e.message || e);
