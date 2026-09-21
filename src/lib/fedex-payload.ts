@@ -1,5 +1,41 @@
 import { FedExShipmentRequest } from './fedex-client';
 import { Order } from './types';
+import { getSettings, resolveSetting, asString } from './settings';
+
+// The shipper (from) address. Resolved from Settings → Business first, falling
+// back to the FEDEX_SHIPPER_* env vars — so the same business address drives
+// both DPD and FedEx labels and is editable in the app, not just in env.
+export interface FedexShipper {
+  name: string; company: string; phone: string;
+  address1: string; address2: string; city: string; postcode: string;
+}
+
+export async function resolveFedexShipper(): Promise<FedexShipper> {
+  const s = await getSettings();
+  const setOr = (key: string, env: string | undefined) => asString(resolveSetting(s, key)) || env || '';
+  return {
+    name: setOr('business.tradingName', process.env.FEDEX_SHIPPER_NAME),
+    company: setOr('business.tradingName', process.env.FEDEX_SHIPPER_COMPANY),
+    phone: setOr('business.supportPhone', process.env.FEDEX_SHIPPER_PHONE),
+    address1: setOr('business.address1', process.env.FEDEX_SHIPPER_ADDRESS1),
+    address2: setOr('business.address2', process.env.FEDEX_SHIPPER_ADDRESS2),
+    city: setOr('business.city', process.env.FEDEX_SHIPPER_CITY),
+    postcode: setOr('business.postcode', process.env.FEDEX_SHIPPER_POSTCODE),
+  };
+}
+
+// Env-only fallback for callers that don't resolve from Settings.
+function envShipper(): FedexShipper {
+  return {
+    name: process.env.FEDEX_SHIPPER_NAME || '',
+    company: process.env.FEDEX_SHIPPER_COMPANY || '',
+    phone: process.env.FEDEX_SHIPPER_PHONE || '',
+    address1: process.env.FEDEX_SHIPPER_ADDRESS1 || '',
+    address2: process.env.FEDEX_SHIPPER_ADDRESS2 || '',
+    city: process.env.FEDEX_SHIPPER_CITY || '',
+    postcode: process.env.FEDEX_SHIPPER_POSTCODE || '',
+  };
+}
 
 // Builds the FedEx requestedShipment payload from an order. Shared by the label
 // booking route and the rate-quote route so a quote reflects what we'd book.
@@ -95,7 +131,8 @@ function normalizeUKPostcode(postcode: string): string | null {
   return `${area}${district} ${inward}`;
 }
 
-export function buildFedExShipmentPayload(order: Order, shipDate: string): FedExShipmentRequest {
+export function buildFedExShipmentPayload(order: Order, shipDate: string, shipper?: FedexShipper): FedExShipmentRequest {
+  const sh = shipper ?? envShipper();
   const countryCode = toCountryCode(order.postToCountry);
   const isInternational = countryCode !== 'GB';
   const isNextDay = order.deliveryType === 'next_day' || order.deliveryType === 'express';
@@ -110,7 +147,7 @@ export function buildFedExShipmentPayload(order: Order, shipDate: string): FedEx
   const recipientPostcode = countryCode === 'GB'
     ? (normalizedUKPostcode || 'AA1 1AA')
     : (rawRecipientPostcode || '00000');
-  const shipperPostcode = sanitizePostcode(process.env.FEDEX_SHIPPER_POSTCODE || '') || 'AA1 1AA';
+  const shipperPostcode = sanitizePostcode(sh.postcode) || 'AA1 1AA';
 
   const recipientAddress = {
     streetLines: sanitizeFedExAddressLines(order.postToAddress1, order.postToAddress2),
@@ -121,8 +158,8 @@ export function buildFedExShipmentPayload(order: Order, shipDate: string): FedEx
   };
 
   const shipperAddress = {
-    streetLines: sanitizeFedExAddressLines(process.env.FEDEX_SHIPPER_ADDRESS1 || '', process.env.FEDEX_SHIPPER_ADDRESS2 || ''),
-    city: ensureMinLength(sanitizeFedExString(process.env.FEDEX_SHIPPER_CITY || '', 35), 3, 'Unknown'),
+    streetLines: sanitizeFedExAddressLines(sh.address1, sh.address2),
+    city: ensureMinLength(sanitizeFedExString(sh.city, 35), 3, 'Unknown'),
     postalCode: shipperPostcode,
     countryCode: 'GB',
   };
@@ -137,9 +174,9 @@ export function buildFedExShipmentPayload(order: Order, shipDate: string): FedEx
     pickupType: 'USE_SCHEDULED_PICKUP',
     shipper: {
       contact: {
-        personName: sanitizeFedExString(process.env.FEDEX_SHIPPER_NAME || 'Warehouse', 35),
-        phoneNumber: sanitizeFedExPhone(process.env.FEDEX_SHIPPER_PHONE || '').replace(/^$/, '0000000000'),
-        companyName: sanitizeFedExString(process.env.FEDEX_SHIPPER_COMPANY || '', 35),
+        personName: sanitizeFedExString(sh.name || 'Warehouse', 35),
+        phoneNumber: sanitizeFedExPhone(sh.phone).replace(/^$/, '0000000000'),
+        companyName: sanitizeFedExString(sh.company, 35),
       },
       address: shipperAddress,
     },

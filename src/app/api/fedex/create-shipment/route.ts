@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createFedExShipment } from '@/lib/fedex-client';
-import { buildFedExShipmentPayload } from '@/lib/fedex-payload';
+import { buildFedExShipmentPayload, resolveFedexShipper } from '@/lib/fedex-payload';
 import { Order } from '@/lib/types';
 
 function notConfigured() {
@@ -24,10 +24,13 @@ export async function POST(req: NextRequest) {
 
   type ShipResult = { ok: true; orderId: string; salesRecordNumber: string; trackingNumber?: string; labelBase64?: string; allLabels?: string[]; labelPdfs?: string[] } | { ok: false; orderId: string; salesRecordNumber: string; error: string };
 
+  // Resolve the shipper (from) address once — Settings → Business, env fallback.
+  const shipper = await resolveFedexShipper();
+
   const results: ShipResult[] = await Promise.all(
     orders.map(async (order): Promise<ShipResult> => {
       try {
-        const payload = buildFedExShipmentPayload(order, shipDate);
+        const payload = buildFedExShipmentPayload(order, shipDate, shipper);
         const res = await createFedExShipment(payload);
         const shipment = res.output?.transactionShipments?.[0];
         const trackingNumber = shipment?.masterTrackingNumber;

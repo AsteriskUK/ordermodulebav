@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { Order } from '@/lib/types';
 import { getFedExToken, getFedExRate } from '@/lib/fedex-client';
-import { buildFedExShipmentPayload } from '@/lib/fedex-payload';
+import { buildFedExShipmentPayload, resolveFedexShipper } from '@/lib/fedex-payload';
 
 // GET /api/fedex/rate-diagnostics
 //
@@ -59,7 +59,7 @@ export async function GET(req: NextRequest) {
   } as unknown as Order;
 
   const shipDate = new Date().toISOString().slice(0, 10);
-  const payload = buildFedExShipmentPayload(sampleOrder, shipDate);
+  const payload = buildFedExShipmentPayload(sampleOrder, shipDate, await resolveFedexShipper());
 
   try {
     const rate = await getFedExRate(payload);

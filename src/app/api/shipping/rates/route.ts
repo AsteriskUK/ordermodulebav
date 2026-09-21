@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { Order } from '@/lib/types';
 import { estimateDpdCost } from '@/lib/shipping-rates';
 import { getFedExRate } from '@/lib/fedex-client';
-import { buildFedExShipmentPayload } from '@/lib/fedex-payload';
+import { buildFedExShipmentPayload, resolveFedexShipper } from '@/lib/fedex-payload';
 
 // Estimated label cost per order for the Batch Shipping cost column.
 // DPD comes from a configurable rate card (no live account-rate API);
@@ -45,6 +45,7 @@ export async function POST(req: NextRequest) {
 
   const shipDate = new Date().toISOString().slice(0, 10);
   const fedexConfigured = !!process.env.FEDEX_CLIENT_ID && !!process.env.FEDEX_CLIENT_SECRET && !!process.env.FEDEX_ACCOUNT_NUMBER;
+  const fedexShipper = fedexConfigured ? await resolveFedexShipper() : undefined;
 
   const rates: RateResult[] = await mapWithConcurrency(orders, FEDEX_CONCURRENCY,
     async (order): Promise<RateResult> => {
@@ -66,7 +67,7 @@ export async function POST(req: NextRequest) {
           return { orderId: order.id, carrier, amount: null, currency: 'GBP', source: 'fedex_live', estimated: true, error: 'FedEx not configured' };
         }
         try {
-          const rate = await getFedExRate(buildFedExShipmentPayload(order, shipDate));
+          const rate = await getFedExRate(buildFedExShipmentPayload(order, shipDate, fedexShipper));
           return {
             orderId: order.id,
             carrier,
