@@ -77,14 +77,27 @@ async function htmlToPdf(html, isLabel) {
   try {
     const page = await browser.newPage();
     await page.setContent(html, { waitUntil: 'networkidle0' });
-    // A carrier LABEL (e.g. DPD's HTML) must render at label size, not A4 — else
-    // the label ends up in the corner of an A4 page and prints tiny at the top
-    // of the thermal label. Honour the label's own @page CSS if it sets one,
-    // otherwise default to 4x6in with zero margin. Invoices stay A4.
-    const opts = isLabel
-      ? { width: '4in', height: '6in', printBackground: true, margin: { top: '0', bottom: '0', left: '0', right: '0' }, preferCSSPageSize: true }
-      : { format: 'A4', printBackground: true, margin: { top: '10mm', bottom: '10mm', left: '8mm', right: '8mm' } };
-    return await page.pdf(opts);
+    if (isLabel) {
+      // A carrier LABEL (e.g. DPD's HTML) must render as ONE page sized to its
+      // own content — otherwise a fixed A4/6in page either strands it in a
+      // corner or, when the content is a touch taller than the page, splits it
+      // across TWO thermal labels. Measure the content and emit a single page
+      // exactly that size (zero margin); SumatraPDF then scales it to fit the
+      // physical label. pageRanges:'1' guarantees it can never paginate.
+      const dims = await page.evaluate(() => ({
+        w: Math.ceil(document.documentElement.scrollWidth),
+        h: Math.ceil(document.documentElement.scrollHeight),
+      }));
+      return await page.pdf({
+        width: `${Math.max(dims.w, 1)}px`,
+        height: `${Math.max(dims.h, 1)}px`,
+        printBackground: true,
+        margin: { top: '0', bottom: '0', left: '0', right: '0' },
+        pageRanges: '1',
+      });
+    }
+    // Invoices stay A4.
+    return await page.pdf({ format: 'A4', printBackground: true, margin: { top: '10mm', bottom: '10mm', left: '8mm', right: '8mm' } });
   } finally {
     await browser.close();
   }
