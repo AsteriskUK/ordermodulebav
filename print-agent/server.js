@@ -78,12 +78,15 @@ async function htmlToPdf(html, isLabel) {
     const page = await browser.newPage();
     await page.setContent(html, { waitUntil: 'networkidle0' });
     if (isLabel) {
-      // A carrier LABEL (e.g. DPD's HTML) onto a 4x6 thermal label: render a
-      // FIXED 4x6 PORTRAIT page (so it can never be auto-rotated to landscape)
-      // and scale the content down so it all fits inside that page (so it can
-      // never split across two labels). Measure the content, compute a single
-      // scale that fits both width and height, and emit exactly one page.
-      const W = 384, H = 576; // 4x6in at 96dpi
+      // Render a carrier LABEL onto a FIXED portrait page the size of the
+      // physical label stock, and scale the content to fit inside it — so the
+      // label can never rotate to landscape nor split across two labels. The
+      // stock size defaults to 4x6in but is configurable to match whatever is
+      // loaded (e.g. 4x4): set PRINT_AGENT_LABEL_WIDTH_IN / _HEIGHT_IN. The
+      // printer driver's paper/stock size must be set to the same dimensions.
+      const LABEL_W_IN = parseFloat(process.env.PRINT_AGENT_LABEL_WIDTH_IN || '4') || 4;
+      const LABEL_H_IN = parseFloat(process.env.PRINT_AGENT_LABEL_HEIGHT_IN || '6') || 6;
+      const W = Math.round(LABEL_W_IN * 96), H = Math.round(LABEL_H_IN * 96);
       await page.setViewport({ width: W, height: H, deviceScaleFactor: 1 });
       await page.emulateMediaType('print');
       const c = await page.evaluate(() => ({
@@ -92,8 +95,8 @@ async function htmlToPdf(html, isLabel) {
       }));
       const scale = Math.max(0.1, Math.min(1, W / Math.max(c.w, 1), H / Math.max(c.h, 1)));
       return await page.pdf({
-        width: '4in',
-        height: '6in',
+        width: `${LABEL_W_IN}in`,
+        height: `${LABEL_H_IN}in`,
         scale,
         printBackground: true,
         margin: { top: '0', bottom: '0', left: '0', right: '0' },
