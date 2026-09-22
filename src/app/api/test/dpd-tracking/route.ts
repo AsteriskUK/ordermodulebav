@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { trackDPDShipment } from '@/lib/dpd-client';
+import { trackDPDShipment, probeDpdTracking } from '@/lib/dpd-client';
 
 /**
  * Test endpoint for DPD tracking API
@@ -14,6 +14,12 @@ export async function GET(request: NextRequest) {
       { success: false, error: 'Missing tracking number. Use ?number=YOUR_TRACKING_NUMBER' },
       { status: 400 }
     );
+  }
+
+  // ?probe=1 → try candidate tracking endpoints and report each status.
+  if (request.nextUrl.searchParams.get('probe') === '1') {
+    const probe = await probeDpdTracking(trackingNumber);
+    return NextResponse.json({ success: true, trackingNumber, probe });
   }
 
   try {

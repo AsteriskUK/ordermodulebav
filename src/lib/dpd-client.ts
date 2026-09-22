@@ -385,6 +385,41 @@ export interface DPDTrackingResponse {
   errors?: string[];
 }
 
+// TEMP diagnostic: try candidate DPD tracking endpoints and report each status,
+// so we can find the real one. Remove once tracking is confirmed.
+export async function probeDpdTracking(trackingNumber: string): Promise<{ path: string; status: number; body: string }[]> {
+  const baseUrl = getBaseUrl();
+  const token = await getAccessToken();
+  const apiKey = process.env.DPD_API_KEY;
+  const accountNumber = process.env.DPD_ACCOUNT_NUMBER;
+  const headers: Record<string, string> = { 'Authorization': `Bearer ${token}`, 'Accept': 'application/json' };
+  if (apiKey) headers['Client-Id'] = apiKey;
+  if (accountNumber) headers['GeoClient'] = `account/${accountNumber}`;
+  const enc = encodeURIComponent(trackingNumber);
+  const paths = [
+    `/v1/customer/shipping/tracking?trackingNumber=${enc}`,
+    `/v1/customer/shipping/tracking/${enc}`,
+    `/v1/customer/tracking?trackingNumber=${enc}`,
+    `/v1/customer/tracking/${enc}`,
+    `/v1/customer/shipping/shipments/tracking?trackingNumber=${enc}`,
+    `/v1/customer/shipping/parcel/${enc}`,
+    `/v1/customer/shipping/parcels/${enc}`,
+    `/v1/customer/shipping/parcels/${enc}/tracking`,
+    `/v1/customer/shipping/shipment/tracking?parcelNumber=${enc}`,
+    `/v1/customer/tracking/parcel/${enc}`,
+  ];
+  const out: { path: string; status: number; body: string }[] = [];
+  for (const p of paths) {
+    try {
+      const res = await fetch(`${baseUrl}${p}`, { headers });
+      out.push({ path: p, status: res.status, body: (await res.text()).replace(/\s+/g, ' ').slice(0, 120) });
+    } catch (e) {
+      out.push({ path: p, status: -1, body: String(e).slice(0, 120) });
+    }
+  }
+  return out;
+}
+
 export async function trackDPDShipment(trackingNumber: string): Promise<DPDTrackingResponse> {
   const baseUrl = getBaseUrl();
   const token = await getAccessToken();
