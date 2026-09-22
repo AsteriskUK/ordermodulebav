@@ -389,7 +389,9 @@ export async function trackDPDShipment(trackingNumber: string): Promise<DPDTrack
   const baseUrl = getBaseUrl();
   const token = await getAccessToken();
 
-  const res = await fetch(`${baseUrl}/shipping/tracking?trackingNumber=${encodeURIComponent(trackingNumber)}`, {
+  // All DPD customer-API calls live under /v1/customer (auth, shipments, labels);
+  // tracking was missing that prefix, which returned 404.
+  const res = await fetch(`${baseUrl}/v1/customer/shipping/tracking?trackingNumber=${encodeURIComponent(trackingNumber)}`, {
     method: 'GET',
     headers: {
       'Authorization': `Bearer ${token}`,
