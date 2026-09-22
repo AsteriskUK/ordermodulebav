@@ -14,7 +14,7 @@ import { trackDPDShipment } from './dpd-client';
 
 // Scans that exist BEFORE the courier physically has the parcel — a label being
 // created isn't a real movement, so these don't count as a courier scan.
-const PRE_SCAN_RE = /information sent|shipment information|label (created|generated)|order (created|received|processed)|awaiting|pre.?advice|not yet/i;
+const PRE_SCAN_RE = /information sent|shipment information|label (created|generated)|order (created|received|processed)|received your order details|expecting your parcel|awaiting|pre.?advice|not yet/i;
 
 export interface CarrierStatus {
   delivered: boolean;

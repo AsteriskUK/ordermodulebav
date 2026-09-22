@@ -385,69 +385,39 @@ export interface DPDTrackingResponse {
   errors?: string[];
 }
 
-// TEMP diagnostic: try candidate DPD tracking endpoints and report each status,
-// so we can find the real one. Remove once tracking is confirmed.
-export async function probeDpdTracking(trackingNumber: string): Promise<{ path: string; status: number; body: string }[]> {
-  const baseUrl = getBaseUrl();
-  const token = await getAccessToken();
-  const apiKey = process.env.DPD_API_KEY;
-  const accountNumber = process.env.DPD_ACCOUNT_NUMBER;
-  const headers: Record<string, string> = { 'Authorization': `Bearer ${token}`, 'Accept': 'application/json' };
-  if (apiKey) headers['Client-Id'] = apiKey;
-  if (accountNumber) headers['GeoClient'] = `account/${accountNumber}`;
-  const enc = encodeURIComponent(trackingNumber);
-  const paths = [
-    `/v1/customer/shipping/tracking?trackingNumber=${enc}`,
-    `/v1/customer/shipping/tracking/${enc}`,
-    `/v1/customer/tracking?trackingNumber=${enc}`,
-    `/v1/customer/tracking/${enc}`,
-    `/v1/customer/shipping/shipments/tracking?trackingNumber=${enc}`,
-    `/v1/customer/shipping/parcel/${enc}`,
-    `/v1/customer/shipping/parcels/${enc}`,
-    `/v1/customer/shipping/parcels/${enc}/tracking`,
-    `/v1/customer/shipping/shipment/tracking?parcelNumber=${enc}`,
-    `/v1/customer/tracking/parcel/${enc}`,
-  ];
-  const out: { path: string; status: number; body: string }[] = [];
-  for (const p of paths) {
-    try {
-      const res = await fetch(`${baseUrl}${p}`, { headers });
-      out.push({ path: p, status: res.status, body: (await res.text()).replace(/\s+/g, ' ').slice(0, 120) });
-    } catch (e) {
-      out.push({ path: p, status: -1, body: String(e).slice(0, 120) });
-    }
-  }
-  return out;
-}
+// DPD parcel tracking uses the public tracking service (apis.track.dpd.co.uk) —
+// the shipping/customer API has no parcel-status endpoint. Two steps:
+//   1. GET /v1/track?parcel=<number> → 302 to the full parcel code (number*NNNNN)
+//   2. GET /v1/parcels/<code>/parcelevents → the scan events
+// No auth needed (same data the buyer sees on track.dpd.co.uk).
+const DPD_TRACK_BASE = 'https://apis.track.dpd.co.uk';
 
 export async function trackDPDShipment(trackingNumber: string): Promise<DPDTrackingResponse> {
-  const baseUrl = getBaseUrl();
-  const token = await getAccessToken();
-  const apiKey = process.env.DPD_API_KEY;
-  const accountNumber = process.env.DPD_ACCOUNT_NUMBER;
+  const parcelNumber = String(trackingNumber || '').replace(/\D/g, '');
+  if (!parcelNumber) throw new Error('DPD tracking: empty parcel number');
 
-  // All DPD customer-API calls live under /v1/customer (auth, shipments, labels);
-  // tracking was missing that prefix, and also the Client-Id / GeoClient headers
-  // the API requires — both caused it to fail.
-  const headers: Record<string, string> = {
-    'Authorization': `Bearer ${token}`,
-    'Accept': 'application/json',
-  };
-  if (apiKey) headers['Client-Id'] = apiKey;
-  if (accountNumber) headers['GeoClient'] = `account/${accountNumber}`;
+  // Resolve the full parcel code (the API requires the "<number>*NNNNN" form).
+  const redir = await fetch(`${DPD_TRACK_BASE}/v1/track?parcel=${encodeURIComponent(parcelNumber)}`, { redirect: 'manual' });
+  const location = redir.headers.get('location') || '';
+  const m = location.match(/parcels\/(\d+\*\d+)/);
+  if (!m) throw new Error(`DPD tracking: could not resolve parcel code (${redir.status})`);
+  const parcelCode = m[1];
 
-  const res = await fetch(`${baseUrl}/v1/customer/shipping/tracking?trackingNumber=${encodeURIComponent(trackingNumber)}`, {
-    method: 'GET',
-    headers,
+  const res = await fetch(`${DPD_TRACK_BASE}/v1/parcels/${encodeURIComponent(parcelCode)}/parcelevents`, {
+    headers: { Accept: 'application/json' },
   });
+  if (!res.ok) throw new Error(`DPD tracking API error: ${res.status} ${(await res.text()).slice(0, 160)}`);
 
-  if (!res.ok) {
-    const body = await res.text();
-    throw new Error(`DPD tracking API error: ${res.status} ${body}`);
-  }
+  const json = await res.json() as { data?: { eventDate: string; eventLocation?: string; eventText: string }[] };
+  const events = (json.data || []).map((e) => ({
+    date: e.eventDate,
+    time: '',
+    description: e.eventText,
+    location: e.eventLocation,
+  }));
 
-  const data = await res.json();
-  return data as DPDTrackingResponse;
+  // Shape it into the existing DPDTrackingResponse the callers already parse.
+  return { data: { trackingInfo: { trackingResult: { parcelInfo: [{ trackingNumber: parcelNumber, events }] } } } };
 }
 
 // ==================== RETURNS API ====================
