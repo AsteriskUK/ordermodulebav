@@ -2,6 +2,7 @@
 
 import { useEffect } from 'react';
 import { useOrderStore } from '@/lib/store';
+import { runTrackingCheck } from '@/lib/tracking-client';
 
 /**
  * Background tracking scheduler.
@@ -17,7 +18,10 @@ export function TrackingScheduler() {
 
     const check = async () => {
       try {
-        await fetch('/api/tracking/check-all');
+        // Runs in the browser (store is populated here) → server checks the
+        // carriers, we apply packed→shipped / →delivered so it syncs to the DB.
+        const { moved, delivered } = await runTrackingCheck();
+        if (moved || delivered) console.log(`[TrackingScheduler] ${moved} → shipped, ${delivered} → delivered`);
       } catch (e) {
         console.error('[TrackingScheduler] background check failed:', e);
       }

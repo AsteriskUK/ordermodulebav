@@ -10,6 +10,7 @@ import {
 } from '@/components/ui/table';
 import { RefreshCw, Truck, PackageCheck, AlertTriangle, CheckCircle } from 'lucide-react';
 import { toast } from 'sonner';
+import { runTrackingCheck } from '@/lib/tracking-client';
 
 export function TrackingMonitor() {
   const orders = useOrderStore((s) => s.orders);
@@ -31,19 +32,15 @@ export function TrackingMonitor() {
     if (checking) return;
     setChecking(true);
     try {
-      const res = await fetch('/api/tracking/check-all');
-      const data = await res.json();
-      if (data.success) {
-        setResults(data.results || []);
-        setLastChecked(new Date().toLocaleString('en-GB'));
-        const delivered = (data.results || []).filter((r: { status: string }) => r.status === 'delivered').length;
-        if (delivered > 0) {
-          toast.success(`${delivered} order${delivered === 1 ? '' : 's'} marked as delivered`);
-        } else {
-          toast.info('No new deliveries detected');
-        }
+      const { moved, delivered, checked, results } = await runTrackingCheck();
+      setResults(results);
+      setLastChecked(new Date().toLocaleString('en-GB'));
+      if (delivered > 0 || moved > 0) {
+        toast.success(`${moved} moved to Shipped, ${delivered} delivered`);
+      } else if (checked > 0) {
+        toast.info('Checked — no new courier scans yet');
       } else {
-        toast.error(data.message || 'Tracking check failed');
+        toast.info('No packed/shipped orders with tracking to check');
       }
     } catch (e) {
       toast.error(e instanceof Error ? e.message : 'Tracking check failed');
