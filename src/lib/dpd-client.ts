@@ -388,15 +388,22 @@ export interface DPDTrackingResponse {
 export async function trackDPDShipment(trackingNumber: string): Promise<DPDTrackingResponse> {
   const baseUrl = getBaseUrl();
   const token = await getAccessToken();
+  const apiKey = process.env.DPD_API_KEY;
+  const accountNumber = process.env.DPD_ACCOUNT_NUMBER;
 
   // All DPD customer-API calls live under /v1/customer (auth, shipments, labels);
-  // tracking was missing that prefix, which returned 404.
+  // tracking was missing that prefix, and also the Client-Id / GeoClient headers
+  // the API requires — both caused it to fail.
+  const headers: Record<string, string> = {
+    'Authorization': `Bearer ${token}`,
+    'Accept': 'application/json',
+  };
+  if (apiKey) headers['Client-Id'] = apiKey;
+  if (accountNumber) headers['GeoClient'] = `account/${accountNumber}`;
+
   const res = await fetch(`${baseUrl}/v1/customer/shipping/tracking?trackingNumber=${encodeURIComponent(trackingNumber)}`, {
     method: 'GET',
-    headers: {
-      'Authorization': `Bearer ${token}`,
-      'Content-Type': 'application/json',
-    },
+    headers,
   });
 
   if (!res.ok) {
