@@ -4,12 +4,15 @@ import { useOrderStore } from './store';
 // CLIENT-SIDE TRACKING CHECK
 // ----------------------------------------------------------------------------
 // Runs in the browser (see <TrackingScheduler>), where the order store is
-// actually populated. It sends the packed/shipped parcels' tracking numbers to
-// the server (which calls the carriers), then applies the status moves through
-// the normal store actions so they sync to the DB with the signed-in user:
-//   • packed  → shipped   on the first real courier scan
-//   • shipped → delivered on delivery
+// actually populated. It checks ONLY PACKED parcels — the ones waiting on a
+// courier scan to advance — and moves each to Shipped on the first real scan
+// (or straight to Delivered if it's already been delivered). Shipped orders are
+// deliberately NOT re-checked: there can be thousands of them and doing so timed
+// the request out. Chunked + capped so the request can never time out.
 // ============================================================================
+
+const CHUNK = 25;       // ≤ the server's per-request cap
+const MAX_PER_RUN = 75; // safety ceiling; the rest are caught on the next run
 
 interface CheckResult {
   orderId: string;
@@ -28,19 +31,25 @@ export interface TrackingRunResult {
 }
 
 export async function runTrackingCheck(): Promise<{ moved: number; delivered: number; checked: number; results: TrackingRunResult[] }> {
-  const packed = useOrderStore.getState().orders
-    .filter((o) => (o.status === 'packed' || o.status === 'shipped') && o.trackingNumber && o.deliveryCarrier && !o.deletedAt);
-  const items = packed.map((o) => ({ orderId: o.id, trackingNumber: o.trackingNumber as string, carrier: o.deliveryCarrier as string }));
+  const items = useOrderStore.getState().orders
+    .filter((o) => o.status === 'packed' && o.trackingNumber && o.deliveryCarrier && !o.deletedAt)
+    .slice(0, MAX_PER_RUN)
+    .map((o) => ({ orderId: o.id, trackingNumber: o.trackingNumber as string, carrier: o.deliveryCarrier as string }));
 
   if (items.length === 0) return { moved: 0, delivered: 0, checked: 0, results: [] };
 
-  const res = await fetch('/api/tracking/check', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ items }),
-  });
-  if (!res.ok) throw new Error(`tracking check failed ${res.status}`);
-  const { results } = await res.json() as { results: CheckResult[] };
+  // Send in small chunks so a request can never exceed the serverless timeout.
+  const results: CheckResult[] = [];
+  for (let i = 0; i < items.length; i += CHUNK) {
+    const res = await fetch('/api/tracking/check', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ items: items.slice(i, i + CHUNK) }),
+    });
+    if (!res.ok) throw new Error(`tracking check failed ${res.status}`);
+    const data = await res.json() as { results: CheckResult[] };
+    results.push(...data.results);
+  }
 
   let moved = 0, delivered = 0;
   const store = useOrderStore.getState();

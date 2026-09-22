@@ -11,10 +11,12 @@ import { runTrackingCheck } from '@/lib/tracking-client';
  */
 export function TrackingScheduler() {
   const orders = useOrderStore((s) => s.orders);
-  const shippedCount = orders.filter((o) => (o.status === 'packed' || o.status === 'shipped') && o.trackingNumber && o.deliveryCarrier && !o.deletedAt).length;
+  // Only PACKED parcels are checked (awaiting a courier scan → Shipped); shipped
+  // orders are not re-checked (there can be thousands, which timed out).
+  const packedCount = orders.filter((o) => o.status === 'packed' && o.trackingNumber && o.deliveryCarrier && !o.deletedAt).length;
 
   useEffect(() => {
-    if (shippedCount === 0) return;
+    if (packedCount === 0) return;
 
     const check = async () => {
       try {
@@ -37,7 +39,7 @@ export function TrackingScheduler() {
       clearTimeout(initialTimeout);
       clearInterval(interval);
     };
-  }, [shippedCount]);
+  }, [packedCount]);
 
   return null;
 }
