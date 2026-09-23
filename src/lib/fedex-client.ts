@@ -359,10 +359,14 @@ export interface FedExTrackingResponse {
         trackingNumber: string;
       };
       scanEvents?: {
-        date: string;
-        time: string;
-        scanType: string;
-        scanLocation?: string;
+        date?: string;
+        // FedEx returns eventType (code, e.g. "DL"=delivered, "OC"=label created)
+        // and eventDescription (text). `scanType` is kept for backwards-compat.
+        eventType?: string;
+        eventDescription?: string;
+        derivedStatus?: string;
+        scanType?: string;
+        scanLocation?: { city?: string };
       }[];
     }[];
   };

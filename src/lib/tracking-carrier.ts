@@ -30,9 +30,14 @@ export async function carrierTrackingStatus(carrier: string, trackingNumber: str
       const r = data.output?.trackingResults?.[0];
       let delivered = false, hasCourierScan = false, latestStatus = '';
       if (r?.scanEvents?.length) {
-        delivered = r.scanEvents.some((e) => (e.scanType || '').toLowerCase().includes('delivered'));
-        hasCourierScan = r.scanEvents.some((e) => !PRE_SCAN_RE.test(e.scanType || ''));
-        latestStatus = r.scanEvents[0]?.scanType || '';
+        // FedEx: eventType is the code (DL=delivered, OC=label/order created);
+        // eventDescription is the human text. Fall back to scanType for safety.
+        const text = (e: NonNullable<typeof r.scanEvents>[number]) => e.eventDescription || e.derivedStatus || e.scanType || '';
+        delivered = r.scanEvents.some((e) => e.eventType === 'DL' || /delivered/i.test(text(e)));
+        // A real courier scan is anything past "OC" (shipment info sent) that
+        // isn't a pre-scan/label event.
+        hasCourierScan = r.scanEvents.some((e) => (e.eventType && e.eventType !== 'OC') && !PRE_SCAN_RE.test(text(e)));
+        latestStatus = text(r.scanEvents[0]);
       }
       return { delivered, hasCourierScan, latestStatus };
     }

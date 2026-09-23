@@ -18,29 +18,45 @@ export function TrackingMonitor() {
   const [lastChecked, setLastChecked] = useState<string | null>(null);
   const [results, setResults] = useState<{ orderId: string; trackingNumber: string; carrier: string; status: string; message?: string; error?: string }[]>([]);
 
+  const packedOrders = useMemo(
+    () => orders.filter((o) => o.status === 'packed' && o.trackingNumber && o.deliveryCarrier && !o.deletedAt),
+    [orders]
+  );
   const shippedOrders = useMemo(
     () => orders.filter((o) => o.status === 'shipped' && o.trackingNumber && o.deliveryCarrier && !o.deletedAt),
     [orders]
   );
+  const trackableCount = packedOrders.length + shippedOrders.length;
 
   const deliveredOrders = useMemo(
     () => orders.filter((o) => o.status === 'delivered' && !o.deletedAt),
     [orders]
   );
 
+  // Persist the last check on this device so the results survive a reload.
+  const STORE_KEY = 'tracking-last-results';
+  useEffect(() => {
+    try {
+      const raw = localStorage.getItem(STORE_KEY);
+      if (raw) { const d = JSON.parse(raw); setResults(d.results || []); setLastChecked(d.lastChecked || null); }
+    } catch { /* ignore */ }
+  }, []);
+
   const checkAll = async () => {
     if (checking) return;
     setChecking(true);
     try {
       const { moved, delivered, checked, results } = await runTrackingCheck();
+      const when = new Date().toLocaleString('en-GB');
       setResults(results);
-      setLastChecked(new Date().toLocaleString('en-GB'));
+      setLastChecked(when);
+      try { localStorage.setItem(STORE_KEY, JSON.stringify({ results, lastChecked: when })); } catch { /* ignore */ }
       if (delivered > 0 || moved > 0) {
         toast.success(`${moved} moved to Shipped, ${delivered} delivered`);
       } else if (checked > 0) {
-        toast.info('Checked — no new courier scans yet');
+        toast.info(`Checked ${checked} parcel${checked === 1 ? '' : 's'} — no new movement`);
       } else {
-        toast.info('No packed/shipped orders with tracking to check');
+        toast.info('No packed or shipped orders with tracking to check');
       }
     } catch (e) {
       toast.error(e instanceof Error ? e.message : 'Tracking check failed');
@@ -52,10 +68,11 @@ export function TrackingMonitor() {
   // Auto-check every 4 hours while the page is open
   useEffect(() => {
     const interval = setInterval(() => {
-      if (shippedOrders.length > 0) checkAll();
+      if (trackableCount > 0) checkAll();
     }, 4 * 60 * 60 * 1000);
     return () => clearInterval(interval);
-  }, [shippedOrders.length]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [trackableCount]);
 
   return (
     <div className="space-y-6">
@@ -63,12 +80,12 @@ export function TrackingMonitor() {
         <div>
           <h2 className="text-2xl font-bold text-slate-900">Tracking Monitor</h2>
           <p className="text-slate-500 text-sm mt-1">
-            Automatically checks DPD and FedEx tracking for shipped orders and marks them as delivered.
+            Checks DPD &amp; FedEx tracking: packed orders move to Shipped on the first courier scan, and shipped orders to Delivered on delivery.
           </p>
         </div>
-        <Button onClick={checkAll} disabled={checking || shippedOrders.length === 0}>
+        <Button onClick={checkAll} disabled={checking || trackableCount === 0}>
           <RefreshCw className={`h-4 w-4 mr-2 ${checking ? 'animate-spin' : ''}`} />
-          {checking ? 'Checking...' : `Check ${shippedOrders.length} Shipped`}
+          {checking ? 'Checking…' : `Check ${trackableCount} parcel${trackableCount === 1 ? '' : 's'}`}
         </Button>
       </div>
 
@@ -142,14 +159,14 @@ export function TrackingMonitor() {
                               : 'bg-blue-100 text-blue-800 border-blue-300'
                           }
                         >
-                          {r.status}
+                          {r.status === 'in_transit' ? 'In transit' : r.status === 'delivered' ? 'Delivered' : r.status === 'shipped' ? 'Shipped' : 'Error'}
                         </Badge>
                       </TableCell>
                       <TableCell className="text-xs text-slate-500">
-                        {r.error ? (
+                        {r.status === 'error' ? (
                           <span className="flex items-center gap-1 text-red-600">
                             <AlertTriangle className="h-3 w-3" />
-                            {r.error}
+                            {r.message || r.error || 'Error'}
                           </span>
                         ) : (
                           r.message || '—'
