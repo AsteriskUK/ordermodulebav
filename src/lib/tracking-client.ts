@@ -13,6 +13,22 @@ import { useOrderStore } from './store';
 const CHUNK = 25;        // ≤ the server's per-request cap
 const MAX_PER_RUN = 150; // safety ceiling; the rest are caught on the next run
 
+// The stored delivery_carrier is unreliable (import artifacts — e.g. orders
+// marked FedEx that were actually shipped by DPD), so tracking by it hits the
+// wrong API. Resolve the REAL carrier for tracking from, in order:
+//   1. labelCarrier — the carrier the label was actually booked with, or
+//   2. the tracking-number format — DPD = 10/14 digits, FedEx = 12/15 digits, or
+//   3. delivery_carrier as a last resort.
+export function resolveTrackingCarrier(o: { trackingNumber?: string; labelCarrier?: string; deliveryCarrier?: string }): 'DPD' | 'FedEx' | null {
+  const lc = o.labelCarrier;
+  if (lc === 'DPD' || lc === 'FedEx') return lc;
+  const digits = String(o.trackingNumber || '').replace(/\D/g, '');
+  if (digits.length === 10 || digits.length === 14) return 'DPD';
+  if (digits.length === 12 || digits.length === 15) return 'FedEx';
+  if (o.deliveryCarrier === 'DPD' || o.deliveryCarrier === 'FedEx') return o.deliveryCarrier;
+  return null; // unknown/untrackable (e.g. Parcelforce, or no numeric tracking)
+}
+
 // Turn a raw status/error into a short, human-friendly line for the UI.
 function friendly(status: TrackingRunResult['status'], latestStatus: string, error?: string): string {
   if (error) {
@@ -43,12 +59,19 @@ export interface TrackingRunResult {
 }
 
 export async function runTrackingCheck(): Promise<{ moved: number; delivered: number; checked: number; results: TrackingRunResult[] }> {
-  const all = useOrderStore.getState().orders
-    .filter((o) => (o.status === 'packed' || o.status === 'shipped') && o.trackingNumber && o.deliveryCarrier && !o.deletedAt);
+  // Attach the RESOLVED tracking carrier and drop anything untrackable.
+  const trackable = useOrderStore.getState().orders
+    .filter((o) => (o.status === 'packed' || o.status === 'shipped') && o.trackingNumber && !o.deletedAt)
+    .map((o) => ({ order: o, carrier: resolveTrackingCarrier(o) }))
+    .filter((x): x is { order: typeof x.order; carrier: 'DPD' | 'FedEx' } => x.carrier !== null);
+
   // Packed first (awaiting the scan → Shipped), then shipped (awaiting delivery).
-  const ordered = [...all.filter((o) => o.status === 'packed'), ...all.filter((o) => o.status === 'shipped')];
+  const ordered = [
+    ...trackable.filter((x) => x.order.status === 'packed'),
+    ...trackable.filter((x) => x.order.status === 'shipped'),
+  ];
   const items = ordered.slice(0, MAX_PER_RUN)
-    .map((o) => ({ orderId: o.id, trackingNumber: o.trackingNumber as string, carrier: o.deliveryCarrier as string }));
+    .map((x) => ({ orderId: x.order.id, trackingNumber: x.order.trackingNumber as string, carrier: x.carrier }));
 
   if (items.length === 0) return { moved: 0, delivered: 0, checked: 0, results: [] };
 
@@ -71,7 +94,7 @@ export async function runTrackingCheck(): Promise<{ moved: number; delivered: nu
   for (const r of results) {
     const order = store.orders.find((o) => o.id === r.orderId);
     if (!order) continue;
-    const base = { orderId: order.id, trackingNumber: order.trackingNumber as string, carrier: order.deliveryCarrier as string };
+    const base = { orderId: order.id, trackingNumber: order.trackingNumber as string, carrier: (resolveTrackingCarrier(order) || order.deliveryCarrier || '') as string };
     if (r.error) { out.push({ ...base, status: 'error', message: friendly('error', '', r.error) }); continue; }
     if (r.delivered) {
       if (order.status !== 'delivered') { store.updateOrderStatus(order.id, 'delivered'); delivered++; }
